@@ -1,0 +1,5 @@
+# Fins de ligne — normalisation Git.
+# Les scripts exécutés sous Linux (droplet) DOIVENT rester en LF : un shebang
+# ou une ligne en CRLF provoque « bash\r: bad interpreter » ou des bugs subtils.
+*.sh                text eol=lf
+deploy/cron/*       text eol=lf

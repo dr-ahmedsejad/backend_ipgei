@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Fiche d'Émargement — {{ annee_universitaire }}</title>
+    <style>
+        @page { size: A4 portrait; margin: 1.2cm 1.4cm; }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Une fiche (= un groupe) par page */
+        .fiche { page-break-after: always; page-break-inside: auto; }
+        .fiche:last-child { page-break-after: auto; }
+
+        /* Titre centré */
+        .fiche-title {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            margin: 10px 0 18px 0;
+        }
+
+        /* Bloc info — table sans bordures */
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        .info-table td {
+            padding: 4px 6px;
+            border: none;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .info-table .lbl { font-weight: bold; width: 150px; }
+        .info-table .right-lbl { font-weight: bold; text-align: left; width: 90px; }
+        .info-table .right-val { font-weight: bold; font-size: 13px; }
+
+        hr.thin { border: none; border-top: 1px solid #bbb; margin: 8px 0; }
+
+        /* Tableau étudiants */
+        .etu-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+        .etu-table th {
+            background: #ececec;
+            border: 1px solid #999;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .etu-table td {
+            border: 1px solid #bbb;
+            padding: 5px 8px;
+            vertical-align: middle;
+            height: 26px;
+        }
+        tr:nth-child(even) { background: #fafafa; }
+
+        .col-num  { width: 38px; text-align: center; }
+        .col-mat  { width: 110px; text-align: center; }
+        .col-nom  { font-size: 12px; }
+        .col-sign { width: 170px; }
+
+        .mat-code {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            color: #000;
+        }
+
+        /* Signature */
+        .sig-block { margin-top: 22px; width: 38%; margin-left: auto; }
+        .sig-block p { font-size: 10px; color: #555; margin: 0 0 26px 0; font-weight: bold; }
+        .sig-line { border-bottom: 1px solid #888; }
+
+        .entete-wrapper { margin-bottom: 6px; }
+        .empty-row td { text-align: center; color: #888; padding: 20px; }
+    </style>
+</head>
+<body>
+
+{% for groupe in groupes %}
+<div class="fiche">
+
+    <!-- En-tête ISS (commun aux fiches de présence) -->
+    <div class="entete-wrapper">
+        {% include 'suivi_en_tete.html' %}
+    </div>
+
+    <!-- Titre centré -->
+    <div class="fiche-title">
+        Fiche d'Émargement{% if filiere %} — {{ filiere.code }}{% endif %}{% if groupe.nom %} — {{ groupe.nom }}{% endif %}
+    </div>
+
+    <!-- Informations -->
+    <table class="info-table">
+        <tr>
+            {% if filiere %}<td class="lbl">Filière :</td><td>{{ filiere.intitule_fr }}</td>{% else %}<td colspan="2"></td>{% endif %}
+            <td class="right-lbl">Semestre :</td>
+            <td class="right-val">{{ semestre }}</td>
+        </tr>
+        <tr>
+            <td class="lbl">Niveau :</td>
+            <td>L{{ niveau }}</td>
+            <td class="right-lbl">Date :</td>
+            <td>{{ date_impression }}</td>
+        </tr>
+    </table>
+
+    <hr class="thin">
+
+    <!-- Liste étudiants du groupe -->
+    <table class="etu-table">
+        <thead>
+            <tr>
+                <th class="col-mat">Matricule</th>
+                <th class="col-nom">Nom et Prénom</th>
+                <th class="col-sign">Signature</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for etudiant in groupe.etudiants %}
+            <tr>
+                <td class="col-mat"><span class="mat-code">{{ etudiant.matricule }}</span></td>
+                <td class="col-nom">{{ etudiant.nom }}</td>
+                <td class="col-sign">&nbsp;</td>
+            </tr>
+            {% empty %}
+            <tr class="empty-row"><td colspan="3">Aucun étudiant inscrit</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="sig-block">
+        <p>Signature du Responsable</p>
+        <div class="sig-line"></div>
+    </div>
+
+</div>
+{% empty %}
+<p style="text-align:center;color:#888;padding:30px;">Aucun étudiant inscrit pour cette sélection.</p>
+{% endfor %}
+
+</body>
+</html>

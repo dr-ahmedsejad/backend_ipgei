@@ -1,0 +1,162 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <title>Fiches récapitulatives vacataires — {{ mois_vacation }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            margin: 0;
+            padding: 0;
+        }
+
+        .new-page {
+            margin-top: 10px;
+            margin-bottom: 10px;
+            margin-left: 5px;
+            margin-right: 5px;
+            page-break-before: always;
+        }
+        .new-page:first-child {
+            page-break-before: avoid;
+        }
+
+        h2 {
+            text-align: center;
+            margin: 6px 0;
+            font-size: 18px;
+        }
+        h4 {
+            margin: 6px 0;
+            font-size: 14px;
+        }
+
+        table.recap {
+            width: 98%;
+            border-collapse: collapse;
+            margin: 6px auto;
+        }
+        table.recap th,
+        table.recap td {
+            border: 1px solid black;
+            text-align: center;
+            padding: 8px;
+            height: 40px;
+            width: 50%;
+            font-size: 14px;
+        }
+        table.recap th {
+            background-color: #f2f2f2;
+        }
+        .td_style {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .total-row td {
+            background-color: #fff3cc;
+            font-weight: bold;
+            font-size: 15px;
+        }
+
+        table.signature {
+            width: 98%;
+            border-collapse: collapse;
+            margin: 24px auto 0 auto;
+        }
+        table.signature td {
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 0 8px;
+            vertical-align: top;
+        }
+    </style>
+</head>
+<body>
+
+{% if data_em %}
+    {% for item in data_em %}
+    <div class="new-page">
+
+        {% include '_institution_header.html' %}
+        <div style="text-align:right; font-size: 12px; margin-top: 4px;">
+            Année universitaire : {{ annee_universitaire }}
+        </div>
+        <br>
+
+        <h2>Fiche Récapitulative du vacataire</h2>
+        <h2>{{ mois_vacation }}</h2>
+        <br>
+
+        <h4>
+            {% if item.prof_genre == "M" %}
+                Nom et prénom de l'enseignant :
+            {% else %}
+                Nom et prénom de l'enseignante :
+            {% endif %}
+            <strong>{{ item.prof_nom }}</strong>
+        </h4>
+
+        <h4 style="margin-top: 0;">
+            Éléments des modules enseignés :
+            <strong>{{ item.em_names|default:"—" }}</strong>
+        </h4>
+
+        <table class="recap">
+            <tr>
+                <td class="td_style">Total CM</td>
+                <td class="td_style">{{ item.totaux.CM_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td>Total TD</td>
+                <td>{{ item.totaux.TD_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td class="td_style">Total TP</td>
+                <td class="td_style">{{ item.totaux.TP_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td>Total PR</td>
+                <td>{{ item.totaux.PR_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td class="td_style">Total Encadrement</td>
+                <td class="td_style">{{ item.totaux.Encadrement_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td>Total Surveillance</td>
+                <td>{{ item.totaux.Surveillance_total|floatformat:1 }}</td>
+            </tr>
+            <tr>
+                <td class="td_style">Total Missions</td>
+                <td class="td_style">{{ item.totaux.Mission_total|floatformat:1 }}</td>
+            </tr>
+            <tr class="total-row">
+                <td><strong>Total général</strong></td>
+                <td><strong>{{ item.total_general|floatformat:1 }}</strong></td>
+            </tr>
+        </table>
+
+        <table class="signature">
+            <tr>
+                <td style="text-align: left;">
+                    Service de scolarité
+                </td>
+                <td style="text-align: right;">
+                    <div style="display:inline-block; text-align:center;">
+                        <div>Le Directeur{% if inst_sigle %} de l'{{ inst_sigle }}{% endif %}</div>
+                        {% if inst_directeur_fr %}
+                        <div><strong>{% if inst_directeur_titre_fr %}{{ inst_directeur_titre_fr }} {% endif %}{{ inst_directeur_fr }}</strong></div>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+    {% endfor %}
+{% endif %}
+
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Configuration outils qualité Python (backend SIGA).
+# NB : la config est posée ici ; le reformatage global (`black .`) doit être fait
+# dans un commit DÉDIÉ et isolé pour ne pas polluer les diffs fonctionnels.
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+extend-exclude = '''
+/(
+    migrations
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort.
+select = ["E", "W", "F", "I"]
+# E501 (longueur de ligne) géré par black ; on évite le double signalement.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Les __init__.py ré-exportent souvent sans usage direct.
+"__init__.py" = ["F401"]
+# Les settings utilisent des imports * et des noms non triés volontairement.
+"siga/settings/*.py" = ["F403", "F405", "E402"]

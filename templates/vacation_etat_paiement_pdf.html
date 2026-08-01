@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>État de vacation — {{ mois_vacation }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 13px; margin: 0; padding: 0; }
+
+        h2 {
+            text-align: center;
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 14px 0 16px 0;
+        }
+
+        table {
+            width: 98%;
+            border-collapse: collapse;
+            margin: auto;
+        }
+
+        th, td {
+            border: 1px solid #000;
+            padding: 8px 10px;
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        th { background-color: #f2f2f2; font-weight: bold; font-size: 12px; }
+        td { font-size: 12px; }
+
+        .left  { text-align: left; }
+        .right { text-align: right; }
+
+        .total-row td {
+            background-color: #FFD966 !important;
+            border: 2px solid #000 !important;
+            font-weight: bold !important;
+            font-size: 14px !important;
+            padding: 10px !important;
+            color: #000 !important;
+        }
+
+        .footer {
+            width: 98%;
+            margin: 28px auto 0 auto;
+            text-align: right;
+            font-weight: bold;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+{% include 'suivi_en_tete.html' with annee_universitaire=annee_univ %}
+
+<h2>État de vacation — {{ mois_vacation }}</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th class="left">Enseignant vacataire</th>
+            <th>Somme perçue (MRU)</th>
+            <th>Compte bancaire</th>
+            <th>Banque</th>
+            <th>Émargement</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in data_em %}
+        <tr>
+            <td class="left">{{ item.prof_nom }}</td>
+            <td class="right"><strong>{{ item.montant_total|floatformat:2 }}</strong></td>
+            <td>{{ item.numero_de_compte|default:"—" }}</td>
+            <td>{{ item.banque_nom|default:"—" }}</td>
+            <td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="5" style="text-align:center; font-style:italic; color:#888;">
+                Aucun vacataire pour ce mois.
+            </td>
+        </tr>
+        {% endfor %}
+
+        <tr class="total-row">
+            <td style="text-align:center; letter-spacing:2px;">TOTAL</td>
+            <td style="text-align:center; font-size:15px;">{{ montant_global|floatformat:2 }}</td>
+            <td colspan="3">&nbsp;</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="footer">
+    <div style="display:inline-block; text-align:center;">
+        <div>Le Directeur</div>
+        {% if inst_directeur_fr %}<div><strong>{% if inst_directeur_titre_fr %}{{ inst_directeur_titre_fr }} {% endif %}{{ inst_directeur_fr }}</strong></div>{% endif %}
+    </div>
+</div>
+
+</body>
+</html>

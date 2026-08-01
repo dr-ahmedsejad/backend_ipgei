@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PV — {{ pv.filiere_code }} {{ pv.niveau_label }}</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: Arial, sans-serif;
+  font-size: 9.5px;
+  color: #111;
+}
+
+/* ── Page A4 paysage ──────────────────────────────────────────── */
+.page {
+  page-break-after: always;
+  padding: 0;
+  display: block;
+}
+.page:last-child { page-break-after: auto; }
+
+/* ── En-tête commun (haut de page) ────────────────────────────── */
+.header-table {
+  width: 100%;
+  border-bottom: 2px solid #006633;
+  margin-bottom: 5px;
+}
+.header-table td { vertical-align: middle; padding: 2px 0; }
+.header-logo  { width: 45px; text-align: left; }
+.header-logo img { height: 36px; }
+.header-center { text-align: center; }
+.header-inst  { font-size: 9.5px; font-weight: bold; color: #006633; }
+.header-titre {
+  font-size: 11.5px; font-weight: bold; color: #006633;
+  margin-top: 2px; text-transform: uppercase;
+}
+.header-right {
+  width: 110px; text-align: right;
+  font-size: 9px; color: #444; line-height: 1.4;
+}
+.header-right b { color: #006633; }
+
+/* ── Bande méta filière / session ─────────────────────────────── */
+.meta-bar {
+  width: 100%;
+  background: #006633;
+  color: white;
+  font-size: 9.5px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+.meta-bar td { padding: 3px 8px; }
+.meta-bar .sep { color: #E5C018; padding: 0 4px; }
+
+/* ── Layout 2 colonnes — étire sur la hauteur A4 paysage ──────── */
+.layout-2col {
+  width: 100%;
+  height: 152mm;            /* zone utile sous header — évite overflow → page vide */
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 6px 0;
+}
+.layout-2col > tbody > tr { height: 152mm; }
+.layout-2col > tbody > tr > td {
+  width: 50%;
+  height: 152mm;
+  vertical-align: top;
+  padding: 0;
+}
+
+/* ── Fiche étudiant (1/2 page par défaut, pleine page si .fiche-pleine) ─── */
+.fiche {
+  border: 1.5px solid #006633;
+  border-radius: 4px;
+  padding: 6px 8px;
+  page-break-inside: avoid;
+  height: 152mm;            /* hauteur fixe alignée sur layout-2col */
+  background: #fdfffe;
+  overflow: hidden;
+}
+/* PV annuel : header + meta-bar plus compacts pour gagner de la hauteur */
+.pv-annuel .header-table { margin-bottom: 2px; }
+.pv-annuel .header-table td { padding: 1px 0; }
+.pv-annuel .header-logo img { height: 28px; }
+.pv-annuel .header-inst { font-size: 8px; }
+.pv-annuel .header-titre { font-size: 10px; margin-top: 1px; }
+.pv-annuel .header-right { font-size: 7.5px; line-height: 1.2; }
+.pv-annuel .meta-bar { font-size: 8px; margin-bottom: 3px; }
+.pv-annuel .meta-bar td { padding: 2px 6px; }
+.pv-annuel .footer { font-size: 7px; margin-top: 2px; padding-top: 1px; }
+
+/* PV annuel : 1 etudiant par page paysage A4 (297x210mm), zone utile ~190mm */
+/* Hauteur libre + max-height + overflow hidden = 1 page garantie */
+.fiche-pleine {
+  height: auto;
+  max-height: 175mm;
+  padding: 3px 6px;
+  page-break-inside: avoid;
+  overflow: hidden;
+}
+.fiche-pleine .fiche-nom { font-size: 11px; }
+.fiche-pleine .fiche-num { font-size: 8.5px; }
+.fiche-pleine .stats td  { padding: 2px 3px; }
+.fiche-pleine .stats .v  { font-size: 10px; }
+.fiche-pleine .stats .l  { font-size: 7.5px; }
+.fiche-pleine table.detail {
+  font-size: 7px;
+  margin-top: 3px;
+  border-collapse: collapse;
+  width: 100%;
+}
+/* En-tetes plus grands et plus lisibles */
+.fiche-pleine table.detail th {
+  font-size: 9px; padding: 3px 3px; line-height: 1.1;
+  letter-spacing: 0.3px;
+}
+.fiche-pleine table.detail td {
+  padding: 1.3px 3px; line-height: 1.15;
+}
+.fiche-pleine table.detail tr.tr-parite td {
+  padding: 3px 6px !important; font-size: 9px !important;
+  letter-spacing: 1.5px;
+}
+.fiche-pleine table.detail tr.tr-mod td { padding: 1.5px 3px; background: #f0f9f0; }
+/* Statut : codes plus gros et avec fond colore pour meilleure visibilite */
+.fiche-pleine .code {
+  font-size: 8px; font-weight: bold; padding: 0.5px 4px;
+  border-radius: 2px; display: inline-block; min-width: 16px;
+  text-align: center; line-height: 1;
+}
+.fiche-pleine .cv   { background: #dcfce7; color: #15803d; }
+.fiche-pleine .cvci { background: #d1fae5; color: #047857; }
+.fiche-pleine .cvcs { background: #fef3c7; color: #b45309; }
+.fiche-pleine .cnv  { background: #fed7aa; color: #c2410c; }
+.fiche-pleine .ce   { background: #fee2e2; color: #991b1b; }
+.layout-pleine { width: 100%; height: auto; border-spacing: 0; }
+.layout-pleine > tbody > tr,
+.layout-pleine > tbody > tr > td { width: 100%; height: auto; padding: 0; vertical-align: top; }
+
+.fiche-id { width: 100%; margin-bottom: 4px; border-collapse: collapse; }
+.fiche-id td { vertical-align: middle; padding: 1px 3px; }
+.fiche-num {
+  font-size: 12px; color: black; font-family: monospace;
+}
+.fiche-nom {
+  font-size: 11px; font-weight: bold; color: #006633; line-height: 1.2;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: bold;
+  text-align: center;
+  white-space: nowrap;
+}
+.badge-admis   { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+.badge-ajourn  { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+.badge-rachat  { background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; }
+.badge-redoub  { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+.badge-exclus  { background:#fee2e2; color:#7f1d1d; border:1px solid #fca5a5; font-style:italic; }
+.badge-blanche { background:#e0f2fe; color:#0c4a6e; border:1px solid #7dd3fc; }
+.badge-vide    { background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; }
+.badge-diplome { background:#f3e8ff; color:#6b21a8; border:1px solid #d8b4fe; }
+.verrou-note   { color:#b45309; font-size:7px; font-style:italic; margin-top:2px; line-height:1.2; }
+
+/* Stats étudiant */
+.stats {
+  width: 100%;
+  margin-bottom: 4px;
+  border-collapse: collapse;
+}
+.stats td {
+  text-align: center;
+  border: 1px solid #c8e6c9;
+  border-radius: 2px;
+  padding: 2px 3px;
+  background: #f9f9f9;
+  width: 25%;
+}
+.stats .v { font-size: 11px; font-weight: bold; color: #006633; }
+.stats .l { font-size: 7.5px; color: #666; }
+.stat-warn   .v { color: #92400e; }
+.stat-warn      { background: #fef9c3 !important; border-color: #fde047 !important; }
+.stat-danger .v { color: #991b1b; }
+.stat-danger    { background: #fee2e2 !important; border-color: #fca5a5 !important; }
+
+/* Tableau modules / éléments (compact) */
+table.detail {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5px;
+  margin-top: 2px;
+}
+table.detail th {
+  background: #006633;
+  color: white;
+  padding: 2px 3px;
+  text-align: center;
+  font-size: 8px;
+  font-weight: bold;
+}
+table.detail th.left { text-align: left; }
+table.detail td {
+  padding: 1.5px 3px;
+  border: 1px solid #ddd;
+  vertical-align: middle;
+}
+tr.tr-mod td {
+  background: #e8f5e9;
+  font-weight: bold;
+  font-size: 9px;
+  border-top: 1.5px solid #006633;
+}
+tr.tr-em td { background: #fff; font-size: 8.5px; }
+tr.tr-em:nth-child(even) td { background: #f7fdf7; }
+
+.tc { text-align: center; }
+.tl { text-align: left; }
+.mono { font-family: monospace; }
+.muted { color: #bbb; }
+
+.code { font-weight: bold; font-size: 8.5px; }
+.cv   { color: #15803d; }
+.cvci { color: #16a34a; }
+.cvcs { color: #d97706; }
+.cnv  { color: #ea580c; }
+.ce   { color: #7f1d1d; }
+
+.obs {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 2px;
+  padding: 2px 5px;
+  font-size: 8.5px;
+  margin-top: 3px;
+}
+
+/* ── Page récap ──────────────────────────────────────────────── */
+.section-title {
+  font-size: 11px; font-weight: bold; color: #006633;
+  border-left: 3px solid #006633; padding-left: 5px;
+  margin: 5px 0 4px 0;
+}
+table.recap {
+  width: 100%; border-collapse: collapse; font-size: 10px;
+  margin-bottom: 6px;
+}
+table.recap th {
+  background: #006633; color: white;
+  padding: 3px 6px; text-align: center; font-size: 9.5px;
+}
+table.recap th.left { text-align: left; }
+table.recap td { padding: 3px 6px; border: 1px solid #ddd; }
+table.recap tr.r-admis td  { background: #f0fdf4; }
+table.recap tr.r-ajourn td { background: #fff8f0; }
+table.recap tr.r-exclus td { background: #fff5f5; }
+
+.stats-recap {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 5px;
+  margin-bottom: 6px;
+}
+.stats-recap td {
+  text-align: center;
+  border: 1px solid #c8e6c9;
+  border-radius: 4px;
+  padding: 5px 4px;
+  background: #f9f9f9;
+}
+.stats-recap .rv { font-size: 18px; font-weight: bold; color: #006633; }
+.stats-recap .rl { font-size: 9.5px; color: #555; }
+
+table.matrice {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  margin-bottom: 12px; table-layout: fixed;
+}
+table.matrice th {
+  background: #006633; color: white;
+  padding: 7px 4px;
+  text-align: center; font-size: 12px;
+  word-wrap: break-word; vertical-align: middle;
+}
+table.matrice th.left { text-align: left; padding-left: 8px; }
+table.matrice td {
+  padding: 6px 6px;
+  border: 1px solid #ddd;
+  text-align: center; vertical-align: middle;
+  font-size: 13px;
+}
+table.matrice td.left { text-align: left; font-size: 12px; }
+.cell-O { background: #fee2e2; color: #dc2626; font-weight: bold; font-size: 14px; }
+.cell-F { background: #fef3c7; color: #d97706; font-weight: bold; font-size: 14px; }
+.cell-V { background: #dcfce7; color: #15803d; font-weight: bold; }
+
+.legende-matrice { font-size: 11px; color: #555; margin: 5px 0 8px; }
+.legende-matrice b { padding: 2px 7px; border-radius: 2px; font-size: 12px; }
+
+.sig-table { width:100%; border-collapse:separate; border-spacing:5px; margin-top:5px; }
+.sig-table td {
+  border:1px solid #ddd; border-radius:3px; padding:5px;
+  vertical-align: top;
+}
+.sig-role { font-size: 9px; color:#006633; font-weight:bold; }
+.sig-nom  { font-size: 10px; margin: 2px 0; }
+.sig-line { border-bottom: 1px solid #aaa; height:18px; margin-top:6px; }
+
+table.legende {
+  width:100%; border-collapse:collapse; font-size:9.5px;
+  margin: 4px 0 6px;
+}
+table.legende td { padding: 2px 5px; border: 1px solid #eee; }
+
+.footer {
+  text-align: center;
+  font-size: 8.5px;
+  color: #999;
+  margin-top: 5px;
+  border-top: 1px solid #eee;
+  padding-top: 2px;
+}
+</style>
+</head>
+<body class="{% if pv.type_pv == 'annuel' %}pv-annuel{% endif %}">
+
+
+{% for item in lignes_enrichies %}
+{% with l=item.ligne etu=item.ligne.inscription_admin.etudiant %}
+
+{% if pv.type_pv == 'annuel' or forloop.counter0|divisibleby:"2" %}
+<div class="page">
+  <table class="header-table" cellspacing="0" cellpadding="0">
+    <tr>
+      <td class="header-logo">
+        {% if institution_logo_url %}<img src="{{ institution_logo_url }}" alt="">{% endif %}
+      </td>
+      <td class="header-center">
+        {% if institution %}<div class="header-inst">{{ institution.nom_complet_fr|default:institution.nom_fr|default:"" }}</div>{% endif %}
+        <div class="header-titre">
+          {% if pv.type_pv == 'semestriel' %}
+            Procès-Verbal de Délibération Semestrielle{% if pv.semestre_code %} — {{ pv.semestre_code }}{% endif %}
+          {% else %}
+            Procès-Verbal de Délibération Annuelle
+          {% endif %}
+        </div>
+      </td>
+      <td class="header-right">
+        <b>PV N° {{ pv.id }}</b><br>
+        {{ pv.filiere_code }} — {{ pv.niveau_label }}{% if pv.type_pv == 'semestriel' and pv.semestre_code %} — <b style="color:#006633">{{ pv.semestre_code }}</b>{% endif %}<br>
+        {% if pv.type_pv == 'semestriel' %}{{ pv.session_type_label }}{% else %}{{ pv.annee_label }}{% endif %}<br>
+        {% if pv.est_clos %}<span style="color:#15803d">● CLOS</span>{% else %}<span style="color:#d97706">○ EN COURS</span>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="meta-bar" cellspacing="0" cellpadding="0">
+    <tr><td>
+      Filière : <b>{{ pv.filiere_code }}</b> — {{ pv.filiere_nom }}
+      <span class="sep">|</span> Niveau : <b>{{ pv.niveau_label }}</b>
+      {% if pv.type_pv == 'semestriel' and pv.semestre_code %}
+      <span class="sep">|</span> Semestre : <b>{{ pv.semestre_code }}</b>
+      {% endif %}
+      <span class="sep">|</span>
+      {% if pv.type_pv == 'semestriel' %}<b>{{ pv.session_type_label }}</b>
+      {% else %}Année : <b>{{ pv.annee_label }}</b>{% endif %}
+    </td></tr>
+  </table>
+
+  {# Début de la table : 2 colonnes (PV semestriel) ou 1 colonne pleine (PV annuel) #}
+  {% if pv.type_pv == 'annuel' %}
+  <table class="layout-pleine" cellpadding="0">
+    <tr>
+  {% else %}
+  <table class="layout-2col" cellpadding="0">
+    <tr>
+  {% endif %}
+{% endif %}
+
+      {# ─── Cellule fiche étudiant ─────────── #}
+      <td>
+        <div class="fiche{% if pv.type_pv == 'annuel' %} fiche-pleine{% endif %}">
+
+          <table class="fiche-id" cellspacing="0" cellpadding="0">
+            <tr>
+              <td style="width:60%">
+                <div class="fiche-num">N° {{ forloop.counter }}/{{ lignes_enrichies|length }} — Matricule {{ etu.matricule }}</div>
+                <div class="fiche-nom">{{ etu.nom_fr|default:etu.nom }}{% if etu.prenom_fr %}&nbsp;{{ etu.prenom_fr }}{% endif %}</div>
+              </td>
+              <td style="width:40%; text-align:right">
+                {% if pv.type_pv == 'semestriel' %}
+                  {% if l.decision == 'admis' %}<span class="badge badge-admis">V</span>
+                  {% elif l.decision == 'rachat' %}<span class="badge badge-rachat">V — Rachat ✓</span>
+                  {% else %}<span class="badge badge-ajourn">NV</span>{% endif %}
+                {% else %}
+                  <span class="badge badge-{{ l.dec_rendu.kind }}">{{ l.dec_rendu.label }}</span>
+                  {% if l.dec_rendu.note %}<div class="verrou-note">⚠ Non-passage : {{ l.dec_rendu.note }}</div>{% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          </table>
+
+          <table class="stats" cellspacing="2" cellpadding="0">
+            <tr>
+              <td>
+                <div class="v">{% if l.moyenne_annuelle %}{{ l.moyenne_annuelle|floatformat:2 }}{% else %}—{% endif %}</div>
+                <div class="l">Moyenne/20</div>
+              </td>
+              <td class="{% if l.credits_annuels < 15 %}stat-danger{% elif l.credits_annuels < 24 %}stat-warn{% endif %}">
+                <div class="v">{{ l.credits_annuels }}</div>
+                <div class="l">Crédit/30</div>
+              </td>
+              {% if pv.type_pv == 'annuel' %}
+              <td class="{% if l.taux_capitalisation and l.taux_capitalisation < 65 %}stat-warn{% endif %}">
+                <div class="v">{% if l.taux_capitalisation %}{{ l.taux_capitalisation|floatformat:0 }}%{% else %}—{% endif %}</div>
+                <div class="l">Taux</div>
+              </td>
+              {% else %}
+              <td>
+                <div class="v">
+                  {% with c=l.code_statut %}
+                  {% if c == 'V' %}<span class="code cv">V</span>
+                  {% elif c == 'NV' %}<span class="code cnv">NV</span>
+                  {% else %}—{% endif %}
+                  {% endwith %}
+                </div>
+                <div class="l">Decision</div>
+              </td>
+              {% endif %}
+            </tr>
+          </table>
+
+          {% if item.modules %}
+          {% if pv.type_pv == 'annuel' %}
+          {# ─── PV annuel : tableau unique vertical (S1 en haut, S2 en bas) ─── #}
+          {# Colonnes : Module/EM | CC | TP | EXAM | RAT | ME | Coef | Credit | Statut #}
+          {# Crédit affiche par EM (pas par module) — module ligne resume seulement #}
+          <table class="detail" cellspacing="0">
+            <thead>
+              <tr>
+                <th class="left" style="width:35%">Module / Élément</th>
+                <th style="width:7%">CC</th>
+                <th style="width:7%">TP</th>
+                <th style="width:8%">EXAM</th>
+                <th style="width:8%">RAT</th>
+                <th style="width:9%">ME</th>
+                <th style="width:7%">Coef</th>
+                <th style="width:8%">Credit</th>
+                <th style="width:11%">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for mod in item.modules %}
+              {% ifchanged mod.semestre_code %}
+              <tr class="tr-parite">
+                <td colspan="9"
+                    style="background:#006633;color:#fff;font-weight:bold;padding:2px 6px;font-size:8px;text-align:center;letter-spacing:1px">
+                  Semestre {{ mod.semestre_code }}
+                </td>
+              </tr>
+              {% endifchanged %}
+              <tr class="tr-mod">
+                <td><span style="color:#006633">{{ mod.module.code }}</span> — {{ mod.module.intitule_fr }}</td>
+                <td class="tc muted">—</td>
+                <td class="tc muted">—</td>
+                <td class="tc muted">—</td>
+                <td class="tc muted">—</td>
+                <td class="tc"><b>{% if mod.moyenne %}{{ mod.moyenne|floatformat:2 }}{% else %}—{% endif %}</b></td>
+                <td class="tc">{{ mod.module.coefficient }}</td>
+                <td class="tc"><b>{{ mod.credits }}</b></td>
+                <td class="tc">
+                  {% with c=mod.code_statut %}
+                  {% if c == 'V' %}<span class="code cv">V</span>
+                  {% elif c == 'NV' %}<span class="code cnv">NV</span>
+                  {% else %}—{% endif %}
+                  {% endwith %}
+                </td>
+              </tr>
+              {% for e in mod.elements %}
+              <tr class="tr-em">
+                <td style="padding-left:10px; color:#444">{{ e.code }} — {{ e.intitule }}</td>
+                <td class="tc">{% if e.cc != None %}{{ e.cc|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">{% if e.tp != None %}{{ e.tp|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">{% if e.exam != None %}{{ e.exam|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">{% if e.exam_rat != None %}{{ e.exam_rat|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc"><b>{% if e.me_retenue != None %}{{ e.me_retenue|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</b></td>
+                <td class="tc" style="color:black">{{ e.coeff }}</td>
+                <td class="tc">{% if e.est_valide and e.em_credits %}<b>{{ e.em_credits }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">
+                  {% with c=e.code_statut %}
+                  {% if c == 'V' %}<span class="code cv">V</span>
+                  {% elif c == 'VCI' %}<span class="code cvci">VCI</span>
+                  {% elif c == 'VCS' %}<span class="code cvcs">VCS</span>
+                  {% elif c == 'NV' %}<span class="code cnv">NV</span>
+                  {% elif c == 'E' %}<span class="code ce">E</span>
+                  {% else %}<span class="muted">—</span>{% endif %}
+                  {% endwith %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          {# ─── PV semestriel : tableau detaille ─── #}
+          {# Session normale   : 8 cols  Module/EM | CC | TP | EXAM | ME | Coef | Credit | Statut (pas de RAT) #}
+          {# Session rattrapage: 9 cols  Module/EM | CC | TP | EXAM | RAT | ME | Coef | Credit | Statut #}
+          <table class="detail" cellspacing="0">
+            <thead>
+              <tr>
+                <th class="left" style="width:34%">Module / Élément</th>
+                <th style="width:7%">CC</th>
+                <th style="width:7%">TP</th>
+                <th style="width:8%">EXAM</th>
+                {% if pv.session.type_session != 'normale' %}<th style="width:8%">RAT</th>{% endif %}
+                <th style="width:9%">ME</th>
+                <th style="width:7%">Coef</th>
+                <th style="width:8%">Credit</th>
+                <th style="width:12%">Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for mod in item.modules %}
+              <tr class="tr-mod">
+                <td><span style="color:#006633">{{ mod.module.code }}</span> — {{ mod.module.intitule_fr }}</td>
+                <td class="tc muted">—</td>
+                <td class="tc muted">—</td>
+                <td class="tc muted">—</td>
+                {% if pv.session.type_session != 'normale' %}<td class="tc muted">—</td>{% endif %}
+                <td class="tc"><b>{% if mod.moyenne %}{{ mod.moyenne|floatformat:2 }}{% else %}—{% endif %}</b></td>
+                <td class="tc">{{ mod.module.coefficient }}</td>
+                <td class="tc"><b>{{ mod.credits }}</b></td>
+                <td class="tc">
+                  {% with c=mod.code_statut %}
+                  {% if c == 'V' %}<span class="code cv">V</span>
+                  {% elif c == 'NV' %}<span class="code cnv">NV</span>
+                  {% else %}—{% endif %}
+                  {% endwith %}
+                </td>
+              </tr>
+              {% for e in mod.elements %}
+              <tr class="tr-em">
+                <td style="padding-left:14px; color:#444">{{ e.code }} — {{ e.intitule }}</td>
+                <td class="tc">{% if e.cc != None %}{{ e.cc|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">{% if e.tp != None %}{{ e.tp|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">{% if e.exam != None %}{{ e.exam|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                {% if pv.session.type_session != 'normale' %}<td class="tc">{% if e.exam_rat != None %}{{ e.exam_rat|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+                <td class="tc"><b>{% if e.me_retenue != None %}{{ e.me_retenue|floatformat:2 }}{% else %}<span class="muted">—</span>{% endif %}</b></td>
+                <td class="tc" style="color:#888">{{ e.coeff }}</td>
+                <td class="tc">{% if e.est_valide and e.em_credits %}<b>{{ e.em_credits }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="tc">
+                  {% with c=e.code_statut %}
+                  {% if c == 'V' %}<span class="code cv">V</span>
+                  {% elif c == 'VCI' %}<span class="code cvci">VCI</span>
+                  {% elif c == 'VCS' %}<span class="code cvcs">VCS</span>
+                  {% elif c == 'NV' %}<span class="code cnv">NV</span>
+                  {% elif c == 'E' %}<span class="code ce">E</span>
+                  {% else %}<span class="muted">—</span>{% endif %}
+                  {% endwith %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+          {% else %}
+          <p style="font-size:9px;color:#888;font-style:italic;margin:4px 0">
+            Aucun détail de module disponible.
+          </p>
+          {% endif %}
+
+          {% if l.observations %}
+          <div class="obs"><b>Obs :</b> {{ l.observations }}</div>
+          {% endif %}
+
+        </div>{# fin .fiche #}
+      </td>{# fin <td> cellule #}
+      {# ─── Fin cellule fiche étudiant ────────────────────────── #}
+
+
+{% if pv.type_pv == 'annuel' or forloop.counter|divisibleby:"2" or forloop.last %}
+      {# Si dernière fiche et compteur impair (PV semestriel) → cellule vide pour équilibrer #}
+      {% if pv.type_pv != 'annuel' and forloop.last and not forloop.counter|divisibleby:"2" %}
+      <td></td>
+      {% endif %}
+    </tr>
+  </table>{# fin layout-2col #}
+
+  <div class="footer">
+    PV N° {{ pv.id }} — {{ pv.filiere_code }} {{ pv.niveau_label }}{% if pv.type_pv == 'semestriel' and pv.semestre_code %} — {{ pv.semestre_code }}{% endif %}
+    {% if pv.type_pv == 'semestriel' %} — {{ pv.session_type_label }}{% else %} — {{ pv.annee_label }}{% endif %}
+    — Page générée le {{ date_impression }}
+  </div>
+</div>{# fin .page #}
+{% endif %}
+
+{% endwith %}
+{% empty %}
+<div style="padding:30px;text-align:center;color:#888">Aucun résultat enregistré.</div>
+{% endfor %}
+
+
+
+{% if lignes_enrichies %}
+<div class="page">
+
+  <table class="header-table" cellspacing="0" cellpadding="0">
+    <tr>
+      <td class="header-logo">{% if institution_logo_url %}<img src="{{ institution_logo_url }}" alt="">{% endif %}</td>
+      <td class="header-center">
+        {% if institution %}<div class="header-inst">{{ institution.nom_complet_fr|default:institution.nom_fr|default:"" }}</div>{% endif %}
+        <div class="header-titre">Récapitulatif — PV N° {{ pv.id }}</div>
+      </td>
+      <td class="header-right">
+        <b>{{ pv.filiere_code }}</b> — {{ pv.niveau_label }}{% if pv.type_pv == 'semestriel' and pv.semestre_code %} — <b style="color:#006633">{{ pv.semestre_code }}</b>{% endif %}<br>
+        {% if pv.type_pv == 'semestriel' %}{{ pv.session_type_label }}{% else %}{{ pv.annee_label }}{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="stats-recap" cellspacing="5" cellpadding="0">
+    <tr>
+      <td><div class="rv">{{ lignes_enrichies|length }}</div><div class="rl">Étudiants</div></td>
+      <td><div class="rv" style="color:#15803d">{{ nb_admis }}</div><div class="rl">Validés</div></td>
+      <td><div class="rv" style="color:#dc2626">{{ nb_ajournes }}</div><div class="rl">Non validés</div></td>
+      {% if pv.type_pv == 'annuel' %}
+      <td><div class="rv" style="color:#15803d">{{ nb_passage_cond }}</div><div class="rl">Pass. cond.</div></td>
+      <td><div class="rv" style="color:#92400e">{{ nb_redoublement }}</div><div class="rl">Redoublants</div></td>
+      <td><div class="rv" style="color:#7f1d1d">{{ nb_exclus }}</div><div class="rl">Exclus</div></td>
+      {% endif %}
+    </tr>
+  </table>
+
+  <div class="section-title">Liste récapitulative</div>
+  <table class="recap" cellspacing="0">
+    <thead>
+      <tr>
+        <th class="left" style="width:13%">Matricule</th>
+        <th class="left" style="width:36%">Nom &amp; Prénom</th>
+        <th style="width:11%">Moyenne</th>
+        <th style="width:10%">Crédits</th>
+        {% if pv.type_pv == 'annuel' %}<th style="width:10%">Taux %</th>{% endif %}
+        <th>Décision</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in lignes_enrichies %}
+    {% with l=item.ligne etu=item.ligne.inscription_admin.etudiant %}
+    <tr class="{% if pv.type_pv == 'semestriel' %}{% if l.decision == 'admis' or l.decision == 'rachat' %}r-admis{% else %}r-ajourn{% endif %}{% else %}{% if l.decision_annuelle == 'exclusion' %}r-exclus{% elif l.decision_annuelle == 'passage_droit' or l.decision_annuelle == 'passage_cond' %}r-admis{% else %}r-ajourn{% endif %}{% endif %}">
+      <td class="mono">{{ etu.matricule }}</td>
+      <td>{{ etu.nom_fr|default:etu.nom }}{% if etu.prenom_fr %} {{ etu.prenom_fr }}{% endif %}</td>
+      <td class="tc">{% if l.moyenne_annuelle %}{{ l.moyenne_annuelle|floatformat:2 }}{% else %}—{% endif %}</td>
+      <td class="tc">{{ l.credits_annuels }}</td>
+      {% if pv.type_pv == 'annuel' %}
+      <td class="tc">{% if l.taux_capitalisation %}{{ l.taux_capitalisation|floatformat:0 }}%{% else %}—{% endif %}</td>
+      {% endif %}
+      <td class="tc">
+        {% if pv.type_pv == 'semestriel' %}
+          {% if l.decision == 'admis' %}<span style="color:#15803d;font-weight:bold">V</span>
+          {% elif l.decision == 'rachat' %}<span style="color:#1e40af;font-weight:bold">V — Rachat ✓</span>
+          {% else %}<span style="color:#dc2626;font-weight:bold">NV</span>{% endif %}
+        {% else %}
+          <span style="color:{{ l.dec_rendu.color }};font-weight:bold">{{ l.dec_rendu.label }}</span>
+          {% if l.dec_rendu.note %}<div style="color:#b45309;font-size:7px;font-style:italic;margin-top:1px;line-height:1.2">⚠ {{ l.dec_rendu.note }}</div>{% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endwith %}
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="background:#e8f5e9">
+        <td colspan="{% if pv.type_pv == 'annuel' %}6{% else %}5{% endif %}" style="text-align:right;font-weight:bold;padding:4px 6px;border-top:2px solid #006633;font-size:10px">
+          Total : {{ lignes_enrichies|length }} étudiant(s)
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="section-title">Légende</div>
+  <table class="legende">
+    <tr>
+      <td style="width:5%"><span class="code cv">V</span></td><td style="width:24%">Validé</td>
+      <td style="width:6%"><span class="code cvci">VCI</span></td><td style="width:24%">Compensation intra-module</td>
+      <td style="width:6%"><span class="code cvcs">VCS</span></td><td>Compensation semestrielle</td>
+    </tr>
+    <tr>
+      <td><span class="code cnv">NV</span></td><td>Non validé</td>
+      <td><span class="code ce">E</span></td><td>Éliminatoire</td>
+    </tr>
+    {% if has_sr %}
+    {% endif %}
+  </table>
+
+  <div style="border-top:1px solid #aaa;padding-top:5px;margin-top:5px">
+    <div class="section-title">Signatures du jury</div>
+    <p style="font-size:10px;color:#555;margin:3px 0 5px">
+      Date :
+      {% if pv.date_deliberation %}{{ pv.date_deliberation|date:"d/m/Y" }}{% else %}___ / ___ / 20___{% endif %}
+    </p>
+    <table class="sig-table" cellspacing="5" cellpadding="0">
+      <tr>
+      {% for m in membres %}
+        <td>
+          <div class="sig-role">{{ m.get_role_display }}</div>
+          <div class="sig-nom">{{ m.user.get_full_name }}</div>
+          {% if m.signature_at %}
+          <div style="font-size:8.5px;color:#15803d;margin-top:2px">Signé le {{ m.signature_at|date:"d/m/Y" }}</div>
+          {% else %}<div class="sig-line"></div>{% endif %}
+        </td>
+      {% endfor %}
+      {% for i in empty_slots %}
+        <td><div class="sig-role">Membre du jury</div><div class="sig-line"></div></td>
+      {% endfor %}
+      </tr>
+    </table>
+  </div>
+
+  <div class="footer">PV généré par SIGA — {{ date_impression }}</div>
+
+</div>{# fin page récap #}
+}
+
+{% if pv.type_pv == 'semestriel' and pv.session and pv.session.type_session == 'normale' %}
+<div class="page">
+
+  <table class="header-table" cellspacing="0" cellpadding="0">
+    <tr>
+      <td class="header-logo">{% if institution_logo_url %}<img src="{{ institution_logo_url }}" alt="">{% endif %}</td>
+      <td class="header-center">
+        {% if institution %}<div class="header-inst">{{ institution.nom_complet_fr|default:institution.nom_fr|default:"" }}</div>{% endif %}
+        <div class="header-titre">Matrice des rattrapages — PV N° {{ pv.id }}</div>
+      </td>
+      <td class="header-right">
+        <b>{{ pv.filiere_code }}</b> — {{ pv.niveau_label }}{% if pv.semestre_code %} — <b style="color:#006633">{{ pv.semestre_code }}</b>{% endif %}<br>
+        {{ pv.session_type_label }}
+      </td>
+    </tr>
+  </table>
+
+  {% if obligations_pivot and obligations_pivot.em_codes %}
+  <div class="section-title">Obligations de rattrapage par étudiant</div>
+  <div class="legende-matrice">
+    <b class="cell-O">O</b>&nbsp; Obligatoire (éliminatoire ou module &lt; 8)
+    &nbsp;&nbsp;
+    <b class="cell-F">F</b>&nbsp; Facultatif (module entre 8 et 10)
+    &nbsp;&nbsp;
+    <b class="cell-V">—</b>&nbsp; Non concerné (élément validé)
+  </div>
+  <table class="matrice" cellspacing="0">
+    <thead>
+      <tr>
+        <th class="left" style="width:11%">Matricule</th>
+        <th class="left" style="width:24%">Nom &amp; Prénom</th>
+        {% for code in obligations_pivot.em_codes %}
+        <th>{{ code }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in obligations_pivot.rows %}
+    <tr>
+      <td class="left mono">{{ row.etudiant.matricule }}</td>
+      <td class="left">{{ row.etudiant.nom_fr|default:row.etudiant.nom }}</td>
+      {% for val in row.cells_list %}
+      <td class="{% if val == 'O' %}cell-O{% elif val == 'F' %}cell-F{% else %}cell-V{% endif %}">
+        {% if val == 'O' %}O
+        {% elif val == 'F' %}F
+        {% else %}—{% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="section-title">Obligations de rattrapage</div>
+  <p style="font-size:10.5px;color:#888;font-style:italic;margin-top:6px">
+    Aucune obligation de rattrapage — tous les étudiants ont validé leurs éléments.
+  </p>
+  {% endif %}
+
+  <div class="footer">PV généré par SIGA — {{ date_impression }}</div>
+
+</div>{# fin page matrice #}
+{% endif %}
+
+{% endif %}
+
+</body>
+</html>

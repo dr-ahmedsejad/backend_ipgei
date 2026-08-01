@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore SIGA (backend Django)
+# Objectif : ne jamais committer secrets, dumps BD, environnement virtuel,
+# caches Python, fichiers media utilisateur, ni logs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Secrets et config locale ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+deploy/.env
+
+# ── Certificats de signature des documents (clé privée — JAMAIS commitée) ────
+secrets/
+*.p12
+*.pfx
+
+# ── Dumps BD et backups ─────────────────────────────────────────────────────
+# Les dumps contiennent hashes mdp + PII. À transférer par SCP, jamais par git.
+backups/
+*.sql
+*.sql.gz
+*.sql.bz2
+
+# Exception : on garde le dossier deploy/ (Dockerfile, nginx.conf, deploy.sh),
+# mais on exclut explicitement deploy/dump.sql.
+deploy/dump.sql
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ── Environnement virtuel ───────────────────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ── Django ──────────────────────────────────────────────────────────────────
+*.log
+db.sqlite3
+db.sqlite3-journal
+local_settings.py
+
+# ── Media utilisateur (uploads) ─────────────────────────────────────────────
+media/
+!media/.gitkeep
+
+# ── Static files collectés ──────────────────────────────────────────────────
+staticfiles/
+static_collected/
+
+# ── Tests et coverage ───────────────────────────────────────────────────────
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+
+# ── Logs ────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── IDE / Editeurs ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Outils de dev / scripts diagnostic ──────────────────────────────────────
+# Ces fichiers à la racine sont des helpers temporaires, pas du code prod.
+/_diag_*.py
+/_fix_*.py
+/_audit_*.py
+
+# ── Documents de travail markdown (notes locales) ───────────────────────────
+# Décommente si tu veux exclure les notes .md locales :
+# /*.md
+# !README.md
+# !CLAUDE.md
+
+# Sauvegardes locales creees avant migration structurelle (dumps pg_dump).
+.backup/

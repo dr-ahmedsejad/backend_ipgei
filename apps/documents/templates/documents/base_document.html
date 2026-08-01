@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Cairo', 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    color: #1a1a1a;
+    background: #fff;
+    padding: 0;
+  }
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    padding: 15mm 18mm;
+    position: relative;
+  }
+  /* ── En-tête bilingue ──────────────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid #006633;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  .header-left, .header-right {
+    flex: 1;
+    text-align: center;
+    font-size: 9pt;
+    color: #333;
+    line-height: 1.5;
+  }
+  .header-right { direction: rtl; text-align: center; }
+  .logo-center {
+    flex: 0 0 auto;
+    padding: 0 12px;
+  }
+  .logo-center img {
+    height: 55px;
+    object-fit: contain;
+  }
+  .mesrs-line {
+    font-size: 8pt;
+    color: #555;
+    text-align: center;
+    margin-bottom: 2px;
+    letter-spacing: 0.02em;
+  }
+  .inst-name {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #006633;
+  }
+  /* ── Titre document ────────────────────────────────────────────────────── */
+  .doc-title-wrap {
+    text-align: center;
+    margin: 14px 0 12px;
+  }
+  .doc-title {
+    display: inline-block;
+    background: linear-gradient(135deg, #004d24, #006633);
+    color: #fff;
+    font-size: 14pt;
+    font-weight: 700;
+    padding: 6px 28px;
+    border-radius: 6px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .doc-title-ar {
+    display: block;
+    font-size: 12pt;
+    color: #006633;
+    direction: rtl;
+    margin-top: 4px;
+  }
+  /* ── Corps ──────────────────────────────────────────────────────────────── */
+  .section-title {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #006633;
+    border-bottom: 1.5px solid #006633;
+    padding-bottom: 3px;
+    margin: 14px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px 20px;
+    margin-bottom: 10px;
+  }
+  .info-row {
+    display: flex;
+    gap: 6px;
+    font-size: 10pt;
+    align-items: baseline;
+  }
+  .info-label {
+    color: #555;
+    font-size: 9pt;
+    min-width: 100px;
+    white-space: nowrap;
+  }
+  .info-value {
+    font-weight: 600;
+    color: #111;
+    flex: 1;
+  }
+  /* ── Tableau notes ──────────────────────────────────────────────────────── */
+  table.notes {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 9pt;
+  }
+  table.notes thead tr {
+    background: #006633;
+    color: #fff;
+  }
+  table.notes thead th {
+    padding: 5px 7px;
+    text-align: center;
+    font-weight: 600;
+  }
+  table.notes thead th:first-child { text-align: left; padding-left: 10px; }
+  table.notes tbody tr:nth-child(even) { background: #f2f7f2; }
+  table.notes tbody td {
+    padding: 4px 7px;
+    border-bottom: 1px solid #ddd;
+    text-align: center;
+    font-size: 9pt;
+  }
+  table.notes tbody td:first-child { text-align: left; padding-left: 10px; }
+  table.notes tfoot tr { background: #e8f4ee; font-weight: 700; }
+  table.notes tfoot td {
+    padding: 5px 7px;
+    border-top: 2px solid #006633;
+    text-align: center;
+  }
+  /* ── Note colorée ──────────────────────────────────────────────────────── */
+  .note-pass { color: #006633; font-weight: 700; }
+  .note-fail { color: #C82020; font-weight: 700; }
+  /* ── Mention ────────────────────────────────────────────────────────────── */
+  .mention-badge {
+    display: inline-block;
+    padding: 3px 14px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 11pt;
+  }
+  .mention-TB { background: #004d24; color: #fff; }
+  .mention-B  { background: #006633; color: #fff; }
+  .mention-AB { background: #008844; color: #fff; }
+  .mention-P  { background: #5fa85f; color: #fff; }
+  .mention-AJ { background: #C82020; color: #fff; }
+  /* ── Pied de page ───────────────────────────────────────────────────────── */
+  .footer {
+    position: fixed;
+    bottom: 10mm;
+    left: 18mm;
+    right: 18mm;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-top: 1px solid #ccc;
+    padding-top: 8px;
+    font-size: 8pt;
+    color: #666;
+  }
+  .footer-left { flex: 1; }
+  .footer-qr img { height: 60px; width: 60px; }
+  .footer-sig {
+    flex: 0 0 180px;
+    text-align: center;
+    font-size: 9pt;
+  }
+  .footer-sig .sig-name { font-weight: 700; color: #111; }
+  .footer-sig .sig-title { font-size: 8pt; color: #555; }
+  .footer-sig img { max-height: 45px; display: block; margin: 0 auto 4px; }
+  .numero-serie {
+    font-size: 8pt;
+    font-family: monospace;
+    color: #888;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+{% include 'documents/_duplicata_watermark.html' %}
+<div class="page">
+  <!-- En-tête -->
+  <div class="header">
+    <div class="header-left">
+      <div class="mesrs-line">République Islamique de Mauritanie</div>
+      <div class="mesrs-line">Ministère de l'Enseignement Supérieur</div>
+      <div class="inst-name">{{ institution.nom_fr|default:institution.nom }}</div>
+    </div>
+    <div class="logo-center">
+      {% if logo_b64 %}
+        <img src="{{ logo_b64 }}" alt="Logo">
+      {% elif institution.logo %}
+        <img src="{{ institution.logo.path }}" alt="Logo">
+      {% else %}
+        <div style="width:55px;height:55px;background:#e8f4ee;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#006633;font-size:16pt;font-weight:700;">
+          {% if institution.nom_fr %}{{ institution.nom_fr|slice:":1" }}{% else %}U{% endif %}
+        </div>
+      {% endif %}
+    </div>
+    <div class="header-right">
+      <div class="mesrs-line">الجمهورية الإسلامية الموريتانية</div>
+      <div class="mesrs-line">وزارة التعليم العالي</div>
+      <div class="inst-name">{{ institution.nom_ar|default:"" }}</div>
+    </div>
+  </div>
+
+  <!-- Corps du document (injecté par le sous-template) -->
+  {% block content %}{% endblock %}
+
+  <!-- Pied de page -->
+  <div class="footer">
+    <div class="footer-left">
+      <div>Document N° <strong>{{ doc.numero_serie }}</strong></div>
+      <div>Généré le {{ today }}</div>
+      <div class="numero-serie">Vérification : {{ verify_url }}</div>
+    </div>
+    {% if qr_image %}
+    <div class="footer-qr">
+      <img src="{{ qr_image }}" alt="QR">
+    </div>
+    {% endif %}
+    <div class="footer-sig">
+      {% if institution.directeur_signature %}
+        <img src="{{ institution.directeur_signature.path }}" alt="Signature">
+      {% else %}
+        <div style="height:35px;"></div>
+      {% endif %}
+      <div class="sig-name">{{ institution.directeur_nom_fr|default:"Le Directeur" }}</div>
+      <div class="sig-title">{{ institution.directeur_titre_fr|default:"" }}</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

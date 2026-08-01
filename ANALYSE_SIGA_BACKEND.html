@@ -1,0 +1,2358 @@
+<!DOCTYPE html><html><head><title></title><meta charset="utf-8"><style>* {
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 100%;
+}
+
+body {
+	font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell',
+		'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+	line-height: 1.6;
+	font-size: 0.6875em; /* 11 pt */
+	color: #111;
+	margin: 0;
+}
+
+body > :first-child {
+	padding-top: 0;
+	margin-top: 0;
+}
+
+body > :last-child {
+	margin-bottom: 0;
+	padding-bottom: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	margin: 0;
+	padding: 0.5em 0 0.25em;
+}
+
+h5,
+h6 {
+	padding: 0;
+}
+
+h5 {
+	font-size: 1em;
+}
+
+h6 {
+	font-size: 0.875em;
+	text-transform: uppercase;
+}
+
+p {
+	margin: 0.25em 0 1em;
+}
+
+blockquote {
+	margin: 0.5em 0 1em;
+	padding-left: 0.5em;
+	padding-right: 1em;
+	border-left: 4px solid gainsboro;
+	font-style: italic;
+}
+
+ul,
+ol {
+	margin: 0;
+	margin-left: 1em;
+	padding: 0 1.5em 0.5em;
+}
+
+pre {
+	white-space: pre-wrap;
+}
+
+h1 code,
+h2 code,
+h3 code,
+h4 code,
+h5 code,
+h6 code,
+p code,
+li code,
+pre code {
+	background-color: #f8f8f8;
+	padding: 0.1em 0.375em;
+	border: 1px solid #f8f8f8;
+	border-radius: 0.25em;
+	font-family: monospace;
+	font-size: 1.2em;
+}
+
+pre code {
+	display: block;
+	padding: 0.5em;
+}
+
+.page-break {
+	page-break-after: always;
+}
+
+img {
+	max-width: 100%;
+	margin: 1em 0;
+}
+
+table {
+	border-spacing: 0;
+	border-collapse: collapse;
+	display: block;
+	margin: 0 0 1em;
+	width: 100%;
+	overflow: auto;
+}
+
+table th,
+table td {
+	padding: 0.5em 1em;
+	border: 1px solid gainsboro;
+}
+
+table th {
+	font-weight: 600;
+}
+
+table tr {
+	background-color: white;
+	border-top: 1px solid gainsboro;
+}
+
+table tr:nth-child(2n) {
+	background-color: whitesmoke;
+}
+/*# sourceURL=C:\Users\LENOVO\AppData\Local\npm-cache\_npx\55158e48eb5c59f7\node_modules\md-to-pdf\markdown.css*/</style><style>pre code.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 1em
+}
+code.hljs {
+  padding: 3px 5px
+}
+/*!
+  Theme: GitHub
+  Description: Light theme as seen on github.com
+  Author: github.com
+  Maintainer: @Hirse
+  Updated: 2021-05-15
+
+  Outdated base version: https://github.com/primer/github-syntax-light
+  Current colors taken from GitHub's CSS
+*/
+.hljs {
+  color: #24292e;
+  background: #ffffff
+}
+.hljs-doctag,
+.hljs-keyword,
+.hljs-meta .hljs-keyword,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-type,
+.hljs-variable.language_ {
+  /* prettylights-syntax-keyword */
+  color: #d73a49
+}
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.class_.inherited__,
+.hljs-title.function_ {
+  /* prettylights-syntax-entity */
+  color: #6f42c1
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-literal,
+.hljs-meta,
+.hljs-number,
+.hljs-operator,
+.hljs-variable,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  /* prettylights-syntax-constant */
+  color: #005cc5
+}
+.hljs-regexp,
+.hljs-string,
+.hljs-meta .hljs-string {
+  /* prettylights-syntax-string */
+  color: #032f62
+}
+.hljs-built_in,
+.hljs-symbol {
+  /* prettylights-syntax-variable */
+  color: #e36209
+}
+.hljs-comment,
+.hljs-code,
+.hljs-formula {
+  /* prettylights-syntax-comment */
+  color: #6a737d
+}
+.hljs-name,
+.hljs-quote,
+.hljs-selector-tag,
+.hljs-selector-pseudo {
+  /* prettylights-syntax-entity-tag */
+  color: #22863a
+}
+.hljs-subst {
+  /* prettylights-syntax-storage-modifier-import */
+  color: #24292e
+}
+.hljs-section {
+  /* prettylights-syntax-markup-heading */
+  color: #005cc5;
+  font-weight: bold
+}
+.hljs-bullet {
+  /* prettylights-syntax-markup-list */
+  color: #735c0f
+}
+.hljs-emphasis {
+  /* prettylights-syntax-markup-italic */
+  color: #24292e;
+  font-style: italic
+}
+.hljs-strong {
+  /* prettylights-syntax-markup-bold */
+  color: #24292e;
+  font-weight: bold
+}
+.hljs-addition {
+  /* prettylights-syntax-markup-inserted */
+  color: #22863a;
+  background-color: #f0fff4
+}
+.hljs-deletion {
+  /* prettylights-syntax-markup-deleted */
+  color: #b31d28;
+  background-color: #ffeef0
+}
+.hljs-char.escape_,
+.hljs-link,
+.hljs-params,
+.hljs-property,
+.hljs-punctuation,
+.hljs-tag {
+  /* purposely ignored */
+  
+}/*# sourceURL=C:\Users\LENOVO\AppData\Local\npm-cache\_npx\55158e48eb5c59f7\node_modules\highlight.js\styles\github.css*/</style></head>
+	<body class="">
+		<h1 id="analyse-approfondie-du-backend-siga">Analyse Approfondie du Backend SIGA</h1>
+<h2 id="audit-complet--modeles-vues-serializers-et-plan-dintegration-scolarite-lmd">Audit Complet : Modeles, Vues, Serializers et Plan d'Integration Scolarite LMD</h2>
+<blockquote>
+<p><strong>Date :</strong> 13 avril 2026
+<strong>Projet :</strong> SIGA (Systeme Integre de Gestion Academique)
+<strong>Stack :</strong> Django 4.2.16 | DRF 3.15.2 | MySQL 8 | SimpleJWT | pdfkit | openpyxl
+<strong>Chemin :</strong> <code>C:\react_projects\GES\siga</code></p>
+</blockquote>
+<hr>
+<h2 id="table-des-matieres">Table des Matieres</h2>
+<ol>
+<li><a href="#1-vue-densemble-du-projet">Vue d'Ensemble du Projet</a></li>
+<li><a href="#2-inventaire-des-modeles">Inventaire des Modeles</a></li>
+<li><a href="#3-inventaire-des-vues">Inventaire des Vues</a></li>
+<li><a href="#4-inventaire-des-serializers">Inventaire des Serializers</a></li>
+<li><a href="#5-infrastructure-core">Infrastructure Core</a></li>
+<li><a href="#6-cartographie-existant-vs-scolarite-lmd">Cartographie Existant vs Scolarite LMD</a></li>
+<li><a href="#7-plan-damelioration-et-dintegration">Plan d'Amelioration et d'Integration</a></li>
+</ol>
+<hr>
+<h2 id="1-vue-densemble-du-projet">1. Vue d'Ensemble du Projet</h2>
+<h3 id="11-architecture-des-fichiers">1.1 Architecture des Fichiers</h3>
+<pre><code>siga/
+  manage.py
+  requirements.txt
+  migrate_from_gesafped.py          # Script migration legacy
+  siga/                              # Configuration Django
+    settings/
+      base.py                        # Config partagee (JWT, RBAC, CORS, Throttling)
+      development.py                 # DEBUG=True, SQL logging
+      production.py                  # SSL, HSTS, cookies securises
+    urls.py                          # Routeur racine /api/v1/
+    wsgi.py
+  core/                              # Utilitaires partages
+    authentication.py                # JWT Cookie Authentication
+    permissions.py                   # RBAC avec cache versionne
+    exceptions.py                    # Exception handler DRF custom
+    axes_utils.py                    # Protection brute-force
+    mixins.py                        # AuditMixin, SelectAllMixin
+    pagination.py                    # StandardPagination (10/page)
+    throttles.py                     # Rate limiting
+  apps/                              # 12 applications Django
+    authentication/                  # Auth + RBAC (6 modeles)
+    parametres/                      # Config systeme (8 modeles)
+    departement/                     # Departements (1 modele)
+    banque/                          # Banques (1 modele)
+    salle/                           # Salles (1 modele)
+    em/                              # Elements de module (1 modele)
+    prof/                            # Professeurs (1 modele)
+    emplois/                         # Emplois du temps (2 modeles)
+    suivi/                           # Suivi des seances (3 modeles)
+    vacation/                        # Vacations et surveillances (2 modeles)
+    absence/                         # Etudiants et presences (3 modeles)
+    avancement/                      # Avancement (pas de modeles, calculs)
+</code></pre>
+<h3 id="12-configuration-cle">1.2 Configuration Cle</h3>
+<table>
+<thead>
+<tr>
+<th>Element</th>
+<th>Valeur</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Base de donnees</strong></td>
+<td>MySQL 8 (gesafped)</td>
+</tr>
+<tr>
+<td><strong>Authentification</strong></td>
+<td>JWT en cookies HttpOnly (access 15min, refresh 7j)</td>
+</tr>
+<tr>
+<td><strong>Permissions</strong></td>
+<td>RBAC custom avec cache Redis/LocMem (TTL 5min)</td>
+</tr>
+<tr>
+<td><strong>Protection brute-force</strong></td>
+<td>django-axes (5 tentatives / 15min)</td>
+</tr>
+<tr>
+<td><strong>Rate limiting</strong></td>
+<td>Anon 20/min, User 200/min, Login 5/15min</td>
+</tr>
+<tr>
+<td><strong>Documentation API</strong></td>
+<td>drf-spectacular (Swagger + ReDoc)</td>
+</tr>
+<tr>
+<td><strong>Generation PDF</strong></td>
+<td>pdfkit (wkhtmltopdf)</td>
+</tr>
+<tr>
+<td><strong>Import Excel</strong></td>
+<td>openpyxl</td>
+</tr>
+<tr>
+<td><strong>Langue</strong></td>
+<td>fr-fr</td>
+</tr>
+<tr>
+<td><strong>Timezone</strong></td>
+<td>Africa/Nouakchott</td>
+</tr>
+</tbody></table>
+<h3 id="13-roles-existants">1.3 Roles Existants</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Libelle</th>
+<th>Perimetre</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>admin</code></td>
+<td>Administrateur</td>
+<td>Global (bypass RBAC)</td>
+</tr>
+<tr>
+<td><code>DG</code></td>
+<td>Directeur general</td>
+<td>Etablissement</td>
+</tr>
+<tr>
+<td><code>DA</code></td>
+<td>Direction administrative</td>
+<td>Etablissement</td>
+</tr>
+<tr>
+<td><code>DE</code></td>
+<td>Direction enseignement</td>
+<td>Etablissement</td>
+</tr>
+<tr>
+<td><code>AA</code></td>
+<td>Assistant administratif</td>
+<td>Departement</td>
+</tr>
+<tr>
+<td><code>IT</code></td>
+<td>Informatique</td>
+<td>Technique</td>
+</tr>
+<tr>
+<td><code>scolarite</code></td>
+<td>Scolarite</td>
+<td>Departement</td>
+</tr>
+</tbody></table>
+<h3 id="14-endpoints-api-existants">1.4 Endpoints API Existants</h3>
+<pre><code>/api/v1/auth/           -&gt; Authentication, profil, RBAC
+/api/v1/parametres/     -&gt; Configuration systeme (10 ViewSets)
+/api/v1/banques/        -&gt; Banques
+/api/v1/salles/         -&gt; Salles
+/api/v1/departements/   -&gt; Departements
+/api/v1/em/             -&gt; Elements de module
+/api/v1/profs/          -&gt; Professeurs + stats
+/api/v1/emplois/        -&gt; Emplois du temps + grille + dispo + PDF
+/api/v1/suivi/          -&gt; Suivi seances + pointage + charges
+/api/v1/absences/       -&gt; Etudiants + presences + rapport
+/api/v1/vacations/      -&gt; Vacations + surveillances + fiches
+/api/v1/avancement/     -&gt; Avancement EM/Profs + stats + PDFs
+</code></pre>
+<hr>
+<h2 id="2-inventaire-des-modeles">2. Inventaire des Modeles</h2>
+<h3 id="21-app-authentication-6-modeles">2.1 App <code>authentication</code> (6 modeles)</h3>
+<h4 id="customuser">CustomUser</h4>
+<pre><code>Fichier : apps/authentication/models.py
+Heritage : AbstractUser
+Table DB : authentication_customuser
+
+Champs :
+  email              EmailField       unique=True
+  role               CharField(20)    choices=ROLE_CHOICES, default='AA'
+  name               CharField(150)   blank=True
+  avatar             ImageField       upload_to='avatars/', validators=[max 5Mo, JPEG/PNG]
+  + champs herites   (username, password, first_name, last_name, is_staff, is_active, etc.)
+</code></pre>
+<h4 id="module-rbac">Module (RBAC)</h4>
+<pre><code>Table DB : authentication_module
+Champs :
+  code               CharField(50)    unique=True        # ex: 'emplois', 'suivi', 'profs'
+  nom                CharField(100)
+  icone              CharField(50)    blank=True
+  ordre              IntegerField     default=0
+</code></pre>
+<h4 id="action-rbac">Action (RBAC)</h4>
+<pre><code>Table DB : authentication_action
+Champs :
+  code               CharField(50)    unique=True        # ex: 'voir', 'modifier', 'supprimer', 'exporter'
+  nom                CharField(100)
+  icone              CharField(50)    blank=True
+</code></pre>
+<h4 id="moduleaction-rbac---table-de-jonction">ModuleAction (RBAC - table de jonction)</h4>
+<pre><code>Table DB : authentication_moduleaction
+Champs :
+  module             FK(Module)       CASCADE
+  action             FK(Action)       CASCADE
+Contrainte : unique_together = ('module', 'action')
+</code></pre>
+<h4 id="roledefault-rbac---permissions-par-defaut">RoleDefault (RBAC - permissions par defaut)</h4>
+<pre><code>Table DB : authentication_roledefault
+Champs :
+  role               CharField(20)    choices=ROLE_CHOICES
+  module_action      FK(ModuleAction) CASCADE
+  allowed            BooleanField     default=False
+Contrainte : unique_together = ('role', 'module_action')
+</code></pre>
+<h4 id="userpermission-rbac---surcharges-par-utilisateur">UserPermission (RBAC - surcharges par utilisateur)</h4>
+<pre><code>Table DB : authentication_userpermission
+Champs :
+  user               FK(CustomUser)   CASCADE
+  module_action      FK(ModuleAction) CASCADE
+  allowed            BooleanField     default=False
+  departement        FK(Departement)  SET_NULL, null=True  # Scope par dept
+Contrainte : unique_together = ('user', 'module_action')
+</code></pre>
+<h4 id="usercontexte-contexte-session">UserContexte (contexte session)</h4>
+<pre><code>Table DB : authentication_usercontexte
+Champs :
+  user               OneToOneField(CustomUser) CASCADE
+  annee_universitaire CharField(9)    blank=True
+  semestre           CharField(10)    choices=['Pairs','Impairs'], default='Pairs'
+  updated_at         DateTimeField    auto_now=True
+</code></pre>
+<hr>
+<h3 id="22-app-parametres-8-modeles">2.2 App <code>parametres</code> (8 modeles)</h3>
+<h4 id="year">Year</h4>
+<pre><code>Table DB : annee
+Champs :
+  annee              CharField(20)    unique=True        # ex: '2024-2025'
+</code></pre>
+<h4 id="niveau">Niveau</h4>
+<pre><code>Table DB : niveau
+Champs :
+  niveau             CharField(50)    unique=True        # ex: 'Licence', 'Master'
+</code></pre>
+<h4 id="semestre">Semestre</h4>
+<pre><code>Table DB : semestre
+Champs :
+  code_semestre      CharField(20)                       # ex: 'S1', 'S2'
+  semestre           CharField(100)                      # ex: 'Semestre 1'
+  niveau_semestre    FK(Niveau)       CASCADE
+  type_semestre      CharField(1)     choices=['P'=Pair,'I'=Impair], default='I'
+Note : Ce modele represente un semestre de PLANIFICATION (emplois du temps),
+       PAS un semestre LMD academique avec credits.
+</code></pre>
+<h4 id="seance">Seance</h4>
+<pre><code>Table DB : Seance
+Champs :
+  type_seance        CharField(50)    unique=True        # ex: 'CM', 'TD', 'TP', 'PR'
+</code></pre>
+<h4 id="creneau">Creneau</h4>
+<pre><code>Table DB : creneau
+Champs :
+  creneau            CharField(100)   unique=True        # ex: '08:00 - 09:30'
+  duree              FloatField       default=1.5
+  type_creneau       CharField(20)    choices=['matin','apres-midi','soir']
+  ordre              IntegerField     default=0
+  is_actif           BooleanField     default=True
+</code></pre>
+<h4 id="jour">Jour</h4>
+<pre><code>Table DB : jour
+Champs :
+  jour               CharField(20)    unique=True        # ex: 'Lundi', 'Mardi'
+</code></pre>
+<h4 id="semaine">Semaine</h4>
+<pre><code>Table DB : semaine
+Champs :
+  numero_semaine     IntegerField
+  jour               CharField(20)
+  date               DateField
+  annee_universitaire CharField(20)
+  type_semestre      CharField(1)     default='I'
+</code></pre>
+<h4 id="paiement">Paiement</h4>
+<pre><code>Table DB : paiement
+Champs :
+  type               CharField(50)                       # ex: 'CM', 'TD'
+  taux               FloatField                          # ex: 500.0 (MRU/h)
+  date_debut         DateField                           # date d'effet
+Contrainte : unique_together = ('type', 'date_debut')
+Methode classmethod : get_taux_at(type_seance, date) -&gt; float
+</code></pre>
+<h4 id="ramadan">Ramadan</h4>
+<pre><code>Table DB : parametres_ramadan
+Champs :
+  debut              DateField
+  fin                DateField
+</code></pre>
+<h4 id="institution">Institution</h4>
+<pre><code>Table DB : institution
+Champs :
+  acronyme           CharField(20)    unique=True
+  nom                CharField(200)
+</code></pre>
+<hr>
+<h3 id="23-app-departement-1-modele">2.3 App <code>departement</code> (1 modele)</h3>
+<h4 id="departement">Departement</h4>
+<pre><code>Table DB : departement
+Champs :
+  nom                CharField(200)
+  description        TextField        blank=True
+  niveau             FK(Niveau)       SET_NULL, null=True
+  decalage           IntegerField     default=0
+  annee_universitaire CharField(20)   blank=True
+  code               CharField(20)    blank=True
+</code></pre>
+<hr>
+<h3 id="24-app-banque-1-modele">2.4 App <code>banque</code> (1 modele)</h3>
+<h4 id="banque">Banque</h4>
+<pre><code>Table DB : banque
+Champs :
+  nom                CharField(200)   unique=True
+  description        TextField        blank=True
+</code></pre>
+<hr>
+<h3 id="25-app-salle-1-modele">2.5 App <code>salle</code> (1 modele)</h3>
+<h4 id="salle">Salle</h4>
+<pre><code>Table DB : salle
+Champs :
+  nom                CharField(100)   unique=True
+  capacite           IntegerField     default=0
+</code></pre>
+<hr>
+<h3 id="26-app-em-1-modele">2.6 App <code>em</code> (1 modele)</h3>
+<h4 id="em-element-de-module---planification">EM (Element de Module - planification)</h4>
+<pre><code>Table DB : em
+Champs :
+  code_em            CharField(50)
+  intitule           CharField(200)
+  CM                 IntegerField     default=0           # Heures CM prevues
+  TD                 IntegerField     default=0           # Heures TD prevues
+  TP                 IntegerField     default=0           # Heures TP prevues
+  PR                 IntegerField     default=0           # Heures PR prevues
+  departement        FK(Departement)  CASCADE
+  semestre           FK(Semestre)     CASCADE
+Contrainte : unique_together = ('code_em', 'departement')
+Note : Represente un cours pour la PLANIFICATION des emplois du temps.
+       Pas de credits, coefficients, ni ponderations d'evaluation.
+</code></pre>
+<hr>
+<h3 id="27-app-prof-1-modele">2.7 App <code>prof</code> (1 modele)</h3>
+<h4 id="prof">Prof</h4>
+<pre><code>Table DB : prof
+Champs :
+  NNI                BigIntegerField  unique=True          # Numero national d'identification
+  nom                CharField(200)
+  telephone          PositiveIntegerField null=True
+  email              EmailField       blank=True
+  genre              CharField(1)     choices=['M','F']
+  type               CharField(20)    choices=['vacataire','permanent','contractuel']
+  niveau_de_diplome  CharField(20)    choices=['Master','Ingenieur','Doctorat','Autre']
+  description_dernier_diplome CharField(200) blank=True
+  banque             FK(Banque)       CASCADE, null=True
+  numero_de_compte   CharField(100)   blank=True
+  cv                 FileField        upload_to='cvs/'
+  diplome            FileField        upload_to='diplomes/'
+  grade              CharField(100)   choices=['Professeur','MCF-A','MCF-B','MA-A','MA-B','Assistant','Vacataire','Ingenieur','Autre']
+  charge             PositiveIntegerField null=True        # Charge CM annuelle
+  decharge           PositiveIntegerField default=0
+</code></pre>
+<hr>
+<h3 id="28-app-emplois-2-modeles">2.8 App <code>emplois</code> (2 modeles)</h3>
+<h4 id="emplois">Emplois</h4>
+<pre><code>Table DB : emplois_emplois
+Champs legacy (CharField pour compatibilite GesAFPED) :
+  id_prof, id_em, type_seance, jour, creneau, id_salle, id_departement, id_semestre
+  annee_universitaire, type_semestre, taux_paiement
+ForeignKeys (nouveaux champs normalises) :
+  prof               FK(Prof)         SET_NULL
+  em                 FK(EM)           SET_NULL
+  departement        FK(Departement)  SET_NULL
+  salle              FK(Salle)        SET_NULL
+  semestre           FK(Semestre)     SET_NULL
+  creneau_fk         FK(Creneau)      SET_NULL
+Index : (annee_universitaire, departement, semestre), (annee_universitaire, jour, creneau_fk)
+Methode save() : Synchronise les CharField legacy depuis les FK + auto-populate taux_paiement
+</code></pre>
+<h4 id="emploisarchive">EmploisArchive</h4>
+<pre><code>Table DB : emplois_emploisarchive
+Structure identique a Emplois sans index.
+Sert a conserver un snapshot des emplois avant generation du suivi.
+</code></pre>
+<hr>
+<h3 id="29-app-suivi-3-modeles">2.9 App <code>suivi</code> (3 modeles)</h3>
+<h4 id="suivie">Suivie</h4>
+<pre><code>Table DB : suivi_suivie
+Meme pattern dual CharField + FK que Emplois.
+Champs supplementaires :
+  numero_semaine     IntegerField     default=0
+  commentaire        TextField        blank=True
+  date_suivie        DateField        null=True
+  duree_creneau      FloatField       default=1.5
+  taux_paiement      FloatField       default=0.0
+</code></pre>
+<h4 id="suiviepointage">SuiviePointage</h4>
+<pre><code>Table DB : suivi_suivie_pointage
+Variante de Suivie pour le pointage multi-departement.
+id_departement peut contenir plusieurs IDs (CharField max_length=200).
+</code></pre>
+<h4 id="chargeinstitution">ChargeInstitution</h4>
+<pre><code>Table DB : suivi_chargeinstitution
+Champs :
+  institution        FK(Institution)  CASCADE
+  prof               FK(Prof)         CASCADE
+  charge_cm          IntegerField     default=0
+  annee_universitaire CharField(20)
+Contrainte : unique_together = ('prof', 'institution', 'annee_universitaire')
+</code></pre>
+<hr>
+<h3 id="210-app-vacation-2-modeles">2.10 App <code>vacation</code> (2 modeles)</h3>
+<h4 id="vacation">Vacation</h4>
+<pre><code>Table DB : vacation_vacation
+Champs :
+  prof               FK(Prof)         CASCADE
+  departements       M2M(Departement) blank=True
+  em                 FK(EM)           SET_NULL, null=True
+  type               FK(Seance)       SET_NULL, null=True
+  duree              FloatField       default=1.5
+  date               DateField
+  annee_univ         CharField(20)
+  taux_paiement      FloatField       default=0.0
+Propriete : montant = duree * taux_paiement
+</code></pre>
+<h4 id="surveillance">Surveillance</h4>
+<pre><code>Table DB : vacation_surveillance
+Champs :
+  prof               FK(Prof)         CASCADE
+  departement        FK(Departement)  CASCADE
+  duree              FloatField       default=2.0
+  date               DateField
+  annee_univ         CharField(20)
+</code></pre>
+<hr>
+<h3 id="211-app-absence-3-modeles">2.11 App <code>absence</code> (3 modeles)</h3>
+<h4 id="etudiant">Etudiant</h4>
+<pre><code>Table DB : absence_etudiant
+Champs :
+  matricule          CharField(50)    unique=True
+  nom                CharField(200)
+  departement        FK(Departement)  CASCADE
+  genre              CharField(1)     choices=['M','F']
+Note : Modele MINIMALISTE, utilise uniquement pour le tracking des absences.
+       Pas de prenom, date de naissance, filiere, email, telephone, etc.
+</code></pre>
+<h4 id="presence">Presence</h4>
+<pre><code>Table DB : absence_presence
+Champs :
+  suivi              FK(Suivie)       CASCADE
+  etudiant           FK(Etudiant)     CASCADE
+  statut             IntegerField     choices=[0=Present, 1=Absent, 2=Sanctionne, 3=Justifiee]
+  commentaire        TextField        blank=True
+  justificatif       FileField        upload_to='justificatifs/'
+  date_modification  DateTimeField    auto_now=True
+Contrainte : unique_together = ('suivi', 'etudiant')
+</code></pre>
+<h4 id="seuilabsence">SeuilAbsence</h4>
+<pre><code>Table DB : absence_seuilabsence
+Champs :
+  seuil              IntegerField     default=3           # Seuil d'alerte
+Pattern : Singleton (pk=1 toujours)
+</code></pre>
+<hr>
+<h3 id="212-app-avancement-0-modeles">2.12 App <code>avancement</code> (0 modeles)</h3>
+<p>Pas de modeles propres. Calcule l'avancement a partir des donnees <code>Suivie</code>, <code>Emplois</code>, <code>Vacation</code>.</p>
+<hr>
+<h3 id="recapitulatif-des-modeles">Recapitulatif des Modeles</h3>
+<table>
+<thead>
+<tr>
+<th>App</th>
+<th>Nb Modeles</th>
+<th>Modeles</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>authentication</td>
+<td>6</td>
+<td>CustomUser, Module, Action, ModuleAction, RoleDefault, UserPermission, UserContexte</td>
+</tr>
+<tr>
+<td>parametres</td>
+<td>8</td>
+<td>Year, Niveau, Semestre, Seance, Creneau, Jour, Semaine, Paiement, Ramadan, Institution</td>
+</tr>
+<tr>
+<td>departement</td>
+<td>1</td>
+<td>Departement</td>
+</tr>
+<tr>
+<td>banque</td>
+<td>1</td>
+<td>Banque</td>
+</tr>
+<tr>
+<td>salle</td>
+<td>1</td>
+<td>Salle</td>
+</tr>
+<tr>
+<td>em</td>
+<td>1</td>
+<td>EM</td>
+</tr>
+<tr>
+<td>prof</td>
+<td>1</td>
+<td>Prof</td>
+</tr>
+<tr>
+<td>emplois</td>
+<td>2</td>
+<td>Emplois, EmploisArchive</td>
+</tr>
+<tr>
+<td>suivi</td>
+<td>3</td>
+<td>Suivie, SuiviePointage, ChargeInstitution</td>
+</tr>
+<tr>
+<td>vacation</td>
+<td>2</td>
+<td>Vacation, Surveillance</td>
+</tr>
+<tr>
+<td>absence</td>
+<td>3</td>
+<td>Etudiant, Presence, SeuilAbsence</td>
+</tr>
+<tr>
+<td>avancement</td>
+<td>0</td>
+<td>(calculs uniquement)</td>
+</tr>
+<tr>
+<td><strong>TOTAL</strong></td>
+<td><strong>29</strong></td>
+<td></td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="3-inventaire-des-vues">3. Inventaire des Vues</h2>
+<h3 id="31-app-authentication">3.1 App <code>authentication</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Endpoint</th>
+<th>Permissions</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>LoginView</code></td>
+<td>GenericAPIView</td>
+<td>POST /auth/login/</td>
+<td>AllowAny + LoginRateThrottle</td>
+<td>Login avec JWT cookies + axes</td>
+</tr>
+<tr>
+<td><code>LogoutView</code></td>
+<td>GenericAPIView</td>
+<td>POST /auth/logout/</td>
+<td>IsAuthenticated</td>
+<td>Blacklist refresh + clear cookies</td>
+</tr>
+<tr>
+<td><code>CookieTokenRefreshView</code></td>
+<td>TokenRefreshView</td>
+<td>POST /auth/token/refresh/</td>
+<td>AllowAny</td>
+<td>Refresh JWT depuis cookie</td>
+</tr>
+<tr>
+<td><code>ProfilView</code></td>
+<td>RetrieveUpdateAPIView</td>
+<td>GET/PATCH /auth/profil/</td>
+<td>IsAuthenticated</td>
+<td>Profil utilisateur + avatar</td>
+</tr>
+<tr>
+<td><code>ChangePasswordView</code></td>
+<td>UpdateAPIView</td>
+<td>POST /auth/change-password/</td>
+<td>IsAuthenticated + SensitiveThrottle</td>
+<td>Changement mot de passe</td>
+</tr>
+<tr>
+<td><code>ContexteView</code></td>
+<td>GenericAPIView</td>
+<td>GET/PATCH /auth/contexte/</td>
+<td>IsAuthenticated</td>
+<td>Annee/semestre actif</td>
+</tr>
+<tr>
+<td><code>MeView</code></td>
+<td>GenericAPIView</td>
+<td>GET /auth/me/</td>
+<td>IsAuthenticated</td>
+<td>Utilisateur + contexte courant</td>
+</tr>
+<tr>
+<td><code>MesModulesView</code></td>
+<td>GenericAPIView</td>
+<td>GET /auth/mes-modules/</td>
+<td>IsAuthenticated</td>
+<td>Liste modules accessibles</td>
+</tr>
+<tr>
+<td><code>UserViewSet</code></td>
+<td>ModelViewSet</td>
+<td>/auth/users/</td>
+<td>IsAdmin</td>
+<td>CRUD utilisateurs + toggle_active + unblock</td>
+</tr>
+<tr>
+<td><code>LockedAttemptsView</code></td>
+<td>GenericAPIView</td>
+<td>GET /auth/locked-attempts/</td>
+<td>IsAdminOrIT</td>
+<td>IPs bloquees</td>
+</tr>
+<tr>
+<td><code>ModuleViewSet</code></td>
+<td>ReadOnlyModelViewSet</td>
+<td>/auth/rbac/modules/</td>
+<td>IsAdmin</td>
+<td>Liste modules RBAC</td>
+</tr>
+<tr>
+<td><code>RBACMatrixView</code></td>
+<td>APIView</td>
+<td>GET /auth/rbac/matrix/</td>
+<td>IsAdmin</td>
+<td>Matrice role x action</td>
+</tr>
+<tr>
+<td><code>TogglePermissionView</code></td>
+<td>APIView</td>
+<td>POST /auth/rbac/toggle/</td>
+<td>IsAdmin</td>
+<td>Toggle permission</td>
+</tr>
+<tr>
+<td><code>UserPermissionsView</code></td>
+<td>ListAPIView</td>
+<td>GET /auth/rbac/user/{id}/permissions/</td>
+<td>IsAdmin</td>
+<td>Permissions d'un user</td>
+</tr>
+<tr>
+<td><code>UsersMatrixView</code></td>
+<td>APIView</td>
+<td>GET /auth/rbac/users-matrix/</td>
+<td>IsAdmin</td>
+<td>Matrice user x action paginee</td>
+</tr>
+<tr>
+<td><code>UserToggleView</code></td>
+<td>APIView</td>
+<td>POST /auth/rbac/user-toggle/</td>
+<td>IsAdmin + AdminActionThrottle</td>
+<td>Toggle permission user</td>
+</tr>
+<tr>
+<td><code>RoleToggleView</code></td>
+<td>APIView</td>
+<td>POST /auth/rbac/role-toggle/</td>
+<td>IsAdmin</td>
+<td>Toggle permission role</td>
+</tr>
+</tbody></table>
+<p><strong>Service RBAC</strong> (<code>services/rbac_service.py</code>) :</p>
+<ul>
+<li><code>get_role_matrix()</code> : Matrice complete roles x permissions</li>
+<li><code>get_users_matrix(page, size, search)</code> : Matrice utilisateurs paginee</li>
+<li><code>get_user_modules(user)</code> : Codes modules accessibles</li>
+<li><code>toggle_user_permission(user, ma, state)</code> : Appliquer on/off/role</li>
+<li><code>toggle_role_permission(role, ma)</code> : Toggle defaut role</li>
+</ul>
+<hr>
+<h3 id="32-app-parametres">3.2 App <code>parametres</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>YearViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td><code>all()</code> : AllowAny, cache 5min</td>
+</tr>
+<tr>
+<td><code>NiveauViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>SemestreViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>SeanceViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>CreneauViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>JourViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>SemaineViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td><code>generer()</code> : generation semaines</td>
+</tr>
+<tr>
+<td><code>PaiementViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td><code>taux_actuel()</code> : taux courants</td>
+</tr>
+<tr>
+<td><code>RamadanViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>InstitutionViewSet</code></td>
+<td>ModelViewSet</td>
+<td>IsAdmin</td>
+<td>NoPagination</td>
+</tr>
+</tbody></table>
+<p>Tous utilisent <code>AuditMixin</code> + <code>SelectAllMixin</code>.</p>
+<hr>
+<h3 id="33-app-departement">3.3 App <code>departement</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Filtres</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DepartementViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'departements'</td>
+<td>annee_universitaire, niveau / nom, code</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="34-app-banque">3.4 App <code>banque</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Filtres</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>BanqueViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'banques'</td>
+<td>nom, description</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="35-app-salle">3.5 App <code>salle</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Filtres</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SalleViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'salles'</td>
+<td>nom / nom, capacite</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="36-app-em">3.6 App <code>em</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Filtres</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EMViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'em'</td>
+<td>departement, semestre / code_em, intitule</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="37-app-prof">3.7 App <code>prof</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Filtres</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ProfViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'profs'</td>
+<td>type, genre, grade, diplome, banque / nom, email, NNI</td>
+<td><code>stats()</code> : statistiques aggregees (type, genre, diplomes)</td>
+</tr>
+</tbody></table>
+<p>Serializers differencies : <code>ProfListSerializer</code> (leger) pour list, <code>ProfSerializer</code> (complet) pour detail.</p>
+<hr>
+<h3 id="38-app-emplois">3.8 App <code>emplois</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EmploisViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'emplois'</td>
+<td><code>grille()</code> : grille emploi par jour/creneau</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>check-dispo()</code> : verification disponibilite prof/salle/dept</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>grille-all()</code> : grille tous departements</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>bulk()</code> : creation en masse (207 Multi-Status)</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>pdf()</code> : generation PDF emploi du temps</td>
+</tr>
+</tbody></table>
+<p><strong>Service</strong> (<code>services/emplois_service.py</code>) :</p>
+<ul>
+<li><code>archiver_emplois()</code> : Archive avant generation suivi</li>
+<li><code>restaurer_depuis_archive()</code> : Restauration si suppression suivi</li>
+</ul>
+<hr>
+<h3 id="39-app-suivi">3.9 App <code>suivi</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SuivieViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'suivi'</td>
+<td><code>par-semaine()</code> : suppression LIFO par semaine</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>semaines-generees()</code> : liste semaines generees</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>ajouter()</code> : generation suivi depuis emplois</td>
+</tr>
+<tr>
+<td><code>SuiviePointageViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'suivi'</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>ChargeInstitutionViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'suivi'</td>
+<td>-</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="310-app-vacation">3.10 App <code>vacation</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>VacationViewSet</code></td>
+<td>ModelViewSet</td>
+<td>(vacation)</td>
+<td><code>etat()</code> : etat des vacations</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>fiches()</code> : fiches mensuelles paiement</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>pdf-fiches()</code> : PDF fiches paiement</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>attestation()</code> : attestation de travail</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>pdf-attestation()</code> : PDF attestation</td>
+</tr>
+<tr>
+<td><code>SurveillanceViewSet</code></td>
+<td>ModelViewSet</td>
+<td>(vacation)</td>
+<td>-</td>
+</tr>
+</tbody></table>
+<p><strong>Logique metier</strong> : Calcul paiement mensuel combinant Suivie (cours effectues) + Vacation + Surveillance. Conversion TD/TP/PR en equivalent CM (ratio 2/3).</p>
+<hr>
+<h3 id="311-app-absence">3.11 App <code>absence</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Actions Custom</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EtudiantViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'absences'</td>
+<td><code>importer()</code> : import Excel (matricule, nom, genre)</td>
+</tr>
+<tr>
+<td><code>PresenceViewSet</code></td>
+<td>ModelViewSet</td>
+<td>'absences'</td>
+<td><code>bulk()</code> : mise a jour en masse</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>upload-justificatif()</code> : upload justificatif absence</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>rapport()</code> : statistiques absences par etudiant</td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td></td>
+<td><code>par-etudiant()</code> : historique presences d'un etudiant</td>
+</tr>
+<tr>
+<td><code>SeuilAbsenceView</code></td>
+<td>RetrieveUpdateAPIView</td>
+<td>'absences'</td>
+<td>Singleton (pk=1)</td>
+</tr>
+</tbody></table>
+<hr>
+<h3 id="312-app-avancement">3.12 App <code>avancement</code></h3>
+<table>
+<thead>
+<tr>
+<th>Vue</th>
+<th>Type</th>
+<th>Module RBAC</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>AvancementEMView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Avancement par EM (plan vs realise)</td>
+</tr>
+<tr>
+<td><code>AvancementProfsView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Avancement par prof</td>
+</tr>
+<tr>
+<td><code>AvancementProfDetailView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Detail avancement d'un prof</td>
+</tr>
+<tr>
+<td><code>ChargeProfsPermanantsView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Charge des permanents</td>
+</tr>
+<tr>
+<td><code>SuiviProfView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Suivi presence prof</td>
+</tr>
+<tr>
+<td><code>StatistiquesProfsView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Stats profs</td>
+</tr>
+<tr>
+<td><code>StatistiquesSemestresView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Stats semestres</td>
+</tr>
+<tr>
+<td><code>StatistiquesVacationsView</code></td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Stats vacations</td>
+</tr>
+<tr>
+<td>+ 6 vues PDF</td>
+<td>APIView</td>
+<td>'avancement'</td>
+<td>Versions PDF des rapports ci-dessus</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="4-inventaire-des-serializers">4. Inventaire des Serializers</h2>
+<h3 id="41-authentication">4.1 Authentication</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Modele</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SIGATokenObtainPairSerializer</code></td>
+<td>-</td>
+<td>JWT login avec payload custom + contexte</td>
+</tr>
+<tr>
+<td><code>UserContexteSerializer</code></td>
+<td>UserContexte</td>
+<td>annee_universitaire, semestre</td>
+</tr>
+<tr>
+<td><code>UserSerializer</code></td>
+<td>CustomUser</td>
+<td>id, username, name, email, role, avatar, is_active</td>
+</tr>
+<tr>
+<td><code>UserCreateSerializer</code></td>
+<td>CustomUser</td>
+<td>Avec password + confirmation</td>
+</tr>
+<tr>
+<td><code>UserUpdateSerializer</code></td>
+<td>CustomUser</td>
+<td>name, email, role, avatar</td>
+</tr>
+<tr>
+<td><code>ChangePasswordSerializer</code></td>
+<td>-</td>
+<td>old_password, new_password</td>
+</tr>
+<tr>
+<td><code>ModuleSerializer</code></td>
+<td>Module</td>
+<td>code, nom, icone, ordre + actions imbriquees</td>
+</tr>
+<tr>
+<td><code>ActionSerializer</code></td>
+<td>Action</td>
+<td>code, nom, icone</td>
+</tr>
+<tr>
+<td><code>UserToggleSerializer</code></td>
+<td>-</td>
+<td>user_id, module_action_id, state (on/off/role)</td>
+</tr>
+<tr>
+<td><code>RoleToggleSerializer</code></td>
+<td>-</td>
+<td>role, module_action_id</td>
+</tr>
+</tbody></table>
+<h3 id="42-parametres">4.2 Parametres</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Modele</th>
+<th>Champs Particuliers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>YearSerializer</code></td>
+<td>Year</td>
+<td>annee</td>
+</tr>
+<tr>
+<td><code>NiveauSerializer</code></td>
+<td>Niveau</td>
+<td>niveau</td>
+</tr>
+<tr>
+<td><code>SemestreSerializer</code></td>
+<td>Semestre</td>
+<td>+ niveau_nom (read-only)</td>
+</tr>
+<tr>
+<td><code>SeanceSerializer</code></td>
+<td>Seance</td>
+<td>type_seance</td>
+</tr>
+<tr>
+<td><code>CreneauSerializer</code></td>
+<td>Creneau</td>
+<td>tous les champs</td>
+</tr>
+<tr>
+<td><code>JourSerializer</code></td>
+<td>Jour</td>
+<td>jour</td>
+</tr>
+<tr>
+<td><code>SemaineSerializer</code></td>
+<td>Semaine</td>
+<td>tous les champs</td>
+</tr>
+<tr>
+<td><code>PaiementSerializer</code></td>
+<td>Paiement</td>
+<td>type, taux, date_debut</td>
+</tr>
+<tr>
+<td><code>RamadanSerializer</code></td>
+<td>Ramadan</td>
+<td>debut, fin</td>
+</tr>
+<tr>
+<td><code>InstitutionSerializer</code></td>
+<td>Institution</td>
+<td>acronyme, nom</td>
+</tr>
+<tr>
+<td><code>GenerateSemainesSerializer</code></td>
+<td>-</td>
+<td>Input : date_debut, date_fin, type_semestre</td>
+</tr>
+</tbody></table>
+<h3 id="43-departement--banque--salle">4.3 Departement / Banque / Salle</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Champs Particuliers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>DepartementSerializer</code></td>
+<td>+ niveau_nom (read-only)</td>
+</tr>
+<tr>
+<td><code>BanqueSerializer</code></td>
+<td>tous les champs</td>
+</tr>
+<tr>
+<td><code>SalleSerializer</code></td>
+<td>tous les champs</td>
+</tr>
+</tbody></table>
+<h3 id="44-em">4.4 EM</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Champs Particuliers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EMSerializer</code></td>
+<td>+ departement_nom, semestre_nom (read-only)</td>
+</tr>
+</tbody></table>
+<h3 id="45-prof">4.5 Prof</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Usage</th>
+<th>Champs</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ProfSerializer</code></td>
+<td>Detail/Update</td>
+<td>Tous + banque_nom</td>
+</tr>
+<tr>
+<td><code>ProfListSerializer</code></td>
+<td>Liste</td>
+<td>Leger (id, NNI, nom, type, genre, grade, banque, email, telephone, cv, diplome)</td>
+</tr>
+<tr>
+<td><code>ProfStatsSerializer</code></td>
+<td>Stats</td>
+<td>Statistiques aggregees</td>
+</tr>
+</tbody></table>
+<h3 id="46-emplois">4.6 Emplois</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Usage</th>
+<th>Champs Particuliers</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EmploisSerializer</code></td>
+<td>Liste</td>
+<td>+ prof_nom, em_code, em_intitule, dept_nom, salle_nom, semestre_nom, creneau_label</td>
+</tr>
+<tr>
+<td><code>EmploisCreateSerializer</code></td>
+<td>Creation</td>
+<td>Exclut les champs legacy (id_prof, id_em...)</td>
+</tr>
+<tr>
+<td><code>DisponibiliteCheckSerializer</code></td>
+<td>Input</td>
+<td>annee_universitaire, type_semestre, jour, creneau, departement, prof, salle</td>
+</tr>
+</tbody></table>
+<h3 id="47-suivi">4.7 Suivi</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SuivieSerializer</code></td>
+<td>Liste avec type_seance_label</td>
+</tr>
+<tr>
+<td><code>SuivieCreateSerializer</code></td>
+<td>Creation sans champs legacy</td>
+</tr>
+<tr>
+<td><code>SuiviePointageSerializer</code></td>
+<td>+ labels resolus via SerializerMethodField</td>
+</tr>
+<tr>
+<td><code>ChargeInstitutionSerializer</code></td>
+<td>+ institution_nom</td>
+</tr>
+</tbody></table>
+<h3 id="48-vacation">4.8 Vacation</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>VacationSerializer</code></td>
+<td>+ dept_noms (M2M), montant (calcule)</td>
+</tr>
+<tr>
+<td><code>VacationCreateSerializer</code></td>
+<td>Exclut taux_paiement</td>
+</tr>
+<tr>
+<td><code>SurveillanceSerializer</code></td>
+<td>+ prof_nom, dept_nom</td>
+</tr>
+<tr>
+<td><code>EtatVacationSerializer</code></td>
+<td>Input : annee, mois</td>
+</tr>
+<tr>
+<td><code>AttestationSerializer</code></td>
+<td>Input pour attestation</td>
+</tr>
+</tbody></table>
+<h3 id="49-absence">4.9 Absence</h3>
+<table>
+<thead>
+<tr>
+<th>Serializer</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>EtudiantSerializer</code></td>
+<td>+ departement_nom</td>
+</tr>
+<tr>
+<td><code>PresenceSerializer</code></td>
+<td>+ etudiant_nom, matricule, statut_label</td>
+</tr>
+<tr>
+<td><code>PresenceBulkSerializer</code></td>
+<td>Liste pour mise a jour en masse</td>
+</tr>
+<tr>
+<td><code>SeuilAbsenceSerializer</code></td>
+<td>seuil (int)</td>
+</tr>
+<tr>
+<td><code>ImportEtudiantsSerializer</code></td>
+<td>Input : fichier Excel</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="5-infrastructure-core">5. Infrastructure Core</h2>
+<h3 id="51-systeme-rbac-corepermissionspy">5.1 Systeme RBAC (<code>core/permissions.py</code>)</h3>
+<pre><code>Fonctionnement :
+1. Chaque ViewSet declare `required_module = 'code_module'`
+2. RBACPermission mappe l'action DRF vers un code action :
+   list/retrieve -&gt; 'voir'
+   create/update/partial_update -&gt; 'modifier'
+   destroy -&gt; 'supprimer'
+   export -&gt; 'exporter'
+3. Admin (role='admin' ou is_superuser) -&gt; acces total (bypass)
+4. Resolution :
+   a. UserPermission explicite pour cet utilisateur ? -&gt; utilise allowed
+   b. Sinon, RoleDefault pour ce role ? -&gt; utilise allowed
+   c. Sinon -&gt; refuse
+5. Cache versionne (Redis ou LocMem) avec TTL 5 min
+</code></pre>
+<h3 id="52-auditmixin-coremixinspy">5.2 AuditMixin (<code>core/mixins.py</code>)</h3>
+<pre><code class="hljs python"><span class="hljs-comment"># Log CREATE/UPDATE/DELETE vers le logger Python (fichier logs/siga.log)</span>
+<span class="hljs-comment"># PAS de table de base de donnees d'audit actuellement</span>
+</code></pre>
+<h3 id="53-selectallmixin-coremixinspy">5.3 SelectAllMixin (<code>core/mixins.py</code>)</h3>
+<pre><code class="hljs python"><span class="hljs-comment"># Ajoute une action GET /resource/all/ sans pagination</span>
+<span class="hljs-comment"># Utile pour les listes de reference (departements, salles, etc.)</span>
+</code></pre>
+<h3 id="54-throttles-corethrottlespy">5.4 Throttles (<code>core/throttles.py</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Classe</th>
+<th>Limite</th>
+<th>Scope</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>LoginRateThrottle</code></td>
+<td>5 req / 15 min</td>
+<td>Par IP</td>
+</tr>
+<tr>
+<td><code>SensitiveEndpointThrottle</code></td>
+<td>5 req / 1 heure</td>
+<td>Par utilisateur</td>
+</tr>
+<tr>
+<td><code>AdminActionThrottle</code></td>
+<td>60 req / 1 min</td>
+<td>Par utilisateur</td>
+</tr>
+</tbody></table>
+<h3 id="55-pagination-corepaginationpy">5.5 Pagination (<code>core/pagination.py</code>)</h3>
+<ul>
+<li><code>StandardPagination</code> : 10 elements par page (configurable via <code>page_size</code>)</li>
+<li><code>NoPagination</code> : Pour les petits datasets (institutions, etc.)</li>
+</ul>
+<hr>
+<h2 id="6-cartographie-existant-vs-scolarite-lmd">6. Cartographie Existant vs Scolarite LMD</h2>
+<h3 id="61-ce-qui-peut-etre-reutilise-tel-quel">6.1 Ce qui peut etre reutilise TEL QUEL</h3>
+<table>
+<thead>
+<tr>
+<th>Existant</th>
+<th>Reutilisation pour Scolarite</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>CustomUser</code></td>
+<td>Utilisateurs staff (admin, scolarite, DE, etc.)</td>
+</tr>
+<tr>
+<td><code>Departement</code></td>
+<td>Parent des filieres LMD</td>
+</tr>
+<tr>
+<td><code>Salle</code></td>
+<td>Salles d'examen</td>
+</tr>
+<tr>
+<td><code>Niveau</code></td>
+<td>Niveaux academiques (Licence, Master)</td>
+</tr>
+<tr>
+<td><code>Prof</code></td>
+<td>Enseignants LMD, tuteurs academiques de stage</td>
+</tr>
+<tr>
+<td><code>Institution</code></td>
+<td>Hierarchie institutionnelle</td>
+</tr>
+<tr>
+<td><code>Banque</code></td>
+<td>Paiement des vacataires (inchange)</td>
+</tr>
+<tr>
+<td>Systeme RBAC complet</td>
+<td>Permissions pour les nouveaux modules scolarite</td>
+</tr>
+<tr>
+<td>JWT Authentication</td>
+<td>Authentification identique</td>
+</tr>
+<tr>
+<td>AuditMixin</td>
+<td>Logging des actions scolarite</td>
+</tr>
+<tr>
+<td>SelectAllMixin</td>
+<td>Listes de reference</td>
+</tr>
+<tr>
+<td>PDF Generation (pdfkit)</td>
+<td>PV, releves, attestations, diplomes</td>
+</tr>
+<tr>
+<td>Excel Import (openpyxl)</td>
+<td>Import etudiants, notes</td>
+</tr>
+</tbody></table>
+<h3 id="62-ce-qui-doit-etre-etendu-ajout-de-champs">6.2 Ce qui DOIT etre etendu (ajout de champs)</h3>
+<table>
+<thead>
+<tr>
+<th>Modele</th>
+<th>Champs a Ajouter</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Year</code></td>
+<td><code>date_debut</code>, <code>date_fin</code>, <code>est_active</code>, <code>est_cloturee</code></td>
+<td><strong>NUL</strong> - Tous nullable/defaut. Le code existant ne lit que <code>annee</code>.</td>
+</tr>
+<tr>
+<td><code>ROLE_CHOICES</code></td>
+<td><code>'responsable_filiere'</code>, <code>'jury_president'</code></td>
+<td><strong>NUL</strong> - Ajout de choix. Les roles existants sont inchanges.</td>
+</tr>
+<tr>
+<td><code>UserPermission</code></td>
+<td><code>filiere</code> FK (nullable)</td>
+<td><strong>NUL</strong> - Champ additionnel optionnel pour scope par filiere.</td>
+</tr>
+</tbody></table>
+<h3 id="63-ce-qui-ne-doit-pas-etre-modifie-zones-de-conflit">6.3 Ce qui NE DOIT PAS etre modifie (zones de conflit)</h3>
+<table>
+<thead>
+<tr>
+<th>Modele</th>
+<th>Pourquoi ne pas modifier</th>
+<th>Alternative LMD</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Semestre</code> (parametres)</td>
+<td>Utilise dans Emplois, Suivie, SuiviePointage avec synchronisation legacy CharField. Represente un semestre de PLANIFICATION (Pair/Impair), pas un semestre academique.</td>
+<td>Nouveau modele <code>SemestreLMD</code> avec credits, filiere FK</td>
+</tr>
+<tr>
+<td><code>EM</code> (em)</td>
+<td>Utilise dans Emplois, Suivie, Vacation, Avancement. Represente un cours pour la planification horaire (CM/TD/TP heures). Pas de credits ni coefficients.</td>
+<td>Nouveaux modeles <code>ModuleLMD</code> + <code>ElementModule</code> avec bridge FK optionnel vers EM</td>
+</tr>
+<tr>
+<td><code>Etudiant</code> (absence)</td>
+<td>Modele minimaliste (4 champs) couple au systeme d'absence. Pas de prenom, date de naissance, filiere, etc.</td>
+<td>Nouveau modele <code>EtudiantLMD</code> complet avec bridge FK optionnel</td>
+</tr>
+</tbody></table>
+<h3 id="64-ce-qui-est-entierement-nouveau">6.4 Ce qui est ENTIEREMENT NOUVEAU</h3>
+<table>
+<thead>
+<tr>
+<th>Domaine</th>
+<th>Modeles a creer</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Structure LMD</strong></td>
+<td>Filiere, SemestreLMD, ModuleLMD, ElementModule, EtudiantLMD</td>
+</tr>
+<tr>
+<td><strong>Inscriptions</strong></td>
+<td>Preinscription, InscriptionAdministrative, InscriptionPedagogique, InscriptionElement</td>
+</tr>
+<tr>
+<td><strong>Evaluations</strong></td>
+<td>SessionEvaluation, Note, Deliberation, ParametreJury, RachatNote</td>
+</tr>
+<tr>
+<td><strong>Stages</strong></td>
+<td>ConventionStage, EvaluationStage, DerogationMedicale</td>
+</tr>
+<tr>
+<td><strong>Documents</strong></td>
+<td>DocumentOfficiel, NumeroSerieConfig, RegistreDiplome</td>
+</tr>
+<tr>
+<td><strong>Notifications</strong></td>
+<td>Notification</td>
+</tr>
+<tr>
+<td><strong>Audit</strong></td>
+<td>AuditLog (table DB, remplace le logging fichier pour les actions critiques)</td>
+</tr>
+</tbody></table>
+<hr>
+<h2 id="7-plan-damelioration-et-dintegration">7. Plan d'Amelioration et d'Integration</h2>
+<h3 id="71-nouvelles-applications-django-a-creer">7.1 Nouvelles Applications Django a Creer</h3>
+<pre><code>apps/
+  scolarite/           # Structure LMD : Filiere, SemestreLMD, ModuleLMD, ElementModule, EtudiantLMD
+  inscriptions/        # Preinscription, InscriptionAdmin, InscriptionPed, InscriptionElement
+  evaluations/         # SessionEvaluation, Note, MoteurLMD, Deliberation, RachatNote
+  stages/              # ConventionStage, EvaluationStage, DerogationMedicale
+  documents/           # DocumentOfficiel, NumeroSerieConfig, RegistreDiplome
+  notifications/       # Notification
+</code></pre>
+<h3 id="72-nouveaux-endpoints-api">7.2 Nouveaux Endpoints API</h3>
+<pre><code>/api/v1/scolarite/filieres/              # CRUD Filieres
+/api/v1/scolarite/semestres-lmd/         # CRUD SemestreLMD
+/api/v1/scolarite/modules-lmd/           # CRUD ModuleLMD
+/api/v1/scolarite/elements/              # CRUD ElementModule
+/api/v1/scolarite/etudiants/             # CRUD EtudiantLMD + import Excel
+
+/api/v1/inscriptions/preinscriptions/    # CRUD + endpoint public (AllowAny) pour soumission
+/api/v1/inscriptions/administratives/    # CRUD + generation matricule
+/api/v1/inscriptions/pedagogiques/       # CRUD + gestion dettes automatique
+/api/v1/inscriptions/elements/           # Inscriptions aux elements
+
+/api/v1/evaluations/sessions/            # CRUD SessionEvaluation
+/api/v1/evaluations/notes/               # Saisie notes (bulk, import Excel)
+/api/v1/evaluations/deliberations/       # Workflow deliberation
+/api/v1/evaluations/rachats/             # Rachats jury
+/api/v1/evaluations/calcul/{semestre}/   # Declenchement MoteurLMD
+
+/api/v1/stages/conventions/              # CRUD ConventionStage
+/api/v1/stages/evaluations/              # Evaluation stage (3 notes)
+/api/v1/stages/derogations/              # Derogations medicales
+
+/api/v1/documents/generer/               # Generation documents
+/api/v1/documents/verify/{hash}/         # PUBLIC (AllowAny) - verification QR
+/api/v1/documents/registre/              # Registre diplomes (read-only)
+
+/api/v1/notifications/                   # Liste + mark-as-read
+</code></pre>
+<h3 id="73-nouveaux-modules-rbac-a-enregistrer">7.3 Nouveaux Modules RBAC a Enregistrer</h3>
+<pre><code>scolarite_filieres      -&gt; voir, modifier, supprimer
+scolarite_semestres     -&gt; voir, modifier, supprimer
+scolarite_modules       -&gt; voir, modifier, supprimer
+scolarite_etudiants     -&gt; voir, modifier, supprimer, exporter
+inscriptions            -&gt; voir, modifier, supprimer
+evaluations_notes       -&gt; voir, modifier, exporter
+evaluations_delib       -&gt; voir, modifier
+stages                  -&gt; voir, modifier, supprimer
+documents               -&gt; voir, modifier, exporter
+notifications           -&gt; voir, modifier
+</code></pre>
+<h3 id="74-nouveaux-modeles-detailles">7.4 Nouveaux Modeles Detailles</h3>
+<h4 id="app-scolarite">App <code>scolarite</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">Filiere</span>(models.Model):
+    departement     FK(Departement)           <span class="hljs-comment"># Reutilise le modele existant</span>
+    code            CharField(<span class="hljs-number">20</span>) unique
+    intitule        CharField(<span class="hljs-number">200</span>)
+    type_diplome    CharField(<span class="hljs-number">10</span>) choices=[<span class="hljs-string">'LP'</span>,<span class="hljs-string">'LF'</span>,<span class="hljs-string">'M'</span>,<span class="hljs-string">'ING'</span>]
+    nb_semestres    IntegerField default=<span class="hljs-number">6</span>
+    credits_total   IntegerField default=<span class="hljs-number">180</span>
+    est_active      BooleanField default=<span class="hljs-literal">True</span>
+    responsable     FK(Prof) null=<span class="hljs-literal">True</span>         <span class="hljs-comment"># Reutilise le modele existant</span>
+    date_creation   DateTimeField auto_now_add
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">SemestreLMD</span>(models.Model):
+    filiere         FK(Filiere)
+    numero          IntegerField               <span class="hljs-comment"># 1 a 6</span>
+    credits         IntegerField default=<span class="hljs-number">30</span>    <span class="hljs-comment"># Art. 7 : 30 credits/semestre</span>
+    annee_univ      FK(Year)                   <span class="hljs-comment"># Reutilise parametres.Year</span>
+    semestre_emplois FK(Semestre) null=<span class="hljs-literal">True</span>     <span class="hljs-comment"># Bridge vers planification</span>
+    unique_together = (<span class="hljs-string">'filiere'</span>, <span class="hljs-string">'numero'</span>, <span class="hljs-string">'annee_univ'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">ModuleLMD</span>(models.Model):
+    semestre_lmd    FK(SemestreLMD)
+    code            CharField(<span class="hljs-number">20</span>)
+    intitule        CharField(<span class="hljs-number">200</span>)
+    credits         IntegerField
+    coefficient     DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>)
+    est_stage       BooleanField default=<span class="hljs-literal">False</span>  <span class="hljs-comment"># Module stage S4/S6</span>
+    unique_together = (<span class="hljs-string">'code'</span>, <span class="hljs-string">'semestre_lmd'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">ElementModule</span>(models.Model):
+    module          FK(ModuleLMD)
+    code            CharField(<span class="hljs-number">20</span>)
+    intitule        CharField(<span class="hljs-number">200</span>)
+    coefficient     DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>)
+    volume_cm       IntegerField default=<span class="hljs-number">0</span>
+    volume_td       IntegerField default=<span class="hljs-number">0</span>
+    volume_tp       IntegerField default=<span class="hljs-number">0</span>
+    poids_cc        DecimalField(<span class="hljs-number">5</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">40.00</span>   <span class="hljs-comment"># Pourcentage CC</span>
+    poids_tp        DecimalField(<span class="hljs-number">5</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">0.00</span>
+    poids_exam      DecimalField(<span class="hljs-number">5</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">60.00</span>
+    seuil_eliminatoire DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">6.00</span>  <span class="hljs-comment"># Art. 15 : &lt; 6 = eliminatoire</span>
+    em              FK(EM) null=<span class="hljs-literal">True</span>                    <span class="hljs-comment"># Bridge vers planification</span>
+    responsable     FK(Prof) null=<span class="hljs-literal">True</span>
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">EtudiantLMD</span>(models.Model):
+    matricule       CharField(<span class="hljs-number">50</span>) unique
+    nom             CharField(<span class="hljs-number">200</span>)
+    prenom          CharField(<span class="hljs-number">200</span>)
+    date_naissance  DateField
+    lieu_naissance  CharField(<span class="hljs-number">200</span>)
+    nationalite     CharField(<span class="hljs-number">50</span>) default=<span class="hljs-string">'Mauritanienne'</span>
+    cni             CharField(<span class="hljs-number">20</span>) null=<span class="hljs-literal">True</span>
+    genre           CharField(<span class="hljs-number">1</span>) choices=[<span class="hljs-string">'M'</span>,<span class="hljs-string">'F'</span>]
+    adresse         TextField blank=<span class="hljs-literal">True</span>
+    telephone       CharField(<span class="hljs-number">20</span>) blank=<span class="hljs-literal">True</span>
+    email           EmailField blank=<span class="hljs-literal">True</span>
+    photo           ImageField null=<span class="hljs-literal">True</span>
+    filiere         FK(Filiere)
+    statut          CharField(<span class="hljs-number">20</span>) choices=[<span class="hljs-string">'actif'</span>,<span class="hljs-string">'suspendu'</span>,<span class="hljs-string">'diplome'</span>,<span class="hljs-string">'exclu'</span>]
+    etudiant_legacy FK(absence.Etudiant) null=<span class="hljs-literal">True</span>      <span class="hljs-comment"># Bridge vers absence</span>
+    date_creation   DateTimeField auto_now_add
+</code></pre>
+<h4 id="app-inscriptions">App <code>inscriptions</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">Preinscription</span>(models.Model):
+    annee_univ      FK(Year)
+    filiere         FK(Filiere)
+    nom, prenom     CharField
+    date_naissance  DateField
+    genre           CharField(<span class="hljs-number">1</span>)
+    cni             CharField(<span class="hljs-number">20</span>)
+    telephone       CharField(<span class="hljs-number">20</span>)
+    email           EmailField
+    bac_serie       CharField(<span class="hljs-number">50</span>)
+    bac_annee       IntegerField
+    bac_mention     CharField(<span class="hljs-number">50</span>) blank=<span class="hljs-literal">True</span>
+    bac_moyenne     DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    documents       JSONField default=<span class="hljs-built_in">list</span>           <span class="hljs-comment"># References fichiers uploades</span>
+    statut          CharField choices=[<span class="hljs-string">'soumise'</span>,<span class="hljs-string">'en_examen'</span>,<span class="hljs-string">'acceptee'</span>,<span class="hljs-string">'rejetee'</span>,<span class="hljs-string">'inscrite'</span>]
+    motif_rejet     TextField blank=<span class="hljs-literal">True</span>
+    date_soumission DateTimeField auto_now_add
+    examinee_par    FK(CustomUser) null=<span class="hljs-literal">True</span>
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">InscriptionAdministrative</span>(models.Model):
+    etudiant        FK(EtudiantLMD)
+    annee_univ      FK(Year)
+    filiere         FK(Filiere)
+    niveau          IntegerField                     <span class="hljs-comment"># 1, 2, 3</span>
+    numero_inscription CharField(<span class="hljs-number">50</span>) unique           <span class="hljs-comment"># Auto-genere</span>
+    statut          CharField choices=[<span class="hljs-string">'en_cours'</span>,<span class="hljs-string">'validee'</span>,<span class="hljs-string">'annulee'</span>]
+    montant_frais   DecimalField(<span class="hljs-number">10</span>,<span class="hljs-number">2</span>)
+    est_payee       BooleanField default=<span class="hljs-literal">False</span>
+    date_inscription DateTimeField auto_now_add
+    unique_together = (<span class="hljs-string">'etudiant'</span>, <span class="hljs-string">'annee_univ'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">InscriptionPedagogique</span>(models.Model):
+    inscription_admin FK(InscriptionAdministrative)
+    semestre_lmd    FK(SemestreLMD)
+    est_redoublant  BooleanField default=<span class="hljs-literal">False</span>
+    date_inscription DateTimeField auto_now_add
+    unique_together = (<span class="hljs-string">'inscription_admin'</span>, <span class="hljs-string">'semestre_lmd'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">InscriptionElement</span>(models.Model):
+    inscription_ped FK(InscriptionPedagogique)
+    element_module  FK(ElementModule)
+    est_dette       BooleanField default=<span class="hljs-literal">False</span>        <span class="hljs-comment"># Report annee precedente</span>
+    unique_together = (<span class="hljs-string">'inscription_ped'</span>, <span class="hljs-string">'element_module'</span>)
+</code></pre>
+<h4 id="app-evaluations">App <code>evaluations</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">SessionEvaluation</span>(models.Model):
+    annee_univ      FK(Year)
+    type_session    CharField choices=[<span class="hljs-string">'normale'</span>,<span class="hljs-string">'rattrapage'</span>]
+    semestre_lmd    FK(SemestreLMD) null=<span class="hljs-literal">True</span>
+    date_debut      DateField
+    date_fin        DateField
+    est_ouverte     BooleanField default=<span class="hljs-literal">False</span>
+    est_cloturee    BooleanField default=<span class="hljs-literal">False</span>
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">Note</span>(models.Model):
+    inscription_element FK(InscriptionElement)
+    session         FK(SessionEvaluation)
+    note_cc         DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>        <span class="hljs-comment"># 0-20</span>
+    note_tp         DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    note_exam       DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    note_finale     DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>        <span class="hljs-comment"># Calculee par MoteurLMD</span>
+    est_absent      BooleanField default=<span class="hljs-literal">False</span>
+    saisie_par      FK(CustomUser)
+    date_saisie     DateTimeField auto_now
+    unique_together = (<span class="hljs-string">'inscription_element'</span>, <span class="hljs-string">'session'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">Deliberation</span>(models.Model):
+    session         FK(SessionEvaluation)
+    semestre_lmd    FK(SemestreLMD)
+    filiere         FK(Filiere)
+    date_deliberation DateTimeField
+    president_jury  FK(CustomUser)
+    statut          CharField choices=[<span class="hljs-string">'preparation'</span>,<span class="hljs-string">'en_cours'</span>,<span class="hljs-string">'validee'</span>,<span class="hljs-string">'cloturee'</span>]
+    pv_genere       BooleanField default=<span class="hljs-literal">False</span>
+    pv_fichier      FileField null=<span class="hljs-literal">True</span>
+    unique_together = (<span class="hljs-string">'session'</span>, <span class="hljs-string">'semestre_lmd'</span>, <span class="hljs-string">'filiere'</span>)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">ParametreJury</span>(models.Model):
+    deliberation    FK(Deliberation)
+    seuil_validation_module   DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">10.00</span>
+    seuil_validation_semestre DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">10.00</span>
+    seuil_compensation        DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) default=<span class="hljs-number">8.00</span>
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">RachatNote</span>(models.Model):
+    deliberation    FK(Deliberation)
+    note            FK(Note)
+    ancienne_valeur DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>)
+    nouvelle_valeur DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>)
+    motif           TextField
+    decidee_par     FK(CustomUser)
+    date_decision   DateTimeField auto_now_add
+</code></pre>
+<h4 id="app-stages">App <code>stages</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">ConventionStage</span>(models.Model):
+    etudiant        FK(EtudiantLMD)
+    semestre_lmd    FK(SemestreLMD)              <span class="hljs-comment"># S4 ou S6</span>
+    entreprise_nom  CharField(<span class="hljs-number">200</span>)
+    entreprise_adresse TextField
+    tuteur_entreprise_nom CharField(<span class="hljs-number">100</span>)
+    tuteur_entreprise_email EmailField blank=<span class="hljs-literal">True</span>
+    tuteur_entreprise_tel CharField(<span class="hljs-number">20</span>) blank=<span class="hljs-literal">True</span>
+    tuteur_academique FK(Prof)
+    sujet           TextField
+    date_debut      DateField
+    date_fin        DateField
+    convention_fichier FileField null=<span class="hljs-literal">True</span>
+    statut          CharField choices=[<span class="hljs-string">'brouillon'</span>,<span class="hljs-string">'validee'</span>,<span class="hljs-string">'en_cours'</span>,<span class="hljs-string">'terminee'</span>,<span class="hljs-string">'abandonnee'</span>]
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">EvaluationStage</span>(models.Model):
+    convention      OneToOneField(ConventionStage)
+    note_soutenance DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    note_memoire    DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    note_entreprise DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    note_finale     DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>) null=<span class="hljs-literal">True</span>
+    date_soutenance DateField null=<span class="hljs-literal">True</span>
+    jury            M2M(Prof)
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">DerogationMedicale</span>(models.Model):
+    etudiant        FK(EtudiantLMD)
+    semestre_lmd    FK(SemestreLMD)
+    motif           TextField
+    date_debut      DateField
+    date_fin        DateField
+    justificatif    FileField
+    validee_par     FK(CustomUser) null=<span class="hljs-literal">True</span>
+    est_approuvee   BooleanField default=<span class="hljs-literal">False</span>
+</code></pre>
+<h4 id="app-documents">App <code>documents</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">NumeroSerieConfig</span>(models.Model):
+    type_document   CharField unique choices=[<span class="hljs-string">'attestation_inscription'</span>,<span class="hljs-string">'releve_semestre'</span>,
+                    <span class="hljs-string">'releve_complet'</span>,<span class="hljs-string">'attestation_reussite'</span>,<span class="hljs-string">'diplome'</span>]
+    prefixe         CharField(<span class="hljs-number">10</span>)                    <span class="hljs-comment"># ex: 'AI', 'RN', 'DLP'</span>
+    dernier_numero  IntegerField default=<span class="hljs-number">0</span>
+    nb_chiffres     IntegerField default=<span class="hljs-number">5</span>           <span class="hljs-comment"># ex: 00042</span>
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">DocumentOfficiel</span>(models.Model):
+    etudiant        FK(EtudiantLMD)
+    type_document   CharField choices=[...]
+    numero_serie    CharField(<span class="hljs-number">50</span>) unique              <span class="hljs-comment"># Auto-genere</span>
+    fichier         FileField
+    qr_code_hash    UUIDField unique default=uuid4    <span class="hljs-comment"># Token verification</span>
+    hash_document   CharField(<span class="hljs-number">64</span>) null=<span class="hljs-literal">True</span>           <span class="hljs-comment"># SHA-256</span>
+    genere_par      FK(CustomUser)
+    annee_univ      FK(Year)
+    semestre_lmd    FK(SemestreLMD) null=<span class="hljs-literal">True</span>
+    est_valide      BooleanField default=<span class="hljs-literal">True</span>
+    date_generation DateTimeField auto_now_add
+
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">RegistreDiplome</span>(models.Model):
+    document        OneToOneField(DocumentOfficiel)
+    etudiant        FK(EtudiantLMD)
+    filiere         FK(Filiere)
+    numero_diplome  CharField(<span class="hljs-number">50</span>) unique              <span class="hljs-comment"># ex: 'DLP-MRT-2026-00042'</span>
+    mention         CharField(<span class="hljs-number">20</span>)
+    moyenne_generale DecimalField(<span class="hljs-number">4</span>,<span class="hljs-number">2</span>)
+    credits_valides IntegerField
+    date_delivrance DateField
+    date_enregistrement DateTimeField auto_now_add
+    <span class="hljs-comment"># APPEND-ONLY : pas de update/delete autorise</span>
+</code></pre>
+<h4 id="app-notifications">App <code>notifications</code></h4>
+<pre><code class="hljs python"><span class="hljs-keyword">class</span> <span class="hljs-title class_">Notification</span>(models.Model):
+    destinataire    FK(CustomUser)
+    titre           CharField(<span class="hljs-number">200</span>)
+    message         TextField
+    type_notif      CharField(<span class="hljs-number">20</span>) choices=[<span class="hljs-string">'info'</span>,<span class="hljs-string">'warning'</span>,<span class="hljs-string">'action'</span>,<span class="hljs-string">'success'</span>]
+    lue             BooleanField default=<span class="hljs-literal">False</span>
+    lien            CharField(<span class="hljs-number">200</span>) blank=<span class="hljs-literal">True</span>         <span class="hljs-comment"># URL relative</span>
+    date_creation   DateTimeField auto_now_add
+    date_lecture    DateTimeField null=<span class="hljs-literal">True</span>
+</code></pre>
+<h4 id="core---auditlog">Core - <code>AuditLog</code></h4>
+<pre><code class="hljs python"><span class="hljs-comment"># core/models.py (NOUVEAU)</span>
+<span class="hljs-keyword">class</span> <span class="hljs-title class_">AuditLog</span>(models.Model):
+    user            FK(CustomUser) null=<span class="hljs-literal">True</span> SET_NULL
+    action          CharField(<span class="hljs-number">10</span>)                     <span class="hljs-comment"># CREATE, UPDATE, DELETE</span>
+    model_name      CharField(<span class="hljs-number">100</span>)                    <span class="hljs-comment"># ex: 'Note', 'Deliberation'</span>
+    object_id       CharField(<span class="hljs-number">50</span>)
+    changes         JSONField default=<span class="hljs-built_in">dict</span>            <span class="hljs-comment"># {field: {old, new}}</span>
+    ip_address      GenericIPAddressField null=<span class="hljs-literal">True</span>
+    timestamp       DateTimeField auto_now_add
+    <span class="hljs-comment"># Combinaison avec le logging fichier existant</span>
+</code></pre>
+<h3 id="75-moteurlmd---service-de-calcul">7.5 MoteurLMD - Service de Calcul</h3>
+<pre><code>Fichier : apps/evaluations/services/moteur_lmd.py
+
+Fonctions pures (sans effets de bord) pour faciliter les tests :
+
+calculer_moyenne_element(note, element)
+  -&gt; (note_cc * poids_cc + note_tp * poids_tp + note_exam * poids_exam) / 100
+  -&gt; Retourne Decimal arrondi a 2 decimales
+
+est_element_eliminatoire(moyenne, seuil=6.0)
+  -&gt; moyenne &lt; seuil
+
+calculer_moyenne_module(notes_elements, elements)
+  -&gt; Moyenne ponderee par coefficients
+  -&gt; Retourne {moyenne, est_valide, est_bloquant, has_eliminatoire}
+
+calculer_resultat_semestre(resultats_modules)
+  -&gt; Art. 14, 15 : MG &gt;= 10, tous modules &gt;= 8, pas d'eliminatoire
+  -&gt; Retourne {moyenne, est_valide, credits_capitalises, decision}
+
+appliquer_regle_maximum_rattrapage(moy_ordinaire, moy_rattrapage)
+  -&gt; Art. 18 : max(ordinaire, rattrapage)
+
+calculer_progression_annuelle(credits_annee, credits_capitalises, s1_s2_valides, demande_s5)
+  -&gt; Art. 20 : &gt;= 65% credits pour passer
+  -&gt; Art. 20 : Verrou S5 si S1+S2 non valides
+
+verifier_eligibilite_diplome(etudiant)
+  -&gt; Art. 25 : 180 credits + PFE &gt;= 12/20 + tous semestres clotures
+
+calculer_mention(moyenne_generale)
+  -&gt; &gt;= 16 : Tres Bien, &gt;= 14 : Bien, &gt;= 12 : Assez Bien, &gt;= 10 : Passable
+</code></pre>
+<h3 id="76-modifications-aux-modeles-existants">7.6 Modifications aux Modeles Existants</h3>
+<h4 id="year-parametresmodelspy---ajout-de-champs">Year (parametres/models.py) - AJOUT DE CHAMPS</h4>
+<pre><code class="hljs python"><span class="hljs-comment"># AJOUTER (tous nullable/defaut, zero impact sur le code existant) :</span>
+date_debut      DateField null=<span class="hljs-literal">True</span>, blank=<span class="hljs-literal">True</span>
+date_fin        DateField null=<span class="hljs-literal">True</span>, blank=<span class="hljs-literal">True</span>
+est_active      BooleanField default=<span class="hljs-literal">False</span>
+est_cloturee    BooleanField default=<span class="hljs-literal">False</span>
+</code></pre>
+<h4 id="role_choices-authenticationmodelspy---ajout-de-choix">ROLE_CHOICES (authentication/models.py) - AJOUT DE CHOIX</h4>
+<pre><code class="hljs python"><span class="hljs-comment"># AJOUTER a la liste existante :</span>
+(<span class="hljs-string">'responsable_filiere'</span>, <span class="hljs-string">'Responsable de filiere'</span>),
+(<span class="hljs-string">'jury_president'</span>,      <span class="hljs-string">'President de jury'</span>),
+</code></pre>
+<h4 id="userpermission-authenticationmodelspy---ajout-de-champ">UserPermission (authentication/models.py) - AJOUT DE CHAMP</h4>
+<pre><code class="hljs python"><span class="hljs-comment"># AJOUTER (nullable, zero impact) :</span>
+filiere = models.ForeignKey(
+    <span class="hljs-string">'scolarite.Filiere'</span>, on_delete=models.SET_NULL,
+    null=<span class="hljs-literal">True</span>, blank=<span class="hljs-literal">True</span>, related_name=<span class="hljs-string">'user_permissions_rbac'</span>,
+)
+</code></pre>
+<h3 id="77-phases-dimplementation">7.7 Phases d'Implementation</h3>
+<pre><code>PHASE 0 : Fondations (1 semaine)
+  [x] Existant : JWT, RBAC, Throttling, AuditMixin, PDF, Excel
+  [ ] A faire :
+      - Creer core/models.py avec AuditLog
+      - Ajouter 'core' a INSTALLED_APPS
+      - Etendre Year avec date_debut, date_fin, est_active, est_cloturee
+      - Ajouter roles responsable_filiere et jury_president
+      - Ajouter champ filiere a UserPermission
+      - Upgrader AuditMixin pour ecrire en DB + fichier
+
+PHASE 1 : Structure LMD (2 semaines)
+  [x] Existant : Departement, Niveau, Prof, Salle
+  [ ] A faire :
+      - Creer apps/scolarite/ (Filiere, SemestreLMD, ModuleLMD, ElementModule, EtudiantLMD)
+      - ViewSets + Serializers + URLs
+      - Enregistrer modules RBAC via data migration
+      - Import Excel etudiants
+      - Validation Art. 7 (30 credits/semestre), Art. 8 (structure semestres)
+
+PHASE 2 : Inscriptions (2 semaines)
+  [ ] A faire :
+      - Creer apps/inscriptions/
+      - Endpoint public preinscription (AllowAny)
+      - Service generation matricule
+      - Workflow inscription : preinscription -&gt; administrative -&gt; pedagogique
+      - Gestion automatique des dettes (InscriptionElement.est_dette)
+      - Verrou 3eme annee (Art. 20)
+
+PHASE 3 : Evaluations et Notes (3 semaines)
+  [ ] A faire :
+      - Creer apps/evaluations/
+      - Saisie notes (individuelle + bulk + import Excel)
+      - MoteurLMD avec TOUS les calculs Arrete 562
+      - Tests unitaires exhaustifs (&gt;= 30 cas)
+      - Workflow deliberation (preparation -&gt; en_cours -&gt; validee -&gt; cloturee)
+      - Rachats jury avec audit
+      - Generation PV en PDF
+      - Verrouillage notes post-cloture deliberation
+
+PHASE 4 : Stages et PFE (1 semaine)
+  [x] Existant : Prof (tuteur academique)
+  [ ] A faire :
+      - Creer apps/stages/
+      - Convention stage CRUD
+      - Evaluation stage (3 notes)
+      - Integration MoteurLMD (PFE S6 &gt;= 12/20 pour diplome)
+      - Derogation medicale
+
+PHASE 5 : Documents Officiels (2 semaines)
+  [x] Existant : pdfkit (infrastructure PDF)
+  [ ] A faire :
+      - Creer apps/documents/
+      - Auto-increment numero serie
+      - Generation QR code (ajouter lib qrcode)
+      - Templates PDF : attestation, releve notes, diplome
+      - Endpoint public verification authenticite
+      - Registre diplomes (append-only)
+
+PHASE 6 : Notifications (1 semaine)
+  [ ] A faire :
+      - Creer apps/notifications/
+      - Modele Notification
+      - Helpers de creation integres aux workflows
+      - Endpoint liste + mark-as-read
+      - Polling (WebSocket optionnel futur)
+
+TOTAL : ~12 semaines (3 mois) pour l'integration complete
+</code></pre>
+<h3 id="78-points-dattention">7.8 Points d'Attention</h3>
+<h4 id="collision-de-noms">Collision de Noms</h4>
+<ul>
+<li><code>authentication.Module</code> (RBAC) vs <code>scolarite.ModuleLMD</code> (academique) : Nommage explicite avec suffixe <code>LMD</code></li>
+<li><code>parametres.Semestre</code> (planification) vs <code>scolarite.SemestreLMD</code> (academique) : Idem</li>
+</ul>
+<h4 id="compatibilite-ascendante">Compatibilite Ascendante</h4>
+<ul>
+<li>Les apps existantes (emplois, suivi, avancement, vacation) ne sont PAS modifiees</li>
+<li>Les bridges FK sont unidirectionnels et nullable : le code existant n'a jamais besoin de les connaitre</li>
+<li>Les nouveaux champs sur Year et UserPermission sont nullable/defaut</li>
+</ul>
+<h4 id="strategie-etudiant">Strategie Etudiant</h4>
+<ul>
+<li><code>EtudiantLMD</code> (scolarite) est un modele RICHE pour la scolarite</li>
+<li><code>Etudiant</code> (absence) reste MINIMAL pour le tracking des presences</li>
+<li>Le bridge FK <code>etudiant_legacy</code> permet une unification future</li>
+<li>Les etudiants NE SONT PAS des CustomUser (pas d'acces au back-office SIGA)</li>
+</ul>
+<h4 id="base-de-donnees">Base de Donnees</h4>
+<ul>
+<li>Toutes les nouvelles tables creees via migrations Django dans la meme DB MySQL</li>
+<li>Pas de changement de moteur de base de donnees</li>
+<li>Ajouter <code>qrcode</code> et eventuellement <code>weasyprint</code> aux requirements.txt</li>
+</ul>
+<h3 id="79-dependances-a-ajouter">7.9 Dependances a Ajouter</h3>
+<pre><code># requirements.txt - AJOUTS
+qrcode[pil]&gt;=7.4        # Generation QR codes pour documents
+# Optionnel :
+# weasyprint&gt;=60.0       # Alternative a pdfkit pour PDF (meilleur CSS)
+# celery&gt;=5.3            # Taches asynchrones (generation PDF, emails)
+# django-redis&gt;=5.4      # Si Redis pas encore en production
+</code></pre>
+<hr>
+<h2 id="resume">Resume</h2>
+<table>
+<thead>
+<tr>
+<th>Metrique</th>
+<th>Valeur</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Apps existantes</strong></td>
+<td>12</td>
+</tr>
+<tr>
+<td><strong>Modeles existants</strong></td>
+<td>29</td>
+</tr>
+<tr>
+<td><strong>Apps a creer</strong></td>
+<td>6 (scolarite, inscriptions, evaluations, stages, documents, notifications)</td>
+</tr>
+<tr>
+<td><strong>Modeles a creer</strong></td>
+<td>~22</td>
+</tr>
+<tr>
+<td><strong>Modeles a etendre</strong></td>
+<td>3 (Year +4 champs, ROLE_CHOICES +2 roles, UserPermission +1 FK)</td>
+</tr>
+<tr>
+<td><strong>Modeles a NE PAS modifier</strong></td>
+<td>3 (Semestre, EM, Etudiant)</td>
+</tr>
+<tr>
+<td><strong>Code existant a modifier</strong></td>
+<td>&lt; 10 lignes (ajouts dans models.py authentication et parametres)</td>
+</tr>
+<tr>
+<td><strong>Endpoints existants impactes</strong></td>
+<td>0</td>
+</tr>
+<tr>
+<td><strong>Nouveaux endpoints</strong></td>
+<td>~25</td>
+</tr>
+<tr>
+<td><strong>Duree estimee</strong></td>
+<td>~12 semaines</td>
+</tr>
+</tbody></table>
+
+	
+
+</body></html>

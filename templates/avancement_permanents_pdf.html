@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Charge Profs Permanents — {{ annee_universitaire }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 0;
+        }
+        h2 {
+            text-align: center;
+            font-size: 13px;
+            font-weight: bold;
+            margin: 6px 0 10px 0;
+        }
+        table {
+            width: 98%;
+            border-collapse: collapse;
+            margin: 0 auto;
+        }
+        th, td {
+            border: 1px solid #999;
+            text-align: center;
+            padding: 3px 4px;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        td.name-cell {
+            text-align: left;
+            padding-left: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 160px;
+        }
+        tr.total-row td {
+            background-color: #e8f4ee;
+            font-weight: bold;
+            border-top: 2px solid #006633;
+        }
+        td.highlight {
+            border: 2px solid #333;
+            font-weight: bold;
+        }
+        td.positive {
+            background-color: #d4edda;
+        }
+        .footer {
+            margin-top: 14px;
+            font-size: 9px;
+            color: #888;
+            text-align: right;
+        }
+        table.signature {
+            border-collapse: collapse;
+            width: 98%;
+            margin-top: 20px;
+        }
+        table.signature td {
+            border: none;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+{% include 'suivi_en_tete.html' with annee_universitaire=annee_universitaire %}
+<br>
+
+<h2>Charges des enseignants permanents — {{ annee_universitaire }}</h2>
+<br>
+
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2">Professeur</th>
+            <th rowspan="2">Grade</th>
+            <th rowspan="2">Charge</th>
+            <th rowspan="2">Décharge</th>
+            <th rowspan="2">Charge résiduelle</th>
+            <th rowspan="2">CM</th>
+            <th rowspan="2">TD</th>
+            <th rowspan="2">TP</th>
+            <th rowspan="2">PR</th>
+            <th rowspan="2">Surv.</th>
+            <th rowspan="2">Enca.</th>
+            <th rowspan="2">Miss.</th>
+            {% for acro in all_acronyms %}
+            <th rowspan="2">{{ acro }} (CM)</th>
+            {% endfor %}
+            <th rowspan="2" style="border: 2px solid #333;">Total éq. CM</th>
+            <th rowspan="2" style="border: 2px solid #333;">Heures supp (CM)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in data %}
+        <tr>
+            <td class="name-cell">{{ item.prof_nom }}</td>
+            <td>{{ item.grade|default:"—" }}</td>
+            <td>{{ item.charge }}</td>
+            <td>{{ item.decharge }}</td>
+            <td>{{ item.charge_apres_decharge }}</td>
+            <td>{{ item.totaux.CM_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.TD_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.TP_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.PR_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.Surveillance_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.Encadrement_total|floatformat:1 }}</td>
+            <td>{{ item.totaux.Mission_total|floatformat:1 }}</td>
+            {% for charge in item.charges_list %}
+            <td>{{ charge|floatformat:0 }}</td>
+            {% endfor %}
+            <td class="highlight">{{ item.totaux.total_eq_CM|floatformat:2 }}</td>
+            <td class="highlight {% if item.difference > 0 %}positive{% endif %}">
+                {% if item.difference > 0 %}{{ item.difference|floatformat:2 }}{% else %}0,00{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr class="total-row">
+            <td class="name-cell" colspan="5"><strong>Total</strong></td>
+            <td>{{ totaux_globaux.CM_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.TD_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.TP_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.PR_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.Surveillance_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.Encadrement_total|floatformat:1 }}</td>
+            <td>{{ totaux_globaux.Mission_total|floatformat:1 }}</td>
+            {% for total in totaux_par_institution %}<td>{% if total %}{{ total|floatformat:1 }}{% else %}—{% endif %}</td>{% endfor %}
+            <td class="highlight">{{ totaux_globaux.total_eq_CM|floatformat:2 }}</td>
+            <td class="highlight {% if totaux_globaux.total_heures_supp > 0 %}positive{% endif %}">{% if totaux_globaux.total_heures_supp > 0 %}{{ totaux_globaux.total_heures_supp|floatformat:2 }}{% else %}0,00{% endif %}</td>
+        </tr>
+    </tfoot>
+</table>
+
+<table class="signature">
+    <tr>
+        <td style="text-align: right;">
+            <div style="display:inline-block; text-align:center;">
+                <div>Le Directeur</div>
+                {% if inst_directeur_fr %}<div><strong>{% if inst_directeur_titre_fr %}{{ inst_directeur_titre_fr }} {% endif %}{{ inst_directeur_fr }}</strong></div>{% endif %}
+            </div>
+        </td>
+    </tr>
+</table>
+
+<div class="footer">Généré le {{ date_impression }}</div>
+
+</body>
+</html>

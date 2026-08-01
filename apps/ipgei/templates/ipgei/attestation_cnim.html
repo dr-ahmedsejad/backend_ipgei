@@ -1,0 +1,38 @@
+{% extends "ipgei/_base_ipgei.html" %}
+
+{% block contenu %}
+  <div class="corps-texte">
+    Je soussigné(e), {{ institution.directeur_titre_fr|default:"Directeur" }} de
+    <strong>{{ institution.nom_display }}</strong>, atteste que l'étudiant(e)
+    <strong>{{ etudiant.nom_display }}</strong>, matricule
+    <strong>{{ etudiant.matricule }}</strong>, régulièrement inscrit(e) en classe de
+    <strong>{{ classe.nom }}</strong> (2<sup>e</sup> année, MP) au titre de l'année
+    universitaire <strong>{{ annee_universitaire }}</strong>, a satisfait aux
+    conditions de la délibération de fin de cycle préparatoire.
+  </div>
+
+  <div class="encadre" style="text-align:center">
+    <span class="cle">Décision du jury</span><br>
+    <span class="decision-badge">Autorisé(e) à concourir — CNIM</span>
+    <div style="margin-top:10px;font-size:10pt;color:#333">
+      Moyenne générale : <strong style="color:#006633">{{ moyenne|default_if_none:"—"|floatformat:2 }} / 20</strong>
+      &nbsp;·&nbsp; Seuil requis : <strong>{{ seuil|floatformat:2 }}</strong>
+      {% if rang %}&nbsp;·&nbsp; Rang : <strong>{{ rang }}{% if effectif %} / {{ effectif }}{% endif %}</strong>{% endif %}
+    </div>
+  </div>
+
+  <div class="corps-texte">
+    En conséquence, l'intéressé(e) est <strong>autorisé(e) à se présenter au Concours
+    National d'Ingénieurs et de Maîtrises (CNIM)</strong> au titre de la session
+    {{ annee_universitaire }}.
+  </div>
+
+  <div class="corps-texte" style="margin-top:6px">
+    La présente attestation est délivrée à l'intéressé(e) pour servir et valoir ce que de droit.
+  </div>
+
+  <div style="font-size:9pt;color:#555;margin-top:12px">
+    {% if date_jury %}Décision prononcée en délibération le {{ date_jury|date:"d/m/Y" }}.{% endif %}
+    L'authenticité de ce document peut être vérifiée en ligne à tout moment via le QR code ci-dessous.
+  </div>
+{% endblock %}

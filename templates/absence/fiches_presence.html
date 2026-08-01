@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Fiches de présence — Semaine {{ numero_semaine }} — {{ annee_universitaire }}</title>
+    <style>
+        @page { size: A4 portrait; margin: 1.2cm 1.4cm; }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11px;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        .fiche { page-break-after: always; page-break-inside: avoid; }
+        .fiche:last-child { page-break-after: auto; }
+
+        /* Titre centré */
+        .fiche-title {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            margin: 10px 0 18px 0;
+        }
+
+        /* Bloc info — table sans bordures */
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        .info-table td {
+            padding: 4px 6px;
+            border: none;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .info-table .lbl {
+            font-weight: bold;
+            width: 140px;
+        }
+        .info-table .fill      { min-width: 200px; }
+        .info-table .fill-short { width: 50px; }
+        .info-table .fill-wide  { width: 100%; }
+        .info-table .right-lbl { font-weight: bold; text-align: right; padding-right: 8px; width: 80px; }
+        .info-table .right-val { font-weight: bold; font-size: 13px; }
+
+        /* Séparateur */
+        hr.thin { border: none; border-top: 1px solid #bbb; margin: 8px 0; }
+
+        /* Tableau étudiants */
+        .etu-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+        .etu-table th {
+            background: #ececec;
+            border: 1px solid #999;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .etu-table td {
+            border: 1px solid #bbb;
+            padding: 5px 8px;
+            vertical-align: middle;
+            height: 22px;
+        }
+        tr:nth-child(even) { background: #fafafa; }
+
+        .col-mat  { width: 110px; text-align: center; }
+        .col-nom  { font-size: 12px; }
+        .col-abs  { width: 65px; text-align: center; }
+
+        .mat-code {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            color: #000;
+        }
+
+        /* Signature */
+        .sig-block { margin-top: 18px; width: 38%; }
+        .sig-block p { font-size: 10px; color: #555; margin: 0 0 20px 0; }
+        .sig-line { border-bottom: 1px solid #888; }
+
+        .entete-wrapper { margin-bottom: 6px; }
+    </style>
+</head>
+<body>
+
+{% for fiche in fiches %}
+<div class="fiche">
+
+    <!-- En-tête ISS -->
+    <div class="entete-wrapper">
+        {% include 'suivi_en_tete.html' %}
+    </div>
+
+    <!-- Titre centré -->
+    <div class="fiche-title">
+        Fiche de Présence
+        {% if fiche.filiere %} — {{ fiche.filiere }}{% endif %}
+        — {{ fiche.dep_nom }}
+    </div>
+
+    <!-- Informations de la séance -->
+    <table class="info-table">
+        <tr>
+            <td class="lbl">Date :</td>
+            <td>
+                {% if fiche.date_seance %}
+                    {{ fiche.date_seance|date:"d/m/Y" }}
+                {% else %}
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/{{ annee_universitaire|slice:":4" }}
+                {% endif %}
+            </td>
+            <td style="width:60px"></td>
+            <td class="right-lbl">Séance :</td>
+            <td class="right-val">{{ fiche.type_seance }}</td>
+        </tr>
+        <tr>
+            <td class="lbl">Créneau :</td>
+            <td>{{ fiche.creneau }}</td>
+            <td colspan="3"></td>
+        </tr>
+        <tr>
+            <td class="lbl">Élément du module :</td>
+            <td colspan="4">{{ fiche.em_intitule }}</td>
+        </tr>
+        <tr>
+            <td class="lbl">Professeur :</td>
+            <td colspan="4">{{ fiche.prof_nom }}</td>
+        </tr>
+        {% if not fiche.is_surveillance %}
+        <tr>
+            <td class="lbl">Objet du cours :</td>
+            <td colspan="4">&nbsp;</td>
+        </tr>
+        {% endif %}
+    </table>
+
+    <hr class="thin">
+
+    <!-- Liste étudiants -->
+    {% if fiche.etudiants %}
+    <table class="etu-table">
+        <thead>
+            <tr>
+                <th class="col-mat">Matricule</th>
+                <th class="col-nom">Nom et Prénom</th>
+                <th class="col-abs">A si absent</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for etu in fiche.etudiants %}
+            <tr>
+                <td class="col-mat" style="text-align:center;"><span class="mat-code">{{ etu.matricule }}</span></td>
+                <td class="col-nom">{{ etu.nom }}</td>
+                <td class="col-abs">&nbsp;</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="sig-block">
+        <p>{% if fiche.is_surveillance %}Nom et Signature du surveillant{% else %}Signature du professeur{% endif %}</p>
+        <div class="sig-line"></div>
+    </div>
+
+    {% else %}
+    <p style="text-align:center; color:#999; padding:20px 0; font-size:11px;">
+        Aucun étudiant inscrit dans ce groupe.
+    </p>
+    {% endif %}
+
+</div>
+{% endfor %}
+
+</body>
+</html>

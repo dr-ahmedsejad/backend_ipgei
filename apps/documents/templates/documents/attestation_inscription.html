@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  /* ── CONFIGURATION GÉNÉRALE ET GESTION DU PDF ──────── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 10pt;
+    color: #1a1a1a;
+    background: #fff;
+  }
+
+  /* ── MARGES ─────────────────────────────────────────── */
+  .page {
+    width: 240mm;
+    /* min-height < 297mm + espacements réduits (titre/footer/padding) : sinon la
+       table pédagogique remplit la page et déborde d'un cheveu sur une 2e page vide. */
+    min-height: 285mm;
+    padding: 4mm 2mm 3mm 2mm;
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .content { flex: 1; }
+
+  /* ── HEADER ────────────────────────────────────────── */
+  .header-table {
+    width: 100%;
+    border-collapse: collapse;
+    border-bottom: 2px solid #006633;
+    margin-bottom: 8px;
+  }
+
+  .header-table td {
+    vertical-align: middle;
+    width: 33.33%;
+    padding-bottom: 5px;
+  }
+
+  .td-fr { text-align: left; font-size: 10pt; line-height: 1.2; font-weight: 700; color: #006633; }
+  .td-logo { text-align: center; }
+  .td-ar { text-align: right; direction: rtl; font-size: 11pt; line-height: 1.3; font-weight: 700; color: #006633; }
+
+  /* ── TITRES ────────────────────────────────────────── */
+  .doc-date { text-align: right; font-size: 10pt; margin: 4px 0; }
+  .doc-title { text-align: center; font-size: 17pt; font-weight: 700; margin: 5px 0 10px; color: #cc0000; }
+  .intro-text { font-size: 11pt; margin-bottom: 6px; }
+
+  /* ── TABLEAU DES MATIÈRES ──────────────────────────── */
+  table.elem-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 6px 0; border: 1.5px solid #006633; }
+  table.elem-table thead th { padding: 3px 6px; border-top: 1px solid #006633; border-bottom: 1px solid #006633; font-size: 12pt; font-weight: 700; text-align: left; background: #006633; color: #fff; }
+  table.elem-table tbody td { padding: 2px 6px; border-bottom: 0.5px solid #c8e6d7; }
+  .sem-row td { background-color: #e8f5ee; color: #006633; font-weight: bold; font-size: 13pt; }
+  .mod-row td { background-color: #f5fbf7; font-weight: bold; font-style: italic; font-size: 12pt; padding-left: 10px; color: #1a1a1a; }
+  .em-row  td { padding-left: 18px; font-size: 11pt; }
+
+  /* ── GESTION QR CODE ─────────────────────────────────── */
+  .qr-box {
+    width: 55px;
+    height: 55px;
+    padding: 1px;
+  }
+  .qr-box img {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+
+  /* ── ZONE CERTIF + SIGNATURE ───────────────────────── */
+  .certif-zone { margin-top: 8px; }
+  .annee-line { text-align: center; font-size: 11pt; margin: 4px 0; }
+
+  /* ── FOOTER ────────────────────────────────────────── */
+  /* E-Mail Universitaire : déplacé dans le pied de page NATIF (_attestation_footer.html)
+     pour être collé en bas de la page. CSS de l'ancienne barre in-body supprimé. */
+</style>
+</head>
+<body>
+<div class="page">
+<div class="content">
+
+  <table class="header-table">
+    <tr>
+      <td class="td-fr">
+        République Islamique de Mauritanie<br>
+        Ministère de l'enseignement supérieur et de la
+        Recherche Scientifique<br>
+        {{ institution.nom_fr }}<br>
+        Service de la Scolarité
+      </td>
+      <td class="td-logo">
+        {% if logo_b64 %}
+          <img src="{{ logo_b64 }}" style="height: 65px; object-fit: contain;" alt="Logo">
+        {% else %}
+          <div style="font-weight:bold; border:2px solid #006633; border-radius:50%; width:60px; height:60px; line-height:60px; margin:auto; font-size: 14pt; color:#006633; text-align:center;">ISS</div>
+        {% endif %}
+      </td>
+      <td class="td-ar">
+        الجمهورية الاسلامية الموريتانية<br>
+        وزارة التعليم العالي والبحث العلمي<br>
+        {{ institution.nom_ar }}<br>
+        مصلحة الشؤون الطلابية
+      </td>
+    </tr>
+  </table>
+
+  <div class="doc-date">Nouakchott, le {{ today }}</div>
+  <div class="doc-title">Attestation d'inscription</div>
+  <div class="intro-text">Le Directeur de l'{{ institution.nom_fr }} atteste que :</div>
+
+  <table style="width: 100%; border-collapse: collapse; margin-top: 5px;">
+    <tr>
+      <td style="vertical-align: top; line-height: 1.4; font-size: 11pt; padding-right: 15px;">
+        <div style="font-size: 12.5pt; font-weight: bold; margin-bottom: 2px; color: #006633;">
+          {{ civilite }}. {{ etudiant.prenom_fr }} {{ etudiant.nom_fr }}
+        </div>
+        <div><strong style="color:#006633;">NNI:</strong> {{ etudiant.cni }}</div>
+        <div>{{ ne_e }} à {{ etudiant.lieu_naissance_fr }} le {{ date_naissance }}</div>
+        <div>Sexe: {{ genre_label }}</div>
+        <div style="margin-top: 5px;">
+          est {{ inscrit_e }} sous le numéro :
+          <strong style="font-size: 11.5pt; color:#006633;">{{ etudiant.matricule }}</strong> <br>
+          En <strong style="font-size: 11.5pt;">{{ niveau_label }}
+          <span style="font-weight: normal;">{{ filiere_nom }}</span><br>
+          {% if groupe %}<span style="font-size: 10pt;">Groupe: {{ groupe }}</span>{% endif %}
+          <br> aux éléments suivants :</strong>
+        </div>
+      </td>
+
+      <td style="width: 110px; vertical-align: top; text-align: right;">
+        <div style="width: 90px; height: 110px; border: 1.5px solid #006633; position: relative; background-color: #fdfdfd; text-align: center; overflow: hidden; margin-left: auto;">
+          {% if photo_b64 %}
+            <img src="{{ photo_b64 }}" style="width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 2;">
+          {% endif %}
+          <div style="font-size: 7.5pt; color: #999; margin-top: 45px; font-weight: bold; position: relative; z-index: 1;">PHOTO<br>ÉTUDIANT</div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  {% if elements_par_semestre %}
+  <table class="elem-table">
+    <thead>
+      <tr>
+        <th style="width:12%">Code</th>
+        <th>Élément de module</th>
+        <th style="text-align:center;width:9%">Coeff</th>
+        <th style="text-align:center;width:9%">Crédits</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sem in elements_par_semestre %}
+      <tr class="sem-row">
+        <td colspan="2">{{ sem.semestre_label }}</td>
+        <td style="text-align:center">{{ sem.total_coeff }}</td>
+        <td style="text-align:center">{{ sem.total_credits }}</td>
+      </tr>
+      {% for mod in sem.modules %}
+      <tr class="mod-row">
+        <td>{{ mod.code }}</td>
+        <td>{{ mod.intitule_fr }}</td>
+        <td style="text-align:center">{{ mod.total_coeff }}</td>
+        <td style="text-align:center">{{ mod.total_credits }}</td>
+      </tr>
+      {% for e in mod.elements %}
+      <tr class="em-row">
+        <td>{{ e.code }}</td>
+        <td>{{ e.intitule_fr }}</td>
+        <td style="text-align:center">{{ e.coefficient }}</td>
+        <td style="text-align:center">{{ e.credits }}</td>
+      </tr>
+      {% endfor %}
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="certif-zone">
+    <p style="font-size: 11pt;">
+      En foi de quoi, il lui est délivrée la présente attestation d'inscription pour servir et valoir ce que de droit.
+    </p>
+    <div style="margin-top: 10px; margin-bottom:20;" class="annee-line">
+      pour l'année universitaire : <strong style="color:#006633;">{{ annee_univ_label }}</strong>
+    </div>
+    <div style="margin-top: 10px;"></div>
+
+    <table style="width: 100%; margin-top: 10px;  border-collapse: collapse;">
+      <tr>
+        <td style="width: 50%; vertical-align: bottom; text-align: left;">
+          {% if qr_image %}
+          <div class="qr-box">
+            <img src="{{ qr_image }}" alt="QR">
+          </div>
+          <div style="font-size: 7pt; color: #555; margin-top: 2px;">Document certifié</div>
+          {% endif %}
+        </td>
+        <td style="width: 50%; vertical-align: bottom; text-align: right; font-size: 10.5pt; line-height: 1.4; padding-right: 4mm;">
+          Pour le Directeur et P.O.<br>
+          Le Chef service de la Scolarité<br>
+          <span style="font-weight: 700; display: block; margin-top: 25px; color:#006633;"></span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+{% comment %}E-Mail Universitaire déplacé dans le pied de page NATIF
+(_attestation_footer.html, activé via _render_pdf) → toujours collé en bas
+de la page, indépendamment de la quantité de contenu.{% endcomment %}
+
+</div>
+</body>
+</html>

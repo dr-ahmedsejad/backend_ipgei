@@ -1,0 +1,42 @@
+[
+  {
+    "id": 3188,
+    "old_fk_prof_id": 77,
+    "prof_nom": "Boushab ETHMANE SALEM",
+    "date": "2025-12-10",
+    "type": "EF",
+    "duree": 1.5
+  },
+  {
+    "id": 3189,
+    "old_fk_prof_id": 77,
+    "prof_nom": "Boushab ETHMANE SALEM",
+    "date": "2025-12-10",
+    "type": "EF",
+    "duree": 1.5
+  },
+  {
+    "id": 3217,
+    "old_fk_prof_id": 93,
+    "prof_nom": "Ahmed HAMOUNE",
+    "date": "2025-12-09",
+    "type": "DS",
+    "duree": 1.5
+  },
+  {
+    "id": 3218,
+    "old_fk_prof_id": 93,
+    "prof_nom": "Ahmed HAMOUNE",
+    "date": "2025-12-09",
+    "type": "DS",
+    "duree": 1.5
+  },
+  {
+    "id": 4534,
+    "old_fk_prof_id": 93,
+    "prof_nom": "Ahmed HAMOUNE",
+    "date": "2025-12-25",
+    "type": "DS",
+    "duree": 2.0
+  }
+]

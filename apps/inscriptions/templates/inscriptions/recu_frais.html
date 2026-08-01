@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+ * { box-sizing: border-box; }
+ body { font-family: 'Calibri', 'Segoe UI', Tahoma, Arial, sans-serif; color:#000; margin:0; }
+ /* Le reçu occupe toute la demi-feuille A4 pré-coupée (210 × 148 mm). */
+ .recu { height:146mm; padding:8mm 13mm; position:relative; overflow:hidden; }
+ .hd { text-align:center; border-bottom:2.5px solid #006633; padding-bottom:8px; }
+ .logo { height:86px; width:auto; }
+ .acr { font-size:26px; font-weight:bold; color:#006633; font-family:Georgia, serif; }
+ .inst-sub { font-size:11px; color:#000; margin-top:5px; }
+ .titre { text-align:center; font-size:20px; font-weight:bold; letter-spacing:1px; margin:11px 0 8px; color:#000; }
+ .titre .num { display:block; font-size:15px; font-weight:normal; color:#000; letter-spacing:0; margin-top:3px; }
+ table.info { width:100%; border-collapse:collapse; margin:6px 0; }
+ table.info td { padding:6px 10px; border:1px solid #cbd5e1; font-size:14px; vertical-align:top; color:#000; }
+ table.info td.k { background:#f0fdf4; color:#000; font-weight:bold; width:30%; }
+ .mono { font-family:'Courier New',monospace; color:#000; }
+ .montant { text-align:center; margin:11px 0 6px; background:#006633; color:#fff;
+            padding:11px 14px; border-radius:7px; }
+ /* Libellé et montant à la MÊME taille. */
+ .montant span { font-size:20px; text-transform:uppercase; letter-spacing:.5px; vertical-align:middle; }
+ .montant b { font-size:20px; vertical-align:middle; margin-left:6px; }
+ .lettres { font-size:13px; color:#000; margin-bottom:6px; }
+ /* Nom du caissier + signature alignés à DROITE. */
+ .ft { position:absolute; right:13mm; bottom:8mm; text-align:right; font-size:13px; color:#000; }
+ .ft .agent { margin-bottom:15px; }
+ .ft .sig { border-top:1px solid #000; padding-top:4px; width:55mm; text-align:center; margin-left:auto; }
+</style></head><body>
+  <div class="recu">
+    <div class="hd">
+      {% if logo_b64 %}<img src="{{ logo_b64 }}" class="logo">{% else %}<div class="acr">{{ inst_acronyme }}</div>{% endif %}
+      {% if coords %}<div class="inst-sub">{{ coords }}</div>{% endif %}
+    </div>
+    <div class="titre">REÇU DE PAIEMENT<span class="num">N° {{ numero_recu }}</span></div>
+    <table class="info">
+      <tr><td class="k">Date</td><td>{{ date_paiement }}</td></tr>
+      <tr><td class="k">Mode de paiement</td><td>{{ mode }}</td></tr>
+      <tr><td class="k">Reçu de</td><td><b>{{ etudiant_nom }}</b> &nbsp; <span class="mono">{{ matricule }}</span></td></tr>
+      <tr><td class="k">Filière / Niveau</td><td>{{ fil_niv }}</td></tr>
+      <tr><td class="k">Objet</td><td>{{ objet }}</td></tr>
+    </table>
+    <div class="montant"><span>Montant réglé :</span> <b>{{ montant_fmt }} MRU</b></div>
+    <div class="lettres">Arrêté la présente quittance à la somme de : <i>{{ montant_lettres }} ouguiyas</i>.</div>
+    <div class="ft">
+      <div class="agent">Encaissé par&nbsp;: {{ agent|default:"—" }}</div>
+      <div class="sig">Signature &amp; cachet</div>
+    </div>
+  </div>
+</body></html>

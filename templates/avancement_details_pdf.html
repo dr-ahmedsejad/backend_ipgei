@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Détails des enseignements — {{ prof_nom }} — {{ annee_universitaire }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            margin: 0;
+            padding: 0;
+        }
+        h2 {
+            text-align: center;
+            font-size: 14px;
+            margin: 6px 0 6px 0;
+            color: #006633;
+        }
+        .sous-titre {
+            text-align: center;
+            font-size: 11px;
+            color: #444;
+            margin-bottom: 8px;
+        }
+        .semaine-block {
+            margin-bottom: 16px;
+            page-break-inside: avoid;
+        }
+        .semaine-header {
+            background-color: #006633;
+            color: white;
+            padding: 5px 10px;
+            font-weight: bold;
+            font-size: 12px;
+            border-radius: 4px 4px 0 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background-color: #f3f4f6;
+            color: #374151;
+            padding: 5px 8px;
+            text-align: left;
+            font-size: 10px;
+            border: 1px solid #ddd;
+        }
+        td {
+            border: 1px solid #ddd;
+            padding: 5px 8px;
+            font-size: 10px;
+            vertical-align: middle;
+        }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .badge {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: bold;
+        }
+        .badge-cm { background: rgba(0,102,51,0.12); color: #006633; }
+        .badge-td { background: rgba(26,92,143,0.12); color: #1a5c8f; }
+        .badge-tp { background: rgba(184,150,12,0.15); color: #8a6a00; }
+        .badge-other { background: rgba(100,116,139,0.12); color: #475569; }
+        .semaine-total {
+            background-color: #e8f4ee;
+            font-weight: bold;
+            text-align: right;
+            font-size: 10px;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-top: 2px solid #006633;
+        }
+        .resume-global {
+            margin: 8px 0 14px 0;
+            padding: 8px 12px;
+            background: #f0f7f0;
+            border-left: 4px solid #006633;
+            font-size: 11px;
+        }
+        .footer {
+            margin-top: 16px;
+            font-size: 10px;
+            color: #888;
+            text-align: right;
+        }
+        .recap-block {
+            margin-top: 18px;
+            page-break-inside: avoid;
+        }
+        .recap-title {
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 6px;
+            color: #1f2937;
+        }
+        .recap-table {
+            width: 70%;
+            margin: 0 auto;
+            border-collapse: collapse;
+        }
+        .recap-table th {
+            background-color: #f3f4f6;
+            font-size: 10px;
+            text-align: center;
+            padding: 6px 10px;
+            border: 1px solid #999;
+        }
+        .recap-table td {
+            font-size: 10px;
+            padding: 6px 10px;
+            border: 1px solid #999;
+            text-align: center;
+        }
+        .recap-table td.libelle {
+            text-align: left;
+            font-weight: bold;
+        }
+        .recap-table td.libelle-sub {
+            text-align: left;
+            font-weight: normal;
+            padding-left: 24px;
+        }
+    </style>
+</head>
+<body>
+
+{% include 'suivi_en_tete.html' %}
+
+<h2>Détails des Enseignements</h2>
+<div class="sous-titre">
+    <strong>{{ prof_nom }}</strong> &mdash; Année universitaire : <strong>{{ annee_universitaire }}</strong>
+</div>
+
+<div class="resume-global">
+    Total : <strong>{{ total_heures|floatformat:1 }} h</strong>
+    {% if is_vacataire %}&mdash; Montant total : <strong>{{ total_montant|floatformat:0 }} MRU</strong>{% endif %}
+    &mdash; Semaines : <strong>{{ nb_semaines }}</strong>
+</div>
+
+{% for section in sections %}
+{% for semaine in section.semaines %}
+<div class="semaine-block">
+    <div class="semaine-header">
+        <span>
+            {% if forloop.first %}<strong style="margin-right:8px; padding-right:8px; border-right: 2px solid rgba(255,255,255,0.55);">{{ section.label }}</strong>{% endif %}
+            Semaine {{ semaine.numero }}
+        </span>
+        <span style="border-left: 2px solid rgba(255,255,255,0.45); padding-left: 12px;">
+            {{ semaine.total_heures|floatformat:1 }} h
+            {% if is_vacataire %}&mdash; {{ semaine.total_montant|floatformat:0 }} MRU{% endif %}
+        </span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Module</th>
+                <th>Type</th>
+                <th>Département</th>
+                <th style="text-align:right;">Durée (h)</th>
+                {% if is_vacataire %}<th style="text-align:right;">Montant (MRU)</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in semaine.rows %}
+            <tr>
+                <td style="white-space:nowrap;">{{ row.date_suivie_fmt|default:"—" }}</td>
+                <td>{{ row.em__intitule|default:"—" }}</td>
+                <td>
+                    {% if row.type_seance == "CM" %}
+                        <span class="badge badge-cm">CM</span>
+                    {% elif row.type_seance == "TD" %}
+                        <span class="badge badge-td">TD</span>
+                    {% elif row.type_seance == "TP" %}
+                        <span class="badge badge-tp">TP</span>
+                    {% else %}
+                        <span class="badge badge-other">{{ row.type_seance|default:"—" }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ row.departement__nom|default:"—" }}</td>
+                <td style="text-align:right; font-weight:bold;">{{ row.duree_creneau|floatformat:1 }}</td>
+                {% if is_vacataire %}<td style="text-align:right;">{{ row.montant|floatformat:0 }}</td>{% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endfor %}
+
+<div class="recap-block">
+    <div class="recap-title">Tableau Récapitulatif</div>
+    <table class="recap-table">
+        <thead>
+            <tr>
+                <th style="width: 50%;">Indicateur</th>
+                <th>Nombre de séances</th>
+                <th>Total (Heures)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ligne in recap_lignes %}
+            <tr>
+                <td class="{% if ligne.is_sub %}libelle-sub{% else %}libelle{% endif %}">{{ ligne.libelle }}</td>
+                <td>{{ ligne.nb }}</td>
+                <td>{{ ligne.heures|floatformat:1 }}h</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="footer">
+    Généré le {{ date_impression }} &mdash; {{ inst_nom_fr|default:"ISS" }}
+</div>
+
+</body>
+</html>

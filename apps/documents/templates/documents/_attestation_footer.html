@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  /* Pied de page NATIF wkhtmltopdf (rendu séparément avec le contexte → email
+     dynamique), collé au bas de la page comme le NB du relevé.
+     NB : wkhtmltopdf (vieux WebKit) ne gère PAS calc() → on prend la pleine largeur
+     via un vrai <table width:100%> inséré dans un bloc à marges latérales. */
+  body { margin: 0; font-family: Arial, sans-serif; }
+  .fbar {
+    margin: 0 8mm;
+    border-top: 1px solid #006633;
+    padding-top: 1.5mm;
+    font-size: 8.5pt;
+    color: #555555;
+  }
+  .fbar table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .fbar .l { text-align: left;   width: 33%; }
+  .fbar .c { text-align: center; width: 34%; font-weight: bold; color: #006633; }
+  .fbar .r { text-align: right;  width: 33%; direction: rtl; }
+</style>
+</head>
+<body>
+  <div class="fbar">
+    <table><tr>
+      <td class="l">E-Mail Universitaire :</td>
+      <td class="c">{{ email_univ }}</td>
+      <td class="r"> البريد الإلكتروني الجامعي :</td>
+    </tr></table>
+  </div>
+</body>
+</html>

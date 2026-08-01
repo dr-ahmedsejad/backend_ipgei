@@ -1,0 +1,51 @@
+{% extends "documents/base_document.html" %}
+{% block content %}
+
+<div class="doc-title-wrap">
+  <span class="doc-title">Diplôme de {{ grade }}</span>
+  <span class="doc-title-ar">شهادة {{ grade_ar }}</span>
+</div>
+
+<div style="text-align:center;margin:20px 0;">
+  <p style="font-size:12pt;line-height:1.8;">
+    <strong>{{ institution.nom_fr|default:institution.nom }}</strong> délivre le présent diplôme à :
+  </p>
+  <p style="font-size:17pt;font-weight:700;color:#006633;margin:12px 0;">
+    {{ etudiant.nom_fr|default:etudiant.nom }}
+  </p>
+  {% if etudiant.nom_ar %}
+  <p style="font-size:14pt;direction:rtl;color:#444;margin-bottom:12px;">
+    {{ etudiant.nom_ar }}
+  </p>
+  {% endif %}
+  <p style="font-size:10pt;color:#555;">Matricule : <strong>{{ etudiant.matricule }}</strong></p>
+</div>
+
+<div class="section-title">Spécialité / التخصص</div>
+<div class="info-grid">
+  <div class="info-row">
+    <span class="info-label">Filière :</span>
+    <span class="info-value">{{ filiere_nom }}</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Année universitaire :</span>
+    <span class="info-value">{{ annee_universitaire }}</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Moyenne générale :</span>
+    <span class="info-value note-pass">{{ moyenne_generale }}/20</span>
+  </div>
+  <div class="info-row">
+    <span class="info-label">Mention :</span>
+    <span class="info-value">
+      <span class="mention-badge mention-{{ mention_code }}">{{ mention }}</span>
+    </span>
+  </div>
+</div>
+
+<p style="margin-top:24px;font-size:10.5pt;line-height:1.8;text-align:justify;">
+  Par décision du jury de délibération et conformément aux textes réglementaires en vigueur,
+  le présent diplôme est délivré en témoignage des études accomplies avec succès.
+</p>
+
+{% endblock %}

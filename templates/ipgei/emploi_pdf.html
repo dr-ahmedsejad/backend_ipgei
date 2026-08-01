@@ -1,0 +1,165 @@
+{% comment %}
+Emploi du temps IPGEI — gabarit unique pour les trois axes (classe, enseignant,
+salle).
+
+Reprend à l'identique la présentation des emplois du temps du socle
+(`emploi_filiere_pdf.html` et ses variantes) : mêmes couleurs par type de
+séance, même en-tête d'institution, même cadre noir. Les gabarits du socle ne
+sont pas modifiés — ils servent aussi aux écrans Emplois et Suivi.
+
+La différence tient à la CASE. Le socle empile un bloc complet par séance, ce
+qui double la hauteur d'une ligne dès qu'un TP est dédoublé. Ici les séances
+d'une même matière sont regroupées : un en-tête « INFO / TP », puis une ligne
+par groupe.
+
+        ┌──────────────────────────┐
+        │ INFO                 [TP]│
+        │ Informatique             │
+        │ Ahmed SEJAD (G1) — 201   │
+        │ El Veth SIDI (G2) — 202  │
+        └──────────────────────────┘
+
+Une case à deux groupes garde ainsi la hauteur d'une case ordinaire.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Emploi du temps</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; }
+
+        .custom-td {
+            width: 300px;
+            height: 70px;
+            position: relative;
+            padding: 24px 5px 5px 5px;
+            vertical-align: top;
+        }
+
+        /* Types de séance — palette identique à celle du socle. */
+        .session-type {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 1px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+        }
+        .session-type.CM { border: 1px solid #3f51b5; color: #3f51b5; }
+        .session-type.TD { border: 1px solid #4CAF50; color: #2E7D32; }
+        .session-type.TP { border: 1px solid #FF9800; color: #EF6C00; }
+        .session-type.DS { border: 1px solid #9C27B0; color: #6A1B9A; }
+        .session-type.PR { border: 1px solid #9C27B0; color: #6A1B9A; }
+
+        /* Un bloc = une matière. Deux blocs dans la même case restent rares
+           (deux matières sur le même créneau) mais doivent rester lisibles. */
+        .bloc { margin-bottom: 3px; }
+        .bloc + .bloc { border-top: 1px dotted #b0bec5; padding-top: 3px; }
+
+        /* L'intitulé porte seul l'identité de la séance : le code matière
+           n'apprenait rien à un étudiant, qui lit « Informatique » et non
+           « INFO ». En noir et en gras, il devient le point d'accroche de la
+           case. */
+        .course-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #000;
+            line-height: 1.25;
+        }
+
+        /* Une ligne par intervenant : c'est ce qui remplace l'empilement de
+           blocs et garde la case à hauteur constante. */
+        .ligne-seance {
+            font-size: 12px;
+            line-height: 1.4;
+            margin-top: 2px;
+            color: #000;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+            background: white;
+        }
+        td, th { border: 1px solid black; padding: 0.4rem; text-align: center; }
+        th     { background-color: #f2f2f2; font-size: 13px; font-weight: bold; }
+
+        .rouge { background: #ff4d4d; }
+
+        h2, h4 { text-align: center; margin: 0.1rem 0; }
+
+        .etat-semaine {
+            text-align: center;
+            margin: 0.3rem 0 0.2rem;
+            font-size: 11px;
+            color: #546e7a;
+        }
+        /* Une semaine divergente doit sauter aux yeux : ce document ne
+           correspond plus à ce qui a été pointé. */
+        .etat-divergent {
+            color: #b71c1c;
+            font-weight: bold;
+            border: 1px solid #b71c1c;
+            border-radius: 4px;
+            padding: 2px 8px;
+            display: inline-block;
+        }
+
+        .jour { font-weight: bold; font-size: 13px; width: 95px; }
+    </style>
+</head>
+<body>
+{% include '_institution_header.html' %}
+
+<h2>Emploi du temps {{ annee_universitaire }}</h2>
+<h4>{{ cible_libelle }} : {{ cible }}</h4>
+{% if semaine %}
+<h4>{{ semestre_nom }} — Semaine n°{{ semaine }} du {{ debut }} au {{ fin }}</h4>
+{% else %}
+<h4>{{ semestre_nom }}</h4>
+{% endif %}
+
+{% comment %}
+Le document dit ce qu'il vaut. Une grille imprimée circule détachée de l'écran
+qui l'a produite : sans cette mention, rien ne distinguait un emploi du temps
+prévisionnel d'un emploi du temps modifié après que le suivi en a été tiré —
+donc après que des heures ont été pointées et payées sur une autre version.
+{% endcomment %}
+{% if etat_semaine %}
+<p class="etat-semaine">
+  <span{% if est_divergent %} class="etat-divergent"{% endif %}>{{ etat_semaine }}</span>
+</p>
+{% endif %}
+
+<table>
+    <tr>
+        <th></th>
+        {% for creneau in creneaux %}
+        <th>{{ creneau.creneau }}</th>
+        {% endfor %}
+    </tr>
+    {% for row in rows %}
+    <tr>
+        <td class="jour">{{ row.jour }}</td>
+        {% for blocs in row.cells %}
+        <td class="custom-td{% if blocs and 'DS' in blocs.0.type_seance %} rouge{% endif %}">
+            {% for bloc in blocs %}
+            <div class="bloc">
+                <div class="session-type {{ bloc.type_seance }}">{{ bloc.type_seance }}</div>
+                <div class="course-title">{{ bloc.em_intitule }}</div>
+                {% for ligne in bloc.lignes %}
+                <div class="ligne-seance">{{ ligne }}</div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </td>
+        {% endfor %}
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

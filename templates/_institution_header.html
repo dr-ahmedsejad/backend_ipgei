@@ -1,0 +1,14 @@
+<table style="border-collapse: collapse; width: 100%; margin-bottom: 6px;">
+    <tr>
+        <td style="text-align: left; border: none; width: 45%; font-size: 18px; font-weight: bold; line-height: 1.3;">
+            {% if inst_groupe_fr %}{{ inst_groupe_fr }}<br>{% endif %}{{ inst_nom_fr|default:"Institut Supérieur de la Statistique" }}
+        </td>
+        <td style="text-align: center; border: none; width: 10%;">
+            <img src="{{ inst_logo_url|default:image_url }}" alt="Logo" width="70" height="70">
+        </td>
+        <td style="text-align: right; border: none; width: 45%; font-size: 18px; font-weight: bold; line-height: 1.3;">
+            {% if inst_groupe_ar %}{{ inst_groupe_ar }}<br>{% endif %}{{ inst_nom_ar|default:"المعهد العالي للإحصاء" }}
+        </td>
+    </tr>
+</table>
+<hr style="height: 1px; background-color: black; border-color: black;">

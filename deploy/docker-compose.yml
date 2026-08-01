@@ -1,0 +1,242 @@
+# ═══════════════════════════════════════════════════════════════
+# SIGA — Stack de production (branche postgresql)
+# 4 services : PostgreSQL + Django backend + Next.js frontend + Nginx
+#
+# Cette branche EST la version PostgreSQL : le docker-compose utilise
+# postgres:16, le moteur BD etant pilote par DB_ENGINE=postgresql
+# (cf. siga/settings/base.py — aucun code applicatif ne change).
+# La version MySQL vit sur la branche `main` (docker-compose.yml y reste MySQL).
+#
+# PRE-REQUIS avant `docker compose up` :
+#   1. dump.sql.gz doit etre un dump POSTGRESQL brut gzippe, produit avec
+#      `pg_dump --no-owner --no-privileges gesafped26 | gzip > dump.sql.gz`
+#      — PAS un mysqldump. Les flags --no-owner --no-privileges sont
+#      OBLIGATOIRES : sinon les ALTER ... OWNER TO / GRANT du dump referencent
+#      des roles absents du conteneur et cassent l'init (l'entrypoint postgres
+#      importe via psql avec ON_ERROR_STOP).
+#   2. PG monte son propre volume nomme pg_data.
+#
+# Multi-host : l'application est accessible via http://localhost,
+# http://127.0.0.1 OU http://192.168.0.120 (port 80 standard). Le frontend
+# utilise un placeholder (http://__SIGA_API_HOST__) qui est reecrit par
+# Nginx au vol en fonction du Host d'arrivee → meme origine garantie pour
+# les XHR.
+# ═══════════════════════════════════════════════════════════════
+
+services:
+
+  # ─── BD PostgreSQL ───────────────────────────────────────────
+  # postgres:18 = MÊME version majeure que celle où la migration a été validée
+  # (le dump.sql.gz est produit par pg_dump 18 ; restaurer un dump PG18 dans une
+  # version anterieure n'est PAS supporte).
+  db:
+    image: postgres:18
+    container_name: siga-db
+    restart: always
+    environment:
+      POSTGRES_DB: gesafped26
+      POSTGRES_USER: siga
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # Equivalent des options charset/collation MySQL : cluster initialise
+      # en UTF8 avec le provider ICU et la locale francaise (supporte par
+      # postgres:16). Le tri LINGUISTIQUE ICU fr-FR est proche des collations
+      # utf8mb4_*_ci de MySQL (accents/casse ordonnes "a la francaise"), mais
+      # l'egalite STRICTE d'ordre n'est PAS garantie entre les deux moteurs :
+      # les order_signatures du harnais golden (golden_extract/golden_diff)
+      # servent precisement a visualiser l'ecart residuel de collation.
+      # --locale=C.UTF-8 reste la locale libc (LC_CTYPE/LC_MESSAGES...).
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=icu --icu-locale=fr-FR --locale=C.UTF-8"
+    volumes:
+      # Volume dedie PostgreSQL (distinct du db_data MySQL de la branche main).
+      # ⚠️ postgres:18+ a CHANGE la convention : le volume se monte sur
+      # /var/lib/postgresql (et PG place ses donnees dans le sous-dossier
+      # /var/lib/postgresql/18/docker), et NON plus sur /var/lib/postgresql/data
+      # comme en 16 — sinon l'image ignore le volume (donnees ephemeres + erreur).
+      # cf. https://github.com/docker-library/postgres/pull/1259
+      - pg_data:/var/lib/postgresql
+      # dump.sql.gz (SQL POSTGRESQL brut gzippe, produit avec
+      # `pg_dump --no-owner --no-privileges` — cf. PRE-REQUIS en tete de
+      # fichier : sinon ALTER OWNER casse l'init ON_ERROR_STOP) importe au tout
+      # premier demarrage UNIQUEMENT (si pg_data existe deja, il est ignore —
+      # `docker compose down -v` pour reimporter). L'image postgres execute
+      # automatiquement les *.sql.gz de /docker-entrypoint-initdb.d/ via psql
+      # sur POSTGRES_DB → aucun gunzip manuel necessaire.
+      - ./dump.sql.gz:/docker-entrypoint-initdb.d/00-init.sql.gz:ro
+    healthcheck:
+      # Plus strict que pg_isready seul : verifie que l'utilisateur siga peut
+      # acceder a gesafped26 ET que la table 'semestre' existe (donc dump importe).
+      # NB : dans le conteneur officiel, psql en local passe par le socket unix
+      # (auth trust) mais on exporte PGPASSWORD pour rester robuste ($$ = escape
+      # compose de $).
+      # -h 127.0.0.1 FORCE le test en TCP : pendant l'import du dump, postgres tourne
+      # d'abord sur le socket local (pas encore en TCP) puis redemarre en TCP. Sans
+      # -h, le healthcheck passe "healthy" trop tot (phase socket) et le backend
+      # demarre avant que le TCP soit pret -> "connection refused". En TCP, il n'est
+      # healthy que quand le VRAI serveur (post-import) ecoute sur 5432.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U siga -d gesafped26 && PGPASSWORD=$$POSTGRES_PASSWORD psql -h 127.0.0.1 -U siga -d gesafped26 -c 'SELECT 1 FROM semestre LIMIT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # ─── Cache Redis (RBAC, throttle login, sessions) ─────────────
+  # Active en prod uniquement. En dev local (runserver mono-worker),
+  # ne pas demarrer ce service -> Django retombe sur LocMemCache via
+  # le fallback de siga/settings/base.py:137 (REDIS_URL absent).
+  redis:
+    image: redis:7-alpine
+    container_name: siga-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Adminer (administration BD) ────────────────────────────────
+  # Remplace phpMyAdmin (MySQL-only) : Adminer parle nativement PostgreSQL.
+  # Accessible sur http://<host>:8091 (system=PostgreSQL, server=db,
+  # user=siga, db=gesafped26).
+  # SECURITE : par defaut bind sur 127.0.0.1 uniquement pour eviter
+  # toute exposition publique. Pour l'acceder a distance, utiliser un
+  # tunnel SSH (`ssh -L 8091:127.0.0.1:8091 user@serveur`) ou bien
+  # remplacer "127.0.0.1:8091:8080" par "8091:8080" si le reseau est prive
+  # et de confiance (LAN interne).
+  adminer:
+    image: adminer:latest
+    container_name: siga-adminer
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8091:8080"
+
+  # ─── Backend Django ──────────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: siga-backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DJANGO_SETTINGS_MODULE: siga.settings.docker
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY}
+      # Hosts autorisés : le DOMAINE public (via .env), localhost/127.0.0.1 et le
+      # nom interne `backend` (utilisé par Nginx). Les ":port" ne sont PAS inclus
+      # (Django compare seulement le hostname).
+      ALLOWED_HOSTS: ${DOMAIN},localhost,127.0.0.1,backend
+      # Bascule moteur BD pilotee par env (cf. siga/settings/base.py) :
+      # DB_ENGINE=postgresql + port 5432 = PostgreSQL. Les autres variables
+      # (DB_NAME/DB_USER/DB_PASSWORD/DB_HOST) gardent les memes noms.
+      DB_ENGINE: postgresql
+      DB_NAME: gesafped26
+      DB_USER: siga
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: 5432
+      # CORS : origine publique (http ET https du domaine) + local. Grace au
+      # sub_filter Nginx, les XHR du frontend retombent sur le meme origin que la
+      # page → CORS n'est sollicite que pour des appels cross-origin (rares).
+      CORS_ALLOWED_ORIGINS: https://${DOMAIN},http://${DOMAIN},http://localhost,http://127.0.0.1
+      # Cookies (JWT / session / CSRF) marques Secure → transmis UNIQUEMENT en
+      # HTTPS. A activer une fois le certificat SSL en place (Phase 6). On NE met
+      # PAS DJANGO_SSL_REDIRECT (c'est Nginx qui redirige 80→443 ; le laisser cote
+      # Django casserait la sous-requete auth_request du /media/).
+      DJANGO_COOKIE_SECURE: "True"
+      # Domaine de vérification des documents officiels (QR). Défaut = domaine public
+      # (QR scannable partout). Surchargeable via .env (ex. LAN) sans casser le droplet.
+      DOCUMENTS_BASE_URL: ${DOCUMENTS_BASE_URL:-https://ent.iss-gp.mr}
+      USE_PROF_TYPE_HISTORY: "true"
+      JWT_ACCESS_TOKEN_LIFETIME_MINUTES: "60"
+      JWT_REFRESH_TOKEN_LIFETIME_DAYS: "7"
+      AXES_FAILURE_LIMIT: "5"
+      AXES_COOLOFF_MINUTES: "15"
+      # Cache Redis : Django bascule automatiquement sur RedisCache des que cette
+      # variable est definie (cf siga/settings/base.py:137).
+      REDIS_URL: redis://redis:6379/1
+      # Sauvegardes BD : le scanner Django parcourt /app/backups (= host
+      # /opt/siga/backups via bind-mount ci-dessous). Les scripts shell de
+      # /siga/deploy/backup-scripts/ ecrivent dans le meme dossier cote host.
+      BACKUP_BASE_DIR: /app/backups
+    volumes:
+      # Bind-mount du dossier media local : les fichiers existants sont visibles
+      # immediatement, et tout nouvel upload depuis SIGA apparait sur ton disque.
+      - ../media:/app/media
+      # Bind-mount des sauvegardes : Django (scanner / streaming) doit voir
+      # les fichiers ecrits par les scripts cron du host.
+      - ../../backups:/app/backups
+      # Certificat de signature PDF (PKCS#12). Persiste sur l'hote
+      # (/opt/siga/secrets) → survit aux recreations de conteneur. Genere par
+      # `manage.py generer_certificat_signature` (auto-signe) OU depose ici.
+      - ../secrets:/app/secrets
+      - static:/app/staticfiles
+      - logs:/app/logs
+
+  # ─── Frontend Next.js ────────────────────────────────────────
+  frontend:
+    build:
+      context: ../../gesafped_frontend
+      dockerfile: Dockerfile
+      args:
+        # Placeholder reecrit par Nginx (sub_filter) en fonction du Host
+        # d'arrivee. Permet de conserver une seule build pour servir 3 origines
+        # differentes sans alteration du code source.
+        NEXT_PUBLIC_API_URL: http://__SIGA_API_HOST__
+    container_name: siga-frontend
+    restart: always
+    depends_on:
+      - backend
+
+  # ─── Reverse proxy Nginx ─────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: siga-nginx
+    restart: always
+    ports:
+      # 80 → redirige vers 443 (cf. nginx.conf). 443 = HTTPS (app).
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Fichier de conf Nginx : défaut = nginx.conf (droplet : ent.iss-gp.mr + Let's
+      # Encrypt). Variante LAN on-premise : le .env pose SIGA_NGINX_CONF=./nginx.lan.conf
+      # (cert auto-signé). Le droplet n'a pas cette variable → comportement INCHANGÉ.
+      - ${SIGA_NGINX_CONF:-./nginx.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ../media:/var/www/media:ro
+      - static:/var/www/static:ro
+      # Page « en construction » servie sur iss-gp.mr / www (site ISS a venir).
+      - ./iss-placeholder:/var/www/iss:ro
+      # Certificats Let's Encrypt — emis sur l'HOTE par `certbot certonly
+      # --standalone` puis montes en lecture seule dans le conteneur nginx.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Certificat AUTO-SIGNÉ pour la variante LAN (généré par `deploy.sh setup-lan`).
+      # Absent/vide sur le droplet (nginx.conf ne le référence pas) → sans effet.
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+      - frontend
+
+# ═══════════════════════════════════════════════════════════════
+# Volumes nommes (persistants entre redemarrages)
+# Donnees PostgreSQL (pg_data), fichiers uploades, statics generees
+# ═══════════════════════════════════════════════════════════════
+volumes:
+  pg_data:
+  static:
+  logs:
+  redis_data:

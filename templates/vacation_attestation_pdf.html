@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: "EB Garamond", "Garamond", "Georgia", "Times New Roman", serif;
+            font-size: 12.5pt;
+            color: #111;
+            line-height: 1.75;
+            margin: 0;
+            padding: 0;
+        }
+
+        .titre-attestation {
+            text-align: center;
+            font-size: 15pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 20px 0 18px 0;
+            letter-spacing: 2px;
+            color: black;
+        }
+
+        hr.separateur {
+            border: none;
+            border-top: 2px solid #1a3a5c;
+            margin: 0 0 20px 0;
+        }
+
+        .corps {
+            text-align: justify;
+            line-height: 2;
+        }
+
+        .corps p {
+            margin: 0 0 14px 0;
+        }
+
+        .bold { font-weight: bold; }
+
+        table.modules {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0 8px 0;
+            font-size: 11pt;
+            font-family: "EB Garamond", "Garamond", "Georgia", serif;
+        }
+
+        table.modules th {
+            color: black;
+            padding: 8px;
+            text-align: center;
+            border: 1px solid black;
+            font-size: 10.5pt;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+            background-color: #F0F0F0;
+        }
+
+        table.modules td {
+            padding: 6px 8px;
+            border: 1px solid black;
+            text-align: center;
+        }
+
+        table.modules .total-pondere-row td {
+            font-weight: bold;
+            color: black;
+            background-color: #F0F0F0;
+        }
+
+        .note-pondere {
+            font-size: 9.5pt;
+            font-style: italic;
+            color: #666;
+            margin: 4px 0 18px 0;
+            text-align: right;
+        }
+
+        .signature-bloc {
+            text-align: right;
+            margin-top: 50px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    {% include "entete_DG.html" %}
+    <br>
+
+    <div class="titre-attestation">{{ titre_document }}</div>
+
+    {% if numero_attestation %}
+    <div style="text-align:right; font-size:10pt; color:#555; margin: -6px 0 8px 0;">
+        N° <strong>{{ numero_attestation }}</strong>
+    </div>
+    {% endif %}
+
+    <div class="corps">
+
+        <p>
+            Je soussigné{% if inst_directeur_fr %} <span class="bold">{{ inst_directeur_fr }}</span>{% endif %},
+            {{ inst_directeur_titre_fr|default:"le Directeur" }} {{ inst_de_sigle }},
+            atteste que
+            <span class="bold">{{ civilite }} {{ prof.nom }}</span>{% if prof.type != 'militaire' %} -{% endif %}
+            {% if prof.type == 'permanent' %}
+            <span class="bold">{{ qualite }}</span>
+            {% elif prof.type == 'contractuel' %}
+            <span class="bold">Contractuel</span>{% if prof.genre == 'F' %}<span class="bold">le</span>{% endif %}
+            {% endif %}
+
+            {% if afficher_nni %}
+            titulaire du NNI <span class="bold">{{ prof.NNI }}</span>{% endif %},
+            a {% if is_service_fait %}effectué{% else %}assuré{% endif %} <span class="bold">{{ texte_types }}</span>
+            pour un volume total de
+            <span class="bold">{% if is_service_fait %}{{ grand_total_heures|floatformat:2 }} heures{% else %}{{ grand_total_ponde|floatformat:2 }} heures équivalent CM{% endif %}</span>
+            durant l&rsquo;année universitaire
+            <span class="bold">{{ annee_universitaire }}</span>{% if date_debut_periode and date_fin_periode %}
+            <span style="color:#555;">(période du <span class="bold">{{ date_debut_periode }}</span> au <span class="bold">{{ date_fin_periode }}</span>)</span>{% endif %},
+            à l&rsquo;Institut,{% if texte_filieres_description %}
+            en filière <span class="bold">{{ texte_filieres_description }}</span>{% elif texte_depts_description and texte_depts_description != 'divers départements' %}
+            en <span class="bold">{{ texte_depts_description }}</span>{% endif %}.
+            Ce volume horaire est réparti comme suit&nbsp;:
+        </p>
+
+        {% if is_service_fait %}
+        {# === Attestation de Service Fait (personnel admin / militaire) === #}
+        <table class="modules">
+            <thead>
+                <tr>
+                    <th>Type d'activité</th>
+                    <th>Nombre de séances</th>
+                    <th>Total des heures</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in services_list %}
+                <tr>
+                    <td style="font-weight:bold; color:#1a3a5c; text-align:left; padding-left:10px;">
+                        {{ s.type_activite }}
+                    </td>
+                    <td>{{ s.nb_seances }}</td>
+                    <td><strong>{{ s.total_heures|floatformat:2 }} h</strong></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="3" style="text-align:center; font-style:italic; color:#666;">
+                        Aucune activité enregistrée.
+                    </td>
+                </tr>
+                {% endfor %}
+
+                <tr class="total-pondere-row">
+                    <td colspan="2" style="text-align:right; padding-right:12px;">
+                        Volume Horaire Total :
+                    </td>
+                    <td>{{ grand_total_heures|floatformat:2 }} h</td>
+                </tr>
+            </tbody>
+        </table>
+        {% else %}
+        {# === Attestation d'Enseignement (vacataire/permanent/contractuel/militaire) === #}
+        <table class="modules">
+            <thead>
+                <tr>
+                    <th>Filière</th>
+                    <th>Niv.</th>
+                    <th>Sem.</th>
+                    <th>Élément de Module</th>
+                    <th>CM</th>
+                    <th>TD</th>
+                    <th>TP</th>
+                    <th>Éq. CM (h)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in modules %}
+                <tr>
+                    {% if m.is_encadrement_perm %}
+                    {# Ligne Encadrement permanent : Filiere/Niv/Sem/Module fusionnes en 1 cellule #}
+                    <td colspan="4" style="text-align:left; padding-left:8px; font-weight:bold; color:#1a3a5c;">
+                        {{ m.intitule }}
+                    </td>
+                    {% else %}
+                    <td style="font-weight:bold; color:#1a3a5c; text-align:left; padding-left:8px;">
+                        {{ m.filiere|default:"—" }}
+                    </td>
+                    <td style="font-weight:bold;">{{ m.niveau|default:"—" }}</td>
+                    <td>{{ m.id_semestre }}</td>
+                    <td style="text-align:left; padding-left:10px;">
+                        {{ m.intitule }}
+                    </td>
+                    {% endif %}
+                    <td>{% if m.heures_cm > 0 %}{{ m.heures_cm|floatformat:1 }}{% else %}—{% endif %}</td>
+                    <td>{% if m.heures_td > 0 %}{{ m.heures_td|floatformat:1 }}{% else %}—{% endif %}</td>
+                    <td>{% if m.heures_tp > 0 %}{{ m.heures_tp|floatformat:1 }}{% else %}—{% endif %}</td>
+                    <td><strong>{{ m.total_pondere|floatformat:2 }}</strong></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align:center; font-style:italic; color:#666;">
+                        Aucun module enregistré.
+                    </td>
+                </tr>
+                {% endfor %}
+
+                <tr class="total-pondere-row">
+                    <td colspan="7" style="text-align:right; padding-right:12px;">
+                        Volume Horaire Total (équivalent CM) :
+                    </td>
+                    <td>{{ grand_total_ponde|floatformat:2 }} h</td>
+                </tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if not is_service_fait %}
+        <p class="note-pondere">
+            Pondération appliquée : 1 h CM = 1 h éq. CM &nbsp;|&nbsp;
+            1 h TD = 2/3 h éq. CM &nbsp;|&nbsp; 1 h TP = 2/3 h éq. CM
+        </p>
+        {% endif %}
+
+        <p>
+            La présente attestation est délivrée à
+            {{ interesse }}
+            pour servir et valoir ce que de droit.
+        </p>
+
+    </div>
+
+    <table style="width:100%; margin-top:40px; border:none;">
+        <tr>
+            {% if qr_data_uri %}
+            <td style="border:none; text-align:left; width:120px; vertical-align:top;">
+                <img src="{{ qr_data_uri }}" alt="QR" style="width:100px; height:100px; border:1px solid #ddd; padding:3px;" />
+            </td>
+            {% endif %}
+            <td style="border:none; text-align:right; vertical-align:bottom;">
+                <p style="font-weight:bold; margin:0 0 6px 0;">
+                    Fait à {{ lieu }}, le {{ date_generation }}
+                </p>
+                <div style="display:inline-block; text-align:center; font-weight:bold;">
+                    <div>Le Directeur</div>
+                    {% if inst_directeur_fr %}<div>{{ inst_directeur_fr }}</div>{% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

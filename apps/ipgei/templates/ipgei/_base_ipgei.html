@@ -1,0 +1,180 @@
+{% comment %}
+Squelette commun aux documents officiels IPGEI.
+Un seul fichier porte l'en-tête institutionnel, le bloc étudiant, le QR de
+vérification et le bas de page signé : chaque document ne décrit alors que son
+propre contenu, dans le bloc `contenu`.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4; margin: 0; }
+
+  body {
+    font-family: 'Cairo', 'Segoe UI', Arial, sans-serif;
+    font-size: 10pt;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  .page { width: 210mm; min-height: 297mm; padding: 12mm 14mm; position: relative; }
+
+  /* ── En-tête ─────────────────────────────────────────────────────────── */
+  .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 8px; }
+  .entete td { vertical-align: middle; }
+  .entete-fr, .entete-ar { font-size: 8.5pt; color: #444; line-height: 1.45; width: 36%; }
+  .entete-ar { direction: rtl; text-align: center; }
+  .entete-fr { text-align: center; }
+  .entete-logo { text-align: center; width: 28%; }
+  .entete-logo img { height: 56px; object-fit: contain; }
+  .inst-nom { font-size: 10.5pt; font-weight: 700; color: #006633; display: block; margin-top: 2px; }
+
+  /* ── Titre ───────────────────────────────────────────────────────────── */
+  .titre-zone { text-align: center; margin: 14px 0 10px; }
+  .titre {
+    display: inline-block; background: #006633; color: #fff;
+    font-size: 13pt; font-weight: 700; padding: 6px 26px;
+    border-radius: 5px; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .sous-titre { display: block; margin-top: 5px; font-size: 9.5pt; color: #555; }
+
+  /* ── Bloc identité ───────────────────────────────────────────────────── */
+  .identite { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  .identite td { padding: 4px 6px; font-size: 10pt; vertical-align: top; }
+  .identite .lab { color: #666; width: 30mm; }
+  .identite .val { font-weight: 700; }
+  .photo-cell { width: 26mm; text-align: right; vertical-align: top; }
+  .photo-cell img { width: 24mm; height: 30mm; object-fit: cover; border: 1px solid #ccc; }
+
+  /* ── Tableaux de notes ───────────────────────────────────────────────── */
+  table.notes { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table.notes th {
+    background: #006633; color: #fff; font-size: 8.5pt; font-weight: 700;
+    padding: 5px 4px; text-align: center; border: 1px solid #005229;
+  }
+  table.notes td {
+    font-size: 9pt; padding: 4px; border: 1px solid #d5d5d5; text-align: center;
+  }
+  table.notes td.gauche { text-align: left; }
+  table.notes tr:nth-child(even) td { background: #f7faf8; }
+  table.notes .ligne-total td {
+    background: #eaf3ee !important; font-weight: 700; font-size: 9.5pt; border-top: 2px solid #006633;
+  }
+  .bloc-semestre-titre {
+    font-size: 10pt; font-weight: 700; color: #006633;
+    margin: 10px 0 4px; padding-bottom: 2px; border-bottom: 1px solid #cfe3d6;
+  }
+
+  /* ── Encadrés ────────────────────────────────────────────────────────── */
+  .encadre {
+    border: 1.5px solid #006633; border-radius: 5px;
+    padding: 10px 14px; margin: 10px 0; background: #f7faf8;
+  }
+  .encadre .cle { font-size: 9pt; color: #555; }
+  .encadre .valeur { font-size: 15pt; font-weight: 700; color: #006633; }
+  .decision-badge {
+    display: inline-block; padding: 5px 18px; border-radius: 4px;
+    font-size: 12pt; font-weight: 700; color: #fff; background: #006633;
+  }
+  .decision-badge.defavorable { background: #a33; }
+  .corps-texte { font-size: 11pt; line-height: 1.9; text-align: justify; margin: 12px 0; }
+
+  /* ── Bas de page ─────────────────────────────────────────────────────── */
+  .pied { width: 100%; margin-top: 14px; }
+  .pied td { vertical-align: bottom; font-size: 8.5pt; color: #555; }
+  .qr-zone { width: 32mm; text-align: left; }
+  .qr-zone img { width: 28mm; height: 28mm; }
+  .qr-legende { font-size: 6.5pt; color: #777; line-height: 1.3; margin-top: 2px; }
+  .signature-zone { text-align: center; width: 62mm; }
+  .signature-zone img { height: 20mm; object-fit: contain; display: block; margin: 0 auto; }
+  .signature-titre { font-weight: 700; color: #1a1a1a; font-size: 9pt; }
+  .mentions {
+    margin-top: 10px; padding-top: 6px; border-top: 1px solid #ddd;
+    font-size: 7.5pt; color: #777; text-align: center; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  {# ── En-tête institutionnel bilingue ─────────────────────────────────── #}
+  <table class="entete">
+    <tr>
+      <td class="entete-fr">
+        {% if institution.ministere_fr %}<div>{{ institution.ministere_fr }}</div>{% endif %}
+        {% if institution.groupe_fr %}<div>{{ institution.groupe_fr }}</div>{% endif %}
+        <span class="inst-nom">{{ institution.nom_display }}</span>
+      </td>
+      <td class="entete-logo">
+        {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
+      </td>
+      <td class="entete-ar">
+        {% if institution.ministere_ar %}<div>{{ institution.ministere_ar }}</div>{% endif %}
+        {% if institution.groupe_ar %}<div>{{ institution.groupe_ar }}</div>{% endif %}
+        {% if institution.nom_ar %}<span class="inst-nom">{{ institution.nom_ar }}</span>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  {# ── Titre du document ───────────────────────────────────────────────── #}
+  <div class="titre-zone">
+    <span class="titre">{{ titre }}</span>
+    <span class="sous-titre">
+      Année universitaire {{ annee_universitaire }} — N° {{ numero_serie }}
+    </span>
+  </div>
+
+  {# ── Identité de l'étudiant ──────────────────────────────────────────── #}
+  <table class="identite">
+    <tr>
+      <td>
+        <table style="width:100%">
+          <tr><td class="lab">Nom et prénom</td><td class="val">{{ etudiant.nom_display }}</td></tr>
+          <tr><td class="lab">Matricule</td><td class="val">{{ etudiant.matricule }}</td></tr>
+          {% if etudiant.date_naissance %}
+          <tr><td class="lab">Né(e) le</td>
+              <td class="val">{{ etudiant.date_naissance|date:"d/m/Y" }}{% if etudiant.lieu_naissance_fr %} à {{ etudiant.lieu_naissance_fr }}{% endif %}</td></tr>
+          {% endif %}
+          <tr><td class="lab">Classe</td><td class="val">{{ classe.nom }}</td></tr>
+          <tr><td class="lab">Niveau</td>
+              <td class="val">{% if niveau == 'MPSI' %}MPSI — 1re année{% else %}MP — 2e année{% endif %}</td></tr>
+        </table>
+      </td>
+      {% if photo_b64 %}<td class="photo-cell"><img src="{{ photo_b64 }}" alt=""></td>{% endif %}
+    </tr>
+  </table>
+
+  {% block contenu %}{% endblock %}
+
+  {# ── QR de vérification + signature ──────────────────────────────────── #}
+  <table class="pied">
+    <tr>
+      <td class="qr-zone">
+        {% if qr_b64 %}
+          <img src="{{ qr_b64 }}" alt="QR">
+          <div class="qr-legende">Scannez pour vérifier<br>l'authenticité en ligne</div>
+        {% endif %}
+      </td>
+      <td></td>
+      <td class="signature-zone">
+        <div style="font-size:8.5pt;color:#555">
+          {{ institution.ville_fr|default:"Nouakchott" }}, le {{ date_edition }}
+        </div>
+        <div class="signature-titre">
+          {{ institution.directeur_titre_fr|default:"Le Directeur" }}
+        </div>
+        {% if signature_b64 %}<img src="{{ signature_b64 }}" alt="">{% else %}<div style="height:18mm"></div>{% endif %}
+        <div style="font-weight:700">{{ institution.directeur_nom_fr }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <div class="mentions">
+    Document officiel généré électroniquement — N° {{ numero_serie }}.
+    Toute rature ou surcharge l'annule. Vérification en ligne : {{ verify_url|default:"/verifier/…" }}
+  </div>
+
+</div>
+</body>
+</html>

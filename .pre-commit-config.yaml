@@ -1,0 +1,29 @@
+# Hooks pre-commit backend SIGA. Installation :
+#   pip install pre-commit && pre-commit install
+# Lancer sur tout le repo une fois :
+#   pre-commit run --all-files
+# (les migrations sont exclues via pyproject.toml)
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=2000']
+      # Garde-fou anti-récidive de la fuite de secrets (cf. audit sécu) :
+      - id: detect-private-key

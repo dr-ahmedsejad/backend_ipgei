@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport de progression — {{ pv.filiere_code }} {{ niveau_actuel }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Calibri", "Helvetica Neue", Arial, sans-serif;
+    font-size: 11px;
+    color: #1a1a1a;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .entete { text-align: center; border-bottom: 2px solid #006633; padding-bottom: 10px; margin-bottom: 14px; }
+  .logo-wrap { margin-bottom: 6px; }
+  .logo-wrap img { height: 60px; object-fit: contain; }
+  .ministere { font-size: 10px; color: #555; }
+  .etablissement { font-size: 14px; font-weight: bold; color: #006633; margin-top: 2px; }
+
+  .titre-doc { text-align: center; margin: 12px 0 10px; }
+  .titre-doc h2 { font-size: 15px; font-weight: bold; text-transform: uppercase;
+                  letter-spacing: 2px; color: #006633; border-bottom: 2px solid #006633;
+                  display: inline-block; padding-bottom: 4px; }
+
+  .meta-grid { display: flex; gap: 30px; justify-content: center; margin-bottom: 12px;
+               font-size: 11px; flex-wrap: wrap; }
+  .meta-item { display: flex; gap: 6px; }
+  .meta-item .lbl { font-weight: bold; color: #006633; }
+
+  .stats { display: flex; gap: 8px; justify-content: center; margin: 8px 0 14px; flex-wrap: wrap; }
+  .stat { border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px 10px; font-size: 10.5px; background: #f8fafc; }
+  .stat b { color: #006633; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #006633; color: white; padding: 7px 10px; text-align: center;
+       font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;
+       vertical-align: middle; }
+  td { border: 1px solid #ccc; padding: 6px 10px; vertical-align: middle; }
+  tr:nth-child(even) td { background: #f7faf7; }
+
+  td.dec { font-weight: bold; text-align: center; }
+  td.dec.progresse { color: #065f46; }
+  td.dec.redouble  { color: #92400e; }
+  td.dec.exclu     { color: #991b1b; }
+  td.dec.blanche   { color: #1e40af; }
+
+  .sign-box { margin-top: 40px; text-align: right; font-size: 11px; }
+  .sign-box .label-sign { font-weight: bold; margin-bottom: 40px; color: #006633; }
+
+  .footer { margin-top: 20px; font-size: 9.5px; color: #666; text-align: center; border-top: 1px solid #ddd; padding-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="entete">
+  {% if institution %}
+  {% if institution_logo_url %}
+  <div class="logo-wrap"><img src="{{ institution_logo_url }}" alt="Logo"></div>
+  {% endif %}
+  {% if institution.ministere_fr %}<div class="ministere">{{ institution.ministere_fr }}</div>{% endif %}
+  <div class="etablissement">{{ institution.nom_complet_fr|default:institution.nom_fr|default:institution.nom }}</div>
+  {% endif %}
+</div>
+
+<div class="titre-doc"><h2>Rapport de progression — {{ niveau_actuel }}</h2></div>
+
+<div class="meta-grid">
+  <div class="meta-item"><span class="lbl">Filière :</span> {{ pv.filiere_nom|default:pv.filiere_code }}</div>
+  <div class="meta-item"><span class="lbl">Niveau :</span> {{ niveau_actuel }}</div>
+  <div class="meta-item"><span class="lbl">Année univ. :</span> {{ pv.annee_label }}</div>
+  <div class="meta-item"><span class="lbl">Date :</span> {{ date_impression }}</div>
+</div>
+
+<div class="stats">
+  <div class="stat">Total : <b>{{ nb_total }}</b></div>
+  <div class="stat">Progresse en {{ niveau_suivant }} : <b>{{ nb_progresse }}</b></div>
+  <div class="stat">Redouble en {{ niveau_actuel }} : <b>{{ nb_redouble }}</b></div>
+  {% if nb_exclu %}<div class="stat">Exclus : <b>{{ nb_exclu }}</b></div>{% endif %}
+  {% if nb_blanche %}<div class="stat">Année blanche : <b>{{ nb_blanche }}</b></div>{% endif %}
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:90px">Matricule</th>
+      <th>Nom complet</th>
+      <th style="width:55px">{{ sem_impair_code }}</th>
+      <th style="width:55px">{{ sem_pair_code }}</th>
+      <th style="width:60px">Total</th>
+      <th style="width:200px">Décision</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td style="font-family:'Consolas','Courier New',monospace">{{ r.matricule }}</td>
+      <td>{{ r.nom }}</td>
+      <td style="text-align:center;font-weight:bold">{{ r.cred_impair }}</td>
+      <td style="text-align:center;font-weight:bold">{{ r.cred_pair }}</td>
+      <td style="text-align:center;font-weight:bold;color:#006633">{{ r.cred_total }}</td>
+      <td class="dec {% if r.decision_code == 'passage_droit' or r.decision_code == 'passage_cond' %}progresse{% elif r.decision_code == 'redoublement' %}redouble{% elif r.decision_code == 'exclusion' %}exclu{% elif r.decision_code == 'annee_blanche' %}blanche{% endif %}">
+        {{ r.decision }}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6" style="text-align:center;color:#888;padding:20px">Aucun étudiant.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="sign-box">
+  <div class="label-sign">Le Président du Jury</div>
+  <div>_________________________</div>
+</div>
+
+<div class="footer">
+  Document généré le {{ date_impression }} — Rapport de progression {{ niveau_actuel }} → {{ niveau_suivant }}
+</div>
+
+</body>
+</html>

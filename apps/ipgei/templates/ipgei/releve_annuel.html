@@ -1,0 +1,76 @@
+{% extends "ipgei/_base_ipgei.html" %}
+
+{% block contenu %}
+  {% for bloc in semestres %}
+    <div class="bloc-semestre-titre">
+      Semestre {{ bloc.code }}
+      <span style="float:right;font-weight:400;color:#555">
+        Moyenne : <strong style="color:#006633">{{ bloc.moyenne|default_if_none:"—"|floatformat:2 }} / 20</strong>
+      </span>
+    </div>
+    <table class="notes">
+      <thead>
+        <tr>
+          <th style="width:16mm">Code</th>
+          <th class="gauche">Matière</th>
+          <th style="width:13mm">Coef.</th>
+          <th style="width:13mm">VH</th>
+          <th style="width:16mm">Moy. DS</th>
+          <th style="width:14mm">TP</th>
+          <th style="width:16mm">Examen</th>
+          <th style="width:18mm">Note retenue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in bloc.lignes %}
+        <tr>
+          <td>{{ l.code }}</td>
+          <td class="gauche">{{ l.intitule }}</td>
+          <td>{{ l.coefficient|floatformat:"-2" }}</td>
+          <td>{{ l.volume_horaire }}</td>
+          <td>{{ l.moy_ds|default_if_none:"—"|floatformat:2 }}</td>
+          <td>{% if l.note_tp != None %}{{ l.note_tp|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td>{{ l.moy_exam|default_if_none:"—"|floatformat:2 }}</td>
+          <td><strong>{{ l.note_retenue|default_if_none:"—"|floatformat:2 }}</strong></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" style="padding:8px;color:#888">Aucune note enregistrée.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% empty %}
+    <p style="color:#888;padding:12px">Aucune note enregistrée pour cette année universitaire.</p>
+  {% endfor %}
+
+  <table style="width:100%">
+    <tr>
+      <td style="width:60%;vertical-align:top">
+        <div class="encadre">
+          <span class="cle">Moyenne générale annuelle</span><br>
+          <span class="valeur">{{ moyenne|default_if_none:"—"|floatformat:2 }} / 20</span>
+          <div style="margin-top:6px;font-size:9pt;color:#555">
+            Total des coefficients : {{ total_coefficients|floatformat:"-2" }} —
+            seuil de validation : {{ seuil|floatformat:2 }}<br>
+            {% if valide %}<strong style="color:#006633">Année validée</strong>
+            {% else %}<strong style="color:#a33">Année non validée</strong>{% endif %}
+          </div>
+        </div>
+      </td>
+      <td style="width:40%;vertical-align:top;padding-left:8px">
+        <div class="encadre">
+          <span class="cle">Assiduité de l'année</span>
+          <div style="margin-top:4px;font-size:9.5pt">
+            Absences : <strong>{{ absences.absences }}</strong><br>
+            Absences justifiées : <strong>{{ absences.justifiees }}</strong><br>
+            Retards : <strong>{{ absences.retards }}</strong>
+          </div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <div style="font-size:7.5pt;color:#777;margin-top:4px">
+    La moyenne annuelle est pondérée par les coefficients de toutes les matières des deux semestres.
+    La note retenue par matière vaut max(moyenne, rattrapage).
+  </div>
+{% endblock %}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Fiche de présence - Semaine {{ semaine }} - {{ semestre }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+        }
+        .new-page {
+            margin-top: 10px;
+            margin-bottom: 10px;
+            margin-left: 5px;
+            margin-right: 5px;
+            page-break-before: always;
+        }
+        .new-page:first-child {
+            page-break-before: avoid;
+        }
+        table {
+            width: 98%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            text-align: center;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        h2 {
+            margin: 6px 0;
+        }
+    </style>
+</head>
+<body>
+
+{% for fiche_jour in fiches_semaine %}
+<div class="new-page">
+    {% include 'suivi_en_tete.html' %}
+
+    <h2>Fiche de présence &mdash; Semaine n°{{ semaine }}{% if semaine_a_decalage %} <span style="font-weight:normal;color:#666;font-size:0.85em">(S{{ semaine_globale }} globale)</span>{% endif %} &mdash; {{ semestre }}</h2>
+    <h2>Jour : {{ fiche_jour.jour }}{% if fiche_jour.date_jour %} &mdash; {{ fiche_jour.date_jour }}{% endif %}</h2>
+
+    <table>
+        <thead>
+        <tr>
+            <th>Filière</th>
+            <th>Horaire</th>
+            <th>Professeur</th>
+            <th>Téléphone</th>
+            <th>Matière</th>
+            <th>Séance</th>
+            <th>Salle</th>
+            <th>Signature</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for fiche in fiche_jour.fiches %}
+        <tr>
+            <td>{{ fiche.departement }}</td>
+            <td>{{ fiche.creneau }}</td>
+            <td>{{ fiche.prof_nom }}</td>
+            <td>{{ fiche.tel_prof }}</td>
+            <td>{{ fiche.em_intitule }}</td>
+            <td>{{ fiche.type_seance }}</td>
+            <td>{{ fiche.salle_nom }}</td>
+            <td style="min-width: 80px;">&nbsp;</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+
+</body>
+</html>

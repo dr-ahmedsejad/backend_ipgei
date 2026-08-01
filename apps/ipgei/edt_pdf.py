@@ -1,0 +1,180 @@
+"""
+Impression des emplois du temps IPGEI.
+
+Reprend les gabarits du socle — `emploi_filiere_pdf.html`, `emploi_prof_pdf.html`
+et `emploi_salle_pdf.html` — afin qu'un emploi du temps de prépa se présente
+exactement comme celui d'une filière SIGA : mêmes couleurs par type de séance,
+même cadre de salle, même en-tête d'institution.
+
+La source reste `ipgei.SeanceReelle` et non `suivi.Suivie` : elle seule couvre
+les semaines à venir, et elle seule porte les annulations, les permutations et
+le sous-groupe. Le calendrier `SemaineIPGEI` fournit le numéro de semaine et les
+dates qui la bornent.
+
+Les gabarits attendent le vocabulaire du socle (CM / TD / TP / DS) : les types
+IPGEI y sont traduits, faute de quoi les cases sortiraient sans couleur.
+"""
+import logging
+from collections import defaultdict
+
+from django.utils.formats import date_format
+
+from apps.parametres.models import Creneau, Jour
+
+logger = logging.getLogger('siga')
+
+# Types de séance IPGEI → libellés attendus par les gabarits, qui portent une
+# couleur par classe CSS (`.session-type.CM`, `.TD`, `.TP`, `.PR`).
+TYPE_AFFICHE = {'cours': 'CM', 'td': 'TD', 'tp': 'TP', 'ds': 'DS'}
+
+
+def _date_fr(valeur):
+    """« 15 septembre » — même forme que les emplois du temps du socle."""
+    if valeur is None:
+        return ''
+    try:
+        return date_format(valeur, format='d F', use_l10n=True)
+    except Exception:
+        return valeur.strftime('%d/%m/%Y')
+
+
+def _ligne(seance, axe):
+    """
+    Ligne décrivant UNE séance à l'intérieur d'un bloc matière.
+
+    Ce qu'elle nomme dépend de l'axe : sur l'emploi du temps d'un enseignant,
+    répéter son nom n'apprend rien, c'est la classe qui manque. Le sujet du
+    document n'est donc jamais répété dans ses propres cases.
+    """
+    groupe = seance.sous_groupe.groupe if seance.sous_groupe_id else ''
+    prof   = seance.prof.nom if seance.prof else ''
+    salle  = seance.salle.nom if seance.salle else ''
+    classe = seance.classe.nom if seance.classe_id else ''
+
+    if axe == 'prof':
+        principal, complement = classe, salle
+    elif axe == 'salle':
+        principal, complement = prof, classe
+    else:                                    # axe classe
+        principal, complement = prof, salle
+
+    texte = principal or '—'
+    if groupe:
+        texte = f'{texte} ({groupe})'
+    if complement:
+        texte = f'{texte} — {complement}'
+    return texte
+
+
+def construire_grille(seances, *, axe='classe'):
+    """
+    Transforme des séances en (créneaux, lignes) pour le gabarit IPGEI.
+
+    Les séances d'une même case sont **regroupées par matière et par type** :
+    un TP dédoublé s'affiche sous un seul en-tête « INFO / TP », suivi d'une
+    ligne par groupe. Empiler deux blocs complets doublait la hauteur de la
+    case, et donc celle de toute la ligne du jour.
+
+    La grille est complète : tous les jours du référentiel et tous les créneaux
+    actifs, occupés ou non. Une case vide est une information — le créneau est
+    libre — et masquer les jours creux décalerait les colonnes d'une semaine à
+    l'autre, rendant deux tirages incomparables.
+    """
+    seances = [s for s in seances if s.creneau_id and not s.annulee]
+
+    creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'creneau'))
+
+    # (jour, créneau) → (matière, type) → bloc
+    grille = defaultdict(lambda: defaultdict(dict))
+    for seance in seances:
+        jour = seance.jour.jour if seance.jour_id else ''
+        type_affiche = TYPE_AFFICHE.get(seance.type_seance, 'CM')
+        cle = (seance.matiere_id, type_affiche)
+
+        blocs = grille[jour][seance.creneau_id]
+        if cle not in blocs:
+            blocs[cle] = {
+                'type_seance': type_affiche,
+                # Aucun type IPGEI n'est « spécial » au sens du socle (sport,
+                # stage…) : la grille de prépa ne contient que des cours.
+                'type_seance_is_special': False,
+                'em_code':     seance.matiere.code if seance.matiere else '',
+                'em_intitule': seance.matiere.intitule if seance.matiere else '',
+                'lignes':      [],
+            }
+        blocs[cle]['lignes'].append(_ligne(seance, axe))
+
+    def cellule(jour, creneau_id):
+        return list(grille[jour][creneau_id].values())
+
+    lignes = [
+        {'jour': jour.jour, 'cells': [cellule(jour.jour, c.id) for c in creneaux]}
+        for jour in Jour.objects.all().order_by('id')
+    ]
+    return creneaux, lignes
+
+
+def reponse_pdf(template, contexte, nom_fichier):
+    """
+    Rend un emploi du temps en PDF, en paysage et **sans pied de page**.
+
+    `core.pdf_renderer.render_pdf_response` numérote les pages (« Page 1 / 1 »),
+    ce qui convient à un état de plusieurs feuillets mais pas à un emploi du
+    temps : il tient sur une page, et cette mention affichée seule en bas d'une
+    grille distribuée aux étudiants n'apprend rien. On ne touche pas au socle —
+    ses autres documents gardent leur numérotation.
+    """
+    from datetime import date
+
+    from django.http import HttpResponse
+    from rest_framework.response import Response
+
+    from core.pdf_renderer import render_pdf_bytes
+    from core.pdf_utils import get_institution_context
+
+    contexte = {
+        **contexte,
+        **get_institution_context(),
+        'date_impression': date.today().strftime('%d/%m/%Y'),
+    }
+    options = {
+        'margin-top':               '0.40in',
+        'margin-right':             '0.40in',
+        'margin-bottom':            '0.40in',
+        'margin-left':              '0.40in',
+        'orientation':              'Landscape',
+        'page-size':                'A4',
+        'enable-local-file-access': '',
+        'encoding':                 'UTF-8',
+    }
+    try:
+        pdf = render_pdf_bytes(template, contexte, options)
+    except Exception as exc:                       # pragma: no cover - dépend de wkhtmltopdf
+        logger.error('PDF emploi du temps : %s', exc)
+        return Response({'error': f'Erreur génération PDF : {exc}'}, status=500)
+
+    reponse = HttpResponse(pdf, content_type='application/pdf')
+    reponse['Content-Disposition'] = f'attachment; filename="{nom_fichier}"'
+    return reponse
+
+
+def contexte_semaine(semaine):
+    """
+    Numéro, bornes et **état** de la semaine.
+
+    L'état figure sur le document : un emploi du temps imprimé circule détaché
+    de l'écran qui l'a produit, et rien ne disait s'il correspondait encore au
+    suivi. « Prévisionnel » et « modifié après génération » ne s'opposent pas
+    de la même façon à ce qui a été pointé, donc payé.
+    """
+    if semaine is None:
+        return {'semaine': '', 'debut': '', 'fin': '', 'semestre_nom': '',
+                'etat_semaine': ''}
+    return {
+        'semaine':      semaine.numero or '',
+        'debut':        _date_fr(semaine.date_debut),
+        'fin':          _date_fr(semaine.date_fin),
+        'semestre_nom': f'Semestre {semaine.semestre.code}' if semaine.semestre_id else '',
+        'etat_semaine': semaine.libelle_coherence,
+        'est_divergent': semaine.etat_coherence == semaine.ETAT_DIVERGENT,
+    }

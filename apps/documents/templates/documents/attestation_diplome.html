@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  /* ── Attestation de diplôme de licence professionnelle ──────────────────────
+     Reproduction du modèle officiel bilingue FR/AR. Mise en page autonome
+     (wkhtmltopdf) : @page margin 0, marges gérées par .page. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4; margin: 0; }
+  body { font-family: Arial, 'DejaVu Sans', sans-serif; color: #000; background: #fff; }
+
+  /* Géométrie ALIGNÉE sur l'attestation d'inscription : même largeur (240mm),
+     même hauteur (min-height 285mm) et mêmes marges (padding 4mm 2mm 3mm 2mm).
+     wkhtmltopdf (smart-shrink) ramène le tout à la pleine largeur A4.
+     NB : le vieux WebKit de wkhtmltopdf ne gère PAS flexbox → on donne au cadre une
+     hauteur EXPLICITE (285 − 4 − 3 = 278mm) pour qu'il remplisse la page et que le
+     pied positionné en absolu (.verif) se colle bien au bas (sinon il remonte sur
+     les signatures). */
+  /* Marge HAUTE augmentée (10mm) pour garantir que la bordure supérieure du cadre
+     ne soit pas rognée à l'impression (zone non imprimable en haut de page).
+     Hauteur du cadre réduite en conséquence pour rester sur UNE page (10+348+3≈361 ≤ 362). */
+  .page  { width: 240mm; min-height: 362mm; padding: 10mm 2mm 3mm 2mm; margin: auto; }
+  .frame { border: 1.5px solid #000; min-height: 348mm; padding: 9mm 12mm 7mm; position: relative; }
+
+  /* ── En-tête bilingue + logos ─────────────────────────────────────────────── */
+  .hdr { width: 100%; border-collapse: collapse; }
+  .hdr > tbody > tr > td { vertical-align: top; width: 50%; }
+  .hdr-inner { width: 100%; border-collapse: collapse; }
+  .hdr-inner td { vertical-align: middle; }
+  .hdr-logo img { height: 66px; width: 66px; object-fit: contain; }
+  .hdr-logo .ph {
+    height: 62px; width: 62px; border: 2px solid #006633; border-radius: 50%;
+    text-align: center; line-height: 58px; font-weight: 700; color: #006633; font-size: 12pt;
+  }
+  /* En-tête : arabe un peu plus grand que le français (meilleure lisibilité). */
+  /* En-tête : toutes les lignes en GRAS VERT (comme la mention .em). */
+  .txt-fr { font-size: 10pt; line-height: 1.5; color: #006633; font-weight: 700; padding-left: 8px; text-align: left; }
+  .txt-ar { font-size: 13pt; line-height: 1.5; color: #006633; font-weight: 700; padding-right: 8px; text-align: right; direction: rtl; }
+  .txt-fr b, .txt-ar b { color: #006633; }
+
+  .hr { border: 0; border-top: 2px solid #006633; margin: 9px 0 2px; }
+  .hr-thin { border: 0; border-top: 1px solid #006633; margin: 0 0 12px; }
+
+  /* ── Titre ────────────────────────────────────────────────────────────────── */
+  .title { text-align: center; margin: 22px 0 18px; }
+  .title-ar { font-size: 18pt; font-weight: 700; color: #000; direction: rtl; }
+  .title-fr { font-size: 14pt; font-weight: 700; color: #006633; letter-spacing: .02em; margin-top: 4px; text-transform: uppercase; }
+  .title-underline { width: 80px; height: 2px; background: #000; margin: 9px auto 0; }
+
+  /* ── Corps bilingue — UNE LIGNE PAR CHAMP ─────────────────────────────────── */
+  /* Chaque champ = une ligne <tr> avec cellule FR (gauche) et cellule AR (droite)
+     → les deux s'alignent EXACTEMENT au même niveau. Même taille / interligne FR=AR.
+     height + padding répartissent les champs verticalement pour remplir la page
+     (wkhtmltopdf répartit la hauteur excédentaire d'une table sur ses lignes). */
+  /* 3 colonnes : libellé FR (gauche) | valeur partagée centrée | libellé AR (droite).
+     La colonne centrale sert de gouttière → sépare nettement FR et AR (lisibilité)
+     ET accueille les valeurs IDENTIQUES (matricule, NNI, date de naissance) affichées
+     UNE SEULE FOIS au centre, sans répétition dans les deux langues. */
+  .body { width: 100%; border-collapse: collapse; height: 150mm; margin: 10px 0; }
+  /* PAS de font-size ici : « .body td » (spécificité 0,1,1) écraserait « .body-ar »
+     (0,1,0) et l'arabe resterait à 12pt. La taille est donc posée PAR CLASSE. */
+  .body td { vertical-align: top; line-height: 1.75; padding: 6px 0; }
+  /* Texte justifié (FR et AR). Sur une ligne unique (libellés/valeurs), la
+     justification n'a aucun effet → le libellé reste collé à son bord. */
+  .body-fr  { width: 42%; text-align: justify; padding-right: 6px; font-size: 12pt; }
+  .body-mid { width: 16%; text-align: center; padding: 6px 4px; font-size: 12pt; }
+  /* Arabe plus grand que le français (à pt égal, l'arabe paraît plus petit). */
+  .body-ar  { width: 42%; text-align: justify; direction: rtl; padding-left: 6px; font-size: 15pt; }
+  .body-mid.val { font-weight: 700; color: #000; white-space: nowrap; }
+  .body .name { font-weight: 700; color: #000; }
+  .body .em   { font-weight: 700; color: #006633; }
+
+  /* ── Date ─────────────────────────────────────────────────────────────────── */
+  .date-wrap { text-align: center; margin: 24px 0 10px; }
+  .date-box {
+    display: inline-block; direction: rtl; font-size: 12pt;
+    border: 1px solid #9aa6bf; border-radius: 4px; padding: 5px 18px; color: #000;
+  }
+
+  /* ── Signatures (Commandant gauche / Directeur droite) ────────────────────── */
+  .sigs { width: 100%; border-collapse: collapse; margin-top: 24px; }
+  .sigs td { width: 50%; vertical-align: top; text-align: center; padding: 0 10px; }
+  /* Hauteur fixe du bloc titre → les NOMS s'alignent quel que soit le nombre de
+     lignes du titre (ex. « Le Commandant… » sur 2 lignes vs « Le Directeur… »). */
+  .sig-titles { min-height: 42px; }
+  /* Tailles ALIGNÉES sur le corps : AR 15pt, FR 12pt. Espace titre→nom réduit. */
+  .sig-ar  { font-size: 15pt; font-weight: 700; direction: rtl; color: #000; }
+  .sig-fr  { font-size: 12pt; font-weight: 700; color: #006633; margin-top: 1px; }
+  .sig-img { height: 42px; margin: 3px auto 1px; display: block; }
+  .sig-gap { height: 24px; }
+  .sig-name { font-size: 15pt; font-weight: 700; direction: rtl; color: #000; margin-top: 2px; }
+
+  /* ── Vérification : QR CENTRÉ en bas (l'URL est déjà encodée dans le QR → pas de
+     texte d'URL affiché). ──────────────────────────────────────────────────── */
+  .verif {
+    position: absolute; left: 12mm; right: 12mm; bottom: 6mm;
+    text-align: center; border-top: 1px solid #d7dce6; padding-top: 7px;
+  }
+  .verif img { width: 78px; height: 78px; display: inline-block; }
+  .verif .meta { font-size: 8pt; color: #8893a8; margin-top: 3px; }
+</style>
+</head>
+<body>
+{% include 'documents/_duplicata_watermark.html' %}
+<div class="page">
+  <div class="frame">
+
+    <!-- En-tête -->
+    <table class="hdr"><tr>
+      <td>
+        <table class="hdr-inner"><tr>
+          <td class="hdr-logo" style="width:62px;">
+            {% if logo_groupe_b64 %}<img src="{{ logo_groupe_b64 }}" alt="Logo">
+            {% elif logo_b64 %}<img src="{{ logo_b64 }}" alt="Logo">
+            {% else %}<div class="ph">GP</div>{% endif %}
+          </td>
+          <td class="txt-fr">
+            République Islamique de Mauritanie<br>
+            Ministère de l'Enseignement Supérieur et de la recherche Scientifique<br>
+            {% if groupe_fr %}{{ groupe_fr }}<br>{% endif %}
+            {{ inst_nom_fr }}
+          </td>
+        </tr></table>
+      </td>
+      <td>
+        <table class="hdr-inner"><tr>
+          <td class="txt-ar">
+            الجمهورية الإسلامية الموريتانية<br>
+            وزارة التعليم العالي والبحث العلمي<br>
+            {% if groupe_ar %}{{ groupe_ar }}<br>{% endif %}
+            {{ inst_nom_ar }}
+          </td>
+          <td class="hdr-logo" style="width:62px; text-align:right;">
+            {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Logo">
+            {% else %}<div class="ph">{{ inst_nom_fr|slice:":1"|default:"I" }}</div>{% endif %}
+          </td>
+        </tr></table>
+      </td>
+    </tr></table>
+    <hr class="hr"><hr class="hr-thin">
+
+    <!-- Titre -->
+    <div class="title">
+      <div class="title-ar">إفادة شهادة الليسانس المهنية</div>
+      <div class="title-fr">Attestation de Diplôme de Licence Professionnelle</div>
+      <div class="title-underline"></div>
+    </div>
+
+    <!-- Corps bilingue — 3 colonnes : libellé FR | valeur centrée (si identique) | libellé AR -->
+    <table class="body">
+      <tr>
+        <td class="body-fr">Vu le procès-verbal des délibérations du jury de passage et d'attribution de diplômes en date du {{ jury_date }},</td>
+        <td class="body-mid"></td>
+        <td class="body-ar">بناء على محضر مداولات لجنة التجاوز ومنح الشهادات الصادر بتاريخ {{ jury_date }}، فإن:</td>
+      </tr>
+      <tr>
+        <td class="body-fr">{{ etu_label_fr }} : <span class="name">{{ nom_fr }}</span></td>
+        <td class="body-mid"></td>
+        <td class="body-ar">{{ etu_label_ar }}: <span class="name">{{ nom_ar }}</span></td>
+      </tr>
+      <tr>
+        <td class="body-fr">N° d'inscription :</td>
+        <td class="body-mid val">{{ matricule }}</td>
+        <td class="body-ar"> رقم التسجيل :</td>
+      </tr>
+      <tr>
+        <td class="body-fr">Numéro National d'Identification (NNI) :</td>
+        <td class="body-mid val">{{ nni }}</td>
+        <td class="body-ar">الرقم الوطني للتعريف : </td>
+      </tr>
+      <tr>
+        <td class="body-fr">{{ ne_fr }} le</td>
+        <td class="body-mid val">{{ date_naissance }}</td>
+        <td class="body-ar">{{ ne_ar }}</td>
+      </tr>
+      <tr>
+        <td class="body-fr">À {{ lieu_fr }}</td>
+        <td class="body-mid"></td>
+        <td class="body-ar">في {{ lieu_ar }}</td>
+      </tr>
+      <tr>
+        <td class="body-fr">A satisfait à l'ensemble des obligations prévues pour l'obtention du diplôme de licence professionnelle en statistique, filière : <span class="em">{{ filiere_fr }}</span></td>
+        <td class="body-mid"></td>
+        <td class="body-ar">{{ satisf_ar }} جميع متطلبات الحصول على شهادة الليسانس المهنية في مجال الإحصاء، شعبة: <span class="em">{{ filiere_ar }}</span></td>
+      </tr>
+      <tr>
+        <td class="body-fr">Avec la mention :{% if mention_fr %} <span class="em">{{ mention_fr }}</span>{% endif %}</td>
+        <td class="body-mid"></td>
+        <td class="body-ar">بتقدير :{% if mention_ar %} <span class="em">{{ mention_ar }}</span>{% endif %}</td>
+      </tr>
+      <tr>
+        <td class="body-fr">Au titre de l'année universitaire</td>
+        <td class="body-mid val">{{ annee }}</td>
+        <td class="body-ar">برسم السنة الجامعية</td>
+      </tr>
+      <tr>
+        <td class="body-fr">En foi de quoi, la présente attestation lui est délivrée pour servir et valoir ce que de droit.</td>
+        <td class="body-mid"></td>
+        <td class="body-ar">وعليه فقد {{ delivree_ar }} هذه الإفادة للإدلاء بها عند الحاجة.</td>
+      </tr>
+    </table>
+
+    <!-- Date -->
+    <div class="date-wrap">
+      <span class="date-box">نواكشوط بتاريخ {{ today }}</span>
+    </div>
+
+    <!-- Signatures -->
+    <table class="sigs"><tr>
+      <td>
+        <div class="sig-titles">
+          <div class="sig-ar">{{ cmd_titre_ar }}</div>
+          <div class="sig-fr">{{ cmd_titre_fr }}</div>
+        </div>
+        {% if cmd_sig_b64 %}<img class="sig-img" src="{{ cmd_sig_b64 }}" alt="">{% else %}<div class="sig-gap"></div>{% endif %}
+        <div class="sig-name">{{ cmd_nom_ar|default:cmd_nom_fr }}</div>
+      </td>
+      <td>
+        <div class="sig-titles">
+          <div class="sig-ar">{{ dir_titre_ar }}</div>
+          <div class="sig-fr">{{ dir_titre_fr }}</div>
+        </div>
+        {% if dir_sig_b64 %}<img class="sig-img" src="{{ dir_sig_b64 }}" alt="">{% else %}<div class="sig-gap"></div>{% endif %}
+        <div class="sig-name">{{ dir_nom_ar|default:dir_nom_fr }}</div>
+      </td>
+    </tr></table>
+
+    <!-- Vérification : QR centré (l'URL de vérification est encodée dans le QR) -->
+    <div class="verif">
+      {% if qr_image %}<img src="{{ qr_image }}" alt="QR">{% endif %}
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

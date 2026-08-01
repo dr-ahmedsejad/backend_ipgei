@@ -1,0 +1,10 @@
+# Dependencies de developpement / tests — installer via :
+#   pip install -r requirements-dev.txt
+# (en plus de requirements.txt en prod)
+
+pytest==8.3.3
+pytest-django==4.9.0
+pytest-cov==5.0.0
+factory-boy==3.3.1
+freezegun==1.5.1          # mock datetime pour Vacation.date / Paiement.get_taux_at
+psycopg[binary]==3.3.4    # driver PostgreSQL — requis pour pytest --ds=siga.settings.test_pg (avant cutover)

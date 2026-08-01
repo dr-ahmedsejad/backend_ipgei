@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Fiche de Collecte — {{ type_note_label }}</title>
+    <style>
+        @page { size: A4 portrait; margin: 1.2cm 1.4cm; }
+        body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; }
+
+        .fiche { page-break-after: always; page-break-inside: auto; }
+        .fiche:last-child { page-break-after: auto; }
+
+        .fiche-title { text-align: center; font-size: 14px; font-weight: bold; margin: 10px 0 18px 0; }
+
+        .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        .info-table td { padding: 4px 6px; border: none; vertical-align: middle; white-space: nowrap; }
+        .info-table .lbl { font-weight: bold; width: 150px; }
+        .info-table .right-lbl { font-weight: bold; text-align: left; width: 90px; }
+        .info-table .right-val { font-weight: bold; font-size: 13px; }
+
+        hr.thin { border: none; border-top: 1px solid #bbb; margin: 8px 0; }
+
+        .etu-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+        .etu-table th { background: #ececec; border: 1px solid #999; padding: 6px 8px;
+                        text-align: center; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .etu-table td { border: 1px solid #bbb; padding: 5px 8px; vertical-align: middle; height: 26px; }
+        tr:nth-child(even) { background: #fafafa; }
+
+        .col-mat  { width: 110px; text-align: center; }
+        .col-nom  { font-size: 12px; }
+        .col-note { width: 80px; text-align: center; }
+        .col-obs  { width: 130px; }
+
+        .mat-code { font-family: 'Courier New', monospace; font-size: 12px; font-weight: bold; letter-spacing: 0.5px; color: #000; }
+
+        .sig-block { margin-top: 22px; width: 40%; margin-left: auto; }
+        .sig-block p { font-size: 10px; color: #555; margin: 0 0 26px 0; font-weight: bold; }
+        .sig-line { border-bottom: 1px solid #888; }
+        .sig-date { font-size: 10px; color: #555; margin-top: 6px; }
+
+        .entete-wrapper { margin-bottom: 6px; }
+        .empty-row td { text-align: center; color: #888; padding: 20px; }
+    </style>
+</head>
+<body>
+
+{% for groupe in groupes %}
+<div class="fiche">
+
+    <div class="entete-wrapper">
+        {% include 'suivi_en_tete.html' %}
+    </div>
+
+    <div class="fiche-title">Fiche de Collecte — {{ type_note_label }}</div>
+
+    <table class="info-table">
+        <tr><td class="lbl">Filière :</td><td>{{ groupe.filiere|default:"—" }}</td></tr>
+        {% if groupe.nom %}<tr><td class="lbl">Groupe :</td><td>{{ groupe.nom }}</td></tr>{% endif %}
+        <tr><td class="lbl">Élément du module :</td><td>{{ em.code_em }} — {{ em.intitule }}</td></tr>
+        <tr><td class="lbl">Semestre :</td><td>{{ em.semestre.code_semestre|default:"—" }}</td></tr>
+        <tr><td class="lbl">Date :</td><td>{{ date_impression }}</td></tr>
+    </table>
+
+    <hr class="thin">
+
+    <table class="etu-table">
+        <thead>
+            <tr>
+                {% if anonymat %}
+                <th class="col-mat">N° Anonymat</th>
+                {% else %}
+                <th class="col-mat">Matricule</th>
+                <th class="col-nom">Nom et Prénom</th>
+                {% endif %}
+                <th class="col-note">Note /20</th>
+                <th class="col-obs">Observations</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ligne in groupe.lignes %}
+            <tr>
+                {% if anonymat %}
+                <td class="col-mat"><span class="mat-code">{{ ligne.numero_anonymat }}</span></td>
+                {% else %}
+                <td class="col-mat"><span class="mat-code">{{ ligne.etudiant.matricule }}</span></td>
+                <td class="col-nom">{{ ligne.etudiant.nom }}</td>
+                {% endif %}
+                <td class="col-note">&nbsp;</td>
+                <td class="col-obs">&nbsp;</td>
+            </tr>
+            {% empty %}
+            <tr class="empty-row"><td colspan="{% if anonymat %}3{% else %}4{% endif %}">Aucun étudiant</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="sig-block">
+        <p>Signature de l'Enseignant</p>
+        <div class="sig-line"></div>
+        <div class="sig-date">Date : _____ / _____ / _______</div>
+    </div>
+
+</div>
+{% empty %}
+<p style="text-align:center;padding:40px;color:#888">Aucun étudiant.</p>
+{% endfor %}
+
+</body>
+</html>

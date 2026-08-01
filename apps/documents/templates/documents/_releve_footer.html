@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  /* Pied de page NATIF wkhtmltopdf : rendu séparément du corps (pas de mise à
+     l'échelle 240mm), placé dans la marge basse réservée via `margin-bottom`.
+     Flux normal : wkhtmltopdf cale le pied vers le bas de la page. */
+  body { margin: 0; font-family: Arial, sans-serif; }
+  .nb {
+    border-top: 1px solid #cccccc;
+    margin: 0 8mm;
+    padding-top: 1.2mm;
+    font-size: 8pt;
+    color: #444444;
+    line-height: 1.2;
+    overflow: hidden;
+  }
+  .nb .fr { float: left; }
+  .nb .ar { float: right; direction: rtl; }
+</style>
+</head>
+<body>
+  <div class="nb">
+    <span class="fr">NB : Relevé valable après signature, délivré en un seul exemplaire</span>
+    <span class="ar" lang="ar">ملاحظة: كشف الدرجات صالح بعد التوقيع ويسلّم في نسخة واحدة</span>
+  </div>
+</body>
+</html>

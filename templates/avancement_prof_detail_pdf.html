@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Avancement Prof — {{ prof_nom }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 0;
+        }
+        h2 {
+            text-align: center;
+            font-size: 13px;
+            margin: 6px 0 2px 0;
+            color: #006633;
+        }
+        .sous-titre {
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            margin-bottom: 12px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            table-layout: fixed;
+        }
+        .col-code  { width: 7%; }
+        .col-intit { width: 17%; }
+        .col-sem   { width: 7%; }
+        .col-data  { width: 4%; }
+        .col-eq    { width: 5.5%; }
+        .col-eval  { width: 4.5%; }
+
+        th {
+            background-color: #006633;
+            color: white;
+            padding: 5px 3px;
+            text-align: center;
+            font-size: 9px;
+            border: 1px solid #005522;
+        }
+        th.sub  { background-color: #005522; font-size: 8.5px; }
+        th.left { text-align: left; padding-left: 5px; }
+
+        td {
+            border: 1px solid #ddd;
+            padding: 4px 3px;
+            font-size: 9px;
+            vertical-align: middle;
+            text-align: center;
+        }
+        td.left  { text-align: left; padding-left: 5px; }
+        td.code  { font-family: monospace; font-weight: bold; color: #1a1a2e; text-align: left; padding-left: 5px; }
+        td.intit { text-align: left; padding-left: 5px; overflow: hidden; }
+
+        tr:nth-child(even) { background-color: #f9fafb; }
+
+        .pct-ok   { background: rgba(0,102,51,0.14);  color: #006633; font-weight: bold; }
+        .pct-over { background: rgba(200,32,32,0.13); color: #C82020; font-weight: bold; }
+        .pct-na   { color: #94a3b8; }
+
+        .flag-ok   { color: #006633; font-weight: bold; }
+        .flag-none { color: #c0c0c0; }
+
+        .total-row {
+            background-color: #f0f7f0 !important;
+            font-weight: bold;
+            border-top: 2px solid #006633;
+        }
+        .eq-cm-box {
+            display: inline-block;
+            margin: 8px 0;
+            padding: 6px 14px;
+            border-radius: 6px;
+            background: rgba(0,102,51,0.09);
+            color: #006633;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        .footer {
+            margin-top: 14px;
+            font-size: 9px;
+            color: #888;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+{% include 'suivi_en_tete.html' %}
+
+<h2>Avancement des enseignements — {{ prof_nom }}</h2>
+<div class="sous-titre">{{ semestre_label }}</div>
+
+<div style="text-align:center; margin-bottom:10px;">
+    <span class="eq-cm-box">
+        Total éq. CM : {{ totaux_globaux.total_eq_CM|floatformat:2 }} h
+        &nbsp;|&nbsp; CM : {{ totaux_globaux.CM|floatformat:1 }} h
+        &nbsp;|&nbsp; TD : {{ totaux_globaux.TD|floatformat:1 }} h
+        &nbsp;|&nbsp; TP : {{ totaux_globaux.TP|floatformat:1 }} h
+        &nbsp;|&nbsp; PR : {{ totaux_globaux.PR|floatformat:1 }} h
+    </span>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th rowspan="2" class="col-code left">Code EM</th>
+            <th rowspan="2" class="col-intit left">Intitulé</th>
+            <th rowspan="2" class="col-sem">Semestre</th>
+            <th colspan="4" style="background-color:#006633;">Planification</th>
+            <th colspan="4" style="background-color:#1a5c8f;">Réalisation</th>
+            <th colspan="4" style="background-color:#B8960C;">% Avancement</th>
+            <th rowspan="2" class="col-eq" style="background-color:#006633;">Éq. CM</th>
+            <th colspan="3" style="background-color:#475569;">Évaluations</th>
+        </tr>
+        <tr>
+            <th class="sub col-data">CM</th>
+            <th class="sub col-data">TD</th>
+            <th class="sub col-data">TP</th>
+            <th class="sub col-data">PR</th>
+            <th class="sub col-data" style="background-color:#14487a;">CM</th>
+            <th class="sub col-data" style="background-color:#14487a;">TD</th>
+            <th class="sub col-data" style="background-color:#14487a;">TP</th>
+            <th class="sub col-data" style="background-color:#14487a;">PR</th>
+            <th class="sub col-data" style="background-color:#8a6a00;">CM</th>
+            <th class="sub col-data" style="background-color:#8a6a00;">TD</th>
+            <th class="sub col-data" style="background-color:#8a6a00;">TP</th>
+            <th class="sub col-data" style="background-color:#8a6a00;">PR</th>
+            <th class="sub col-eval" style="background-color:#334155;">DS</th>
+            <th class="sub col-eval" style="background-color:#334155;">Exam</th>
+            <th class="sub col-eval" style="background-color:#334155;">Ratt.</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in items %}
+        <tr>
+            <td class="code">{{ row.code_em|default:"—" }}</td>
+            <td class="intit">{{ row.intitule|default:"—" }}</td>
+            <td>{{ row.semestre|default:"—" }}</td>
+
+            {# Planification #}
+            <td>{% if row.plan_CM > 0 %}{{ row.plan_CM }} h{% else %}—{% endif %}</td>
+            <td>{% if row.plan_TD > 0 %}{{ row.plan_TD }} h{% else %}—{% endif %}</td>
+            <td>{% if row.plan_TP > 0 %}{{ row.plan_TP }} h{% else %}—{% endif %}</td>
+            <td>{% if row.plan_PR > 0 %}{{ row.plan_PR }} h{% else %}—{% endif %}</td>
+
+            {# Réalisation #}
+            <td>{% if row.real_CM > 0 %}{{ row.real_CM|floatformat:1 }} h{% else %}—{% endif %}</td>
+            <td>{% if row.real_TD > 0 %}{{ row.real_TD|floatformat:1 }} h{% else %}—{% endif %}</td>
+            <td>{% if row.real_TP > 0 %}{{ row.real_TP|floatformat:1 }} h{% else %}—{% endif %}</td>
+            <td>{% if row.real_PR > 0 %}{{ row.real_PR|floatformat:1 }} h{% else %}—{% endif %}</td>
+
+            {# % CM #}
+            {% if row.plan_CM == 0 %}<td class="pct-na">—</td>
+            {% elif row.pct_CM > 100 %}<td class="pct-over">{{ row.pct_CM }}%</td>
+            {% elif row.pct_CM == 100 %}<td class="pct-ok">{{ row.pct_CM }}%</td>
+            {% else %}<td>{{ row.pct_CM }}%</td>{% endif %}
+
+            {# % TD #}
+            {% if row.plan_TD == 0 %}<td class="pct-na">—</td>
+            {% elif row.pct_TD > 100 %}<td class="pct-over">{{ row.pct_TD }}%</td>
+            {% elif row.pct_TD == 100 %}<td class="pct-ok">{{ row.pct_TD }}%</td>
+            {% else %}<td>{{ row.pct_TD }}%</td>{% endif %}
+
+            {# % TP #}
+            {% if row.plan_TP == 0 %}<td class="pct-na">—</td>
+            {% elif row.pct_TP > 100 %}<td class="pct-over">{{ row.pct_TP }}%</td>
+            {% elif row.pct_TP == 100 %}<td class="pct-ok">{{ row.pct_TP }}%</td>
+            {% else %}<td>{{ row.pct_TP }}%</td>{% endif %}
+
+            {# % PR #}
+            {% if row.plan_PR == 0 %}<td class="pct-na">—</td>
+            {% elif row.pct_PR > 100 %}<td class="pct-over">{{ row.pct_PR }}%</td>
+            {% elif row.pct_PR == 100 %}<td class="pct-ok">{{ row.pct_PR }}%</td>
+            {% else %}<td>{{ row.pct_PR }}%</td>{% endif %}
+
+            {# Éq. CM #}
+            <td style="font-weight:bold; color:#006633;">
+                {% if row.total_eq_CM > 0 %}{{ row.total_eq_CM|floatformat:2 }}{% else %}—{% endif %}
+            </td>
+
+            {# Évaluations #}
+            <td class="{% if row.ds_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.ds_fait %}X{% else %}—{% endif %}</td>
+            <td class="{% if row.exam_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.exam_fait %}X{% else %}—{% endif %}</td>
+            <td class="{% if row.rat_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.rat_fait %}X{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+
+        {# Ligne totaux #}
+        <tr class="total-row">
+            <td colspan="3" style="text-align:right; padding-right:8px;">Total</td>
+            <td colspan="4"></td>
+            <td>{{ totaux_globaux.CM|floatformat:1 }} h</td>
+            <td>{{ totaux_globaux.TD|floatformat:1 }} h</td>
+            <td>{{ totaux_globaux.TP|floatformat:1 }} h</td>
+            <td>{{ totaux_globaux.PR|floatformat:1 }} h</td>
+            <td colspan="4"></td>
+            <td style="color:#006633;">{{ totaux_globaux.total_eq_CM|floatformat:2 }}</td>
+            <td colspan="3"></td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="footer">
+    Généré le {{ date_impression }} &mdash; {{ inst_nom_fr|default:"ISS" }}
+</div>
+
+</body>
+</html>

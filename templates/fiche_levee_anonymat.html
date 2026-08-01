@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #1a1a1a; }
+  .entete { text-align: center; border-bottom: 2px solid #006633; padding-bottom: 10px; margin-bottom: 14px; }
+  .logo-wrap { margin-bottom: 6px; }
+  .logo-wrap img { height: 60px; object-fit: contain; }
+  .ministere { font-size: 10px; color: #555; }
+  .etablissement { font-size: 14px; font-weight: bold; color: #006633; margin-top: 2px; }
+  .bandeau-scelle { background: #fef2f2; border: 1px solid #dc2626; border-radius: 6px;
+                    padding: 6px 16px; text-align: center; margin: 8px 0;
+                    font-weight: bold; color: #991b1b; font-size: 11px; }
+  .titre-doc { text-align: center; margin: 10px 0 8px; }
+  .titre-doc h2 { font-size: 15px; font-weight: bold; text-transform: uppercase;
+                  letter-spacing: 2px; color: #006633; border-bottom: 2px solid #006633;
+                  display: inline-block; padding-bottom: 4px; }
+  .meta-grid { display: flex; gap: 24px; justify-content: center; margin-bottom: 14px;
+               font-size: 11px; flex-wrap: wrap; }
+  .meta-item { display: flex; gap: 6px; }
+  .meta-item .lbl { font-weight: bold; color: #006633; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #006633; color: white; padding: 7px 10px; text-align: left;
+       font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { border: 1px solid #ccc; padding: 6px 10px; vertical-align: middle; }
+  tr:nth-child(even) td { background: #f7faf7; }
+  .num-anon { font-size: 15px; font-weight: bold; color: #006633; text-align: center; }
+  .footer { margin-top: 20px; display: flex; justify-content: space-between; font-size: 10px; color: #555; }
+  .signatures { margin-top: 24px; display: flex; justify-content: space-between; }
+  .sign-block { text-align: center; }
+  .sign-block .lbl { font-weight: bold; font-size: 11px; margin-bottom: 30px; display: block; }
+  .sign-line { border-top: 1px solid #333; width: 150px; display: inline-block; }
+</style>
+</head>
+<body>
+
+<div class="entete">
+  {% if institution %}
+  {% if institution_logo_url %}
+  <div class="logo-wrap"><img src="{{ institution_logo_url }}" alt="Logo"></div>
+  {% endif %}
+  {% if institution.ministere_fr %}<div class="ministere">{{ institution.ministere_fr }}</div>{% endif %}
+  <div class="etablissement">{{ institution.nom_complet_fr|default:institution.nom_fr|default:institution.nom }}</div>
+  {% endif %}
+</div>
+
+<div class="bandeau-scelle">DOCUMENT CONFIDENTIEL — À CONSERVER SCELLÉ JUSQU'À LA FIN DE LA SESSION</div>
+
+<div class="titre-doc"><h2>Fiche de Levée d'Anonymat</h2></div>
+
+<div class="meta-grid">
+  <div class="meta-item"><span class="lbl">Session :</span> {{ session.intitule|default:session.code }}</div>
+  <div class="meta-item"><span class="lbl">Année univ. :</span> {{ session.annee_univ.annee }}</div>
+  <div class="meta-item"><span class="lbl">Date impression :</span> {{ date_impression }}</div>
+  <div class="meta-item"><span class="lbl">Total :</span> {{ anonymats|length }} étudiant{% if anonymats|length != 1 %}s{% endif %}</div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:80px;text-align:center">N° Anonymat</th>
+      <th style="width:130px">Matricule</th>
+      <th>Nom &amp; Prénom</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for anon in anonymats %}
+    <tr>
+      <td class="num-anon">{{ anon.numero_anonymat }}</td>
+      <td style="font-family:monospace">{{ anon.inscription_admin.etudiant.matricule }}</td>
+      <td>{{ anon.inscription_admin.etudiant.nom }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3" style="text-align:center;color:#888;padding:20px">Aucun anonymat généré</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="signatures">
+  <div class="sign-block">
+    <span class="lbl">Président du jury :</span>
+    <div class="sign-line">&nbsp;</div>
+  </div>
+  <div class="sign-block">
+    <span class="lbl">Scolarité :</span>
+    <div class="sign-line">&nbsp;</div>
+  </div>
+  <div class="sign-block">
+    <span class="lbl">Chef d'établissement :</span>
+    <div class="sign-line">&nbsp;</div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>Levée d'anonymat générée par SIGA — {{ date_impression }}</span>
+  <span>{{ anonymats|length }} entrée{% if anonymats|length != 1 %}s{% endif %}</span>
+</div>
+
+</body>
+</html>

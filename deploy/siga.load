@@ -1,0 +1,173 @@
+/*
+ * ============================================================================
+ *  siga.load — Configuration pgloader : copie MySQL (siga) -> PostgreSQL
+ * ============================================================================
+ *
+ *  Rôle : copier les DONNÉES du snapshot MySQL vers une base PostgreSQL neuve,
+ *  en appliquant les casts de type nécessaires (tinyint->bool, json->jsonb,
+ *  char(32)->uuid, datetime->timestamptz, unsigned->bigint).
+ *
+ *  ┌─ CHEMIN PRIMAIRE (ce fichier) : pgloader crée le SCHÉMA + les DONNÉES ─┐
+ *  │  `include drop, create tables, create indexes, reset sequences`        │
+ *  │  Capture les 91 tables, dont les 2 `managed=False`                     │
+ *  │  (prof_type_history, suivi_pointage_departements) que Django ne gère   │
+ *  │  pas. Après le load : `manage.py migrate --fake` aligne l'état Django  │
+ *  │  SANS ré-exécuter le DDL, puis on passe le GATE FIDÉLITÉ SCHÉMA        │
+ *  │  (pg_dump --schema-only vs deploy/canonical_schema.sql). Toute         │
+ *  │  divergence => on ajuste les règles CAST ci-dessous et on rejoue.      │
+ *  └───────────────────────────────────────────────────────────────────────┘
+ *
+ *  FALLBACK (si un cast dérape / la casse de « Seance » pose problème) :
+ *    1. `manage.py migrate` sur PG vide (schéma EXACT Django, casse + citext
+ *       + triggers + séquences corrects par construction) ;
+ *    2. relancer pgloader en `WITH data only` + `session_replication_role`
+ *       = 'replica' (voir bloc commenté en bas), qui n'insère QUE les lignes
+ *       dans le schéma pré-créé. La casse de « Seance » et les triggers
+ *       append-only sont alors garantis par Django.
+ *
+ *  ⚠️ NE MODIFIE JAMAIS LA SOURCE MySQL — pgloader lit seulement (SELECT).
+ *  ⚠️ Les identifiants de connexion ci-dessous sont ceux du DRY-RUN LOCAL.
+ *     Remplacer par les creds staging/prod au moment voulu (ou passer par
+ *     des variables d'env : pgloader accepte les DSN en ligne de commande).
+ *
+ *  Exécution :
+ *      pgloader deploy/siga.load
+ *  puis :
+ *      PG_TEST_DB=siga_pg PG_TEST_PASSWORD=… \
+ *        DJANGO_SETTINGS_MODULE=siga.settings.test_pg python manage.py migrate --fake
+ *      # reset séquences déjà fait par pgloader (reset sequences) ; re-vérifier
+ *      # que chaque séquence > MAX(id) (gate Phase 5.5).
+ * ============================================================================
+ */
+
+LOAD DATABASE
+     FROM      mysql://root@localhost:3306/siga
+     INTO      postgresql://postgres:2212%402212@localhost:5432/siga_pg
+     /* NB : le mot de passe PG contient '@' -> encodé %40 dans le DSN.       */
+     /*      Le user MySQL root local n'a pas de mot de passe (WAMP).         */
+
+ WITH include drop,          /* DROP TABLE avant recréation : base cible jetable */
+      create tables,
+      create indexes,
+      reset sequences,       /* setval() sur toutes les PK serial après le load  */
+      foreign keys,          /* recrée les FK APRÈS insertion des données         */
+      workers = 4, concurrency = 1,
+      batch rows = 2500, batch size = 20MB,
+      prefetch rows = 10000
+
+ SET PostgreSQL PARAMETERS
+      maintenance_work_mem to '512MB',
+      work_mem to '128MB',
+      /* ────────────────────────────────────────────────────────────────── */
+      /*  PIÈGE MAJEUR — timezone. Django tourne avec USE_TZ=True : sur       */
+      /*  MySQL, il stocke les datetimes en **UTC** dans des colonnes        */
+      /*  DATETIME NAÏVES (pas en Africa/Nouakchott).                        */
+      /*  => à l'insertion PG en timestamptz, la session DOIT être en UTC    */
+      /*     pour que la valeur naïve (déjà UTC) soit taguée UTC sans        */
+      /*     décalage. Une session en Africa/Nouakchott décalerait TOUS les  */
+      /*     horodatages de +0h/-0h... (piège du plan §Phase 5).             */
+      /*  Le gate golden_diff (datetime -> UTC ISO µs) rend toute erreur de  */
+      /*  tz immédiatement visible : des deltas datetime PARTOUT = tz faux.  */
+      /* ────────────────────────────────────────────────────────────────── */
+      timezone to 'UTC'
+
+ SET MySQL PARAMETERS
+      net_read_timeout  = '600',
+      net_write_timeout = '600'
+
+ CAST
+      /* tinyint(1) -> boolean : 46 colonnes BooleanField Django.            */
+      type tinyint when (= 1 precision) to boolean drop typemod
+           using tinyint-to-boolean,
+
+      /* json -> jsonb : core_audit_log.changes + core_audit_log_archive.    */
+      type json to jsonb,
+
+      /* int unsigned -> bigint : PositiveIntegerField peut dépasser         */
+      /* INT4_MAX (2 147 483 647). bigint est sûr ; vérifier les bornes au   */
+      /* gate counts si on veut rester en integer.                           */
+      type int      when unsigned to bigint  drop typemod,
+      type smallint when unsigned to integer drop typemod,
+      type bigint   when unsigned to bigint  drop typemod,
+
+      /* datetime / timestamp -> timestamptz. '0000-00-00' MySQL -> NULL.    */
+      /* (interprétation UTC garantie par `timezone to 'UTC'` ci-dessus.)    */
+      type datetime  to timestamptz drop default drop not null
+           using zero-dates-to-null,
+      type timestamp to timestamptz drop default drop not null
+           using zero-dates-to-null,
+
+      /* char(32) hex SANS tirets (UUIDField Django sur MySQL) -> uuid natif.*/
+      /* PostgreSQL accepte les 32 hexas sans tirets en entrée uuid ; les    */
+      /* tirets sont ajoutés à la lecture. CIBLÉ sur les 2 vraies colonnes   */
+      /* UUID uniquement — surtout PAS `type char(32) to uuid` (casserait    */
+      /* tout autre char(32) non-uuid).                                      */
+      column documents_officiel.token_verification to uuid drop typemod,
+      column inscriptions_preinscription.numero_dossier to uuid drop typemod
+
+ BEFORE LOAD DO
+      /* citext : requis si la stratégie de casse « citext » est retenue     */
+      /* (champs d'identité insensibles à la casse — cf. plan §Stratégie de  */
+      /* casse). Inoffensif sinon.                                           */
+      $$ CREATE EXTENSION IF NOT EXISTS citext; $$
+
+ AFTER LOAD DO
+      /* Triggers append-only sur backup_download_log — MÊME sémantique que  */
+      /* apps/backup/migrations/0002 (chemin PostgreSQL). Nécessaire ici car */
+      /* le chemin primaire fait `migrate --fake` (n'exécute pas le DDL).    */
+      /* Idempotent (CREATE OR REPLACE + DROP IF EXISTS avant CREATE).       */
+      $$ CREATE OR REPLACE FUNCTION backup_download_log_append_only()
+         RETURNS trigger AS $body$
+         BEGIN
+             IF TG_OP = 'UPDATE' THEN
+                 RAISE EXCEPTION 'backup_download_log est append-only : UPDATE interdit';
+             ELSIF TG_OP = 'DELETE' THEN
+                 RAISE EXCEPTION 'backup_download_log est append-only : DELETE interdit';
+             END IF;
+             RETURN NULL;
+         END;
+         $body$ LANGUAGE plpgsql; $$,
+      $$ DROP TRIGGER IF EXISTS backup_download_log_no_update ON backup_download_log; $$,
+      $$ CREATE TRIGGER backup_download_log_no_update
+         BEFORE UPDATE ON backup_download_log
+         FOR EACH ROW EXECUTE FUNCTION backup_download_log_append_only(); $$,
+      $$ DROP TRIGGER IF EXISTS backup_download_log_no_delete ON backup_download_log; $$,
+      $$ CREATE TRIGGER backup_download_log_no_delete
+         BEFORE DELETE ON backup_download_log
+         FOR EACH ROW EXECUTE FUNCTION backup_download_log_append_only(); $$
+;
+
+/*
+ * ============================================================================
+ *  BLOC FALLBACK — data-only dans le schéma Django pré-migré (À DÉCOMMENTER
+ *  en remplacement du bloc ci-dessus si le chemin primaire dérape).
+ * ============================================================================
+ *
+ *  Prérequis : `manage.py migrate` a déjà créé le schéma EXACT dans siga_pg
+ *  (casse « Seance », citext, triggers, séquences, index compris).
+ *
+ *  LOAD DATABASE
+ *       FROM  mysql://root@localhost:3306/siga
+ *       INTO  postgresql://postgres:2212%402212@localhost:5432/siga_pg
+ *   WITH data only, reset sequences,
+ *        workers = 4, concurrency = 1,
+ *        batch rows = 2500, prefetch rows = 10000
+ *   SET PostgreSQL PARAMETERS
+ *        timezone to 'UTC',
+ *        session_replication_role to 'replica'   -- désactive FK + triggers
+ *                                                --  (dont append-only) le temps du load
+ *   SET MySQL PARAMETERS
+ *        net_read_timeout = '600', net_write_timeout = '600'
+ *   CAST
+ *        type tinyint when (= 1 precision) to boolean drop typemod using tinyint-to-boolean,
+ *        type json to jsonb,
+ *        type datetime  to timestamptz drop default drop not null using zero-dates-to-null,
+ *        type timestamp to timestamptz drop default drop not null using zero-dates-to-null,
+ *        column documents_officiel.token_verification to uuid drop typemod,
+ *        column inscriptions_preinscription.numero_dossier to uuid drop typemod
+ *   ;
+ *  -- data only ne recrée pas les triggers (déjà présents via migrate) ; il
+ *  -- faut juste re-vérifier après coup que session_replication_role est
+ *  -- revenu à 'origin' (pgloader ferme ses sessions -> automatique).
+ * ============================================================================
+ */

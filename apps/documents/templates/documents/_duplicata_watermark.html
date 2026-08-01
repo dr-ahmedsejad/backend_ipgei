@@ -1,0 +1,28 @@
+{% comment %}
+Filigrane DUPLICATA — affiché uniquement pour une réémission (is_duplicata).
+Inclus juste après <body> dans chaque template de document officiel.
+position:fixed => répété sur chaque page (relevés multi-pages) sous wkhtmltopdf.
+z-index élevé => par-dessus le contenu (semi-transparent) pour bien le voir.
+{% endcomment %}{% if is_duplicata %}
+<div class="duplicata-watermark">DUPLICATA</div>
+<style>
+  .duplicata-watermark {
+    position: fixed;
+    top: 40%;
+    left: -10%;
+    width: 120%;
+    text-align: center;
+    transform: rotate(-32deg);
+    font-size: 105px;
+    font-weight: 900;
+    letter-spacing: 14px;
+    color: rgba(200, 32, 32, 0.26);
+    text-transform: uppercase;
+    z-index: 9999;
+    pointer-events: none;
+    white-space: nowrap;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+</style>
+{% endif %}

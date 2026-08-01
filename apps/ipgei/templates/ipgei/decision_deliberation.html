@@ -1,0 +1,69 @@
+{% extends "ipgei/_base_ipgei.html" %}
+
+{% block contenu %}
+  <div class="corps-texte">
+    Le jury de délibération, réuni pour l'année universitaire
+    <strong>{{ annee_universitaire }}</strong>
+    {% if deliberation.portee == 'semestre' %}au titre du semestre <strong>{{ deliberation.semestre.code }}</strong>{% else %}au titre de l'année{% endif %},
+    après examen des résultats de l'étudiant(e) désigné(e) ci-dessus,
+    a arrêté la décision suivante.
+  </div>
+
+  <div class="encadre" style="text-align:center">
+    <span class="cle">Décision du jury</span><br>
+    <span class="decision-badge{% if ligne.decision == 'reoriente' or ligne.decision == 'exclu' %} defavorable{% endif %}">
+      {{ decision }}
+    </span>
+    <div style="margin-top:10px;font-size:10pt;color:#333">
+      Moyenne générale : <strong style="color:#006633">{{ moyenne|default_if_none:"—"|floatformat:2 }} / 20</strong>
+      &nbsp;·&nbsp; Seuil de validation : <strong>{{ seuil|floatformat:2 }}</strong>
+      {% if rang %}&nbsp;·&nbsp; Rang : <strong>{{ rang }}{% if effectif %} / {{ effectif }}{% endif %}</strong>{% endif %}
+    </div>
+    {% if ligne.motif_ajustement %}
+    <div style="margin-top:8px;font-size:9pt;color:#555;font-style:italic">
+      Observation du jury : {{ ligne.motif_ajustement }}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if details %}
+  <div class="bloc-semestre-titre">Détail des résultats retenus par le jury</div>
+  <table class="notes">
+    <thead>
+      <tr>
+        <th style="width:18mm">Semestre</th>
+        <th style="width:18mm">Code</th>
+        <th class="gauche">Matière</th>
+        <th style="width:16mm">Coefficient</th>
+        <th style="width:20mm">Note retenue</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in details %}
+      <tr>
+        <td>{{ d.semestre.code }}</td>
+        <td>{{ d.matiere.code }}</td>
+        <td class="gauche">{{ d.matiere.intitule }}</td>
+        <td>{{ d.coefficient|floatformat:"-2" }}</td>
+        <td><strong>{{ d.note_retenue|default_if_none:"—"|floatformat:2 }}</strong></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div style="font-size:7.5pt;color:#777">
+    Ces notes sont celles arrêtées lors du jury ; une correction ultérieure d'une note
+    ne modifie pas la présente décision.
+  </div>
+  {% endif %}
+
+  <div style="font-size:9pt;color:#555;margin-top:10px">
+    Délibération {{ deliberation.get_portee_display|lower }} du niveau
+    {{ deliberation.niveau }}{% if date_jury %}, tenue le {{ date_jury|date:"d/m/Y" }}{% endif %}.
+    {% if deliberation.niveau == 'MPSI' %}
+      En 1re année, les décisions possibles sont l'admission en 2e année ou la réorientation.
+    {% else %}
+      En 2e année, les décisions possibles sont l'autorisation à concourir (CNIM) ou le
+      redoublement, ce dernier n'étant accordé qu'une seule fois.
+    {% endif %}
+  </div>
+{% endblock %}

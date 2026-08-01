@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Détails paiement vacation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 0;
+        }
+
+        h2 {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            margin: 8px 0 6px 0;
+        }
+
+        table.main {
+            width: 98%;
+            border-collapse: collapse;
+            margin: 0 auto;
+        }
+
+        table.main th,
+        table.main td {
+            border: 1px solid black;
+            text-align: center;
+            padding: 3px 4px;
+        }
+
+        table.main th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        /* Selecteur plus specifique que `table.main td` pour eviter l'override
+           text-align: center applique a toutes les cellules. */
+        table.main td.name-cell {
+            text-align: left;
+            padding-left: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 160px;
+        }
+
+        tr.total-row td {
+            background-color: #fff3cc;
+            font-weight: bold;
+        }
+
+        table.signature {
+            border-collapse: collapse;
+            width: 98%;
+            margin-top: 20px;
+        }
+
+        table.signature td {
+            border: none;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 0 8px;
+        }
+    </style>
+</head>
+<body>
+
+    {% include 'suivi_en_tete.html' with annee_universitaire=annee_universitaire %}
+    <br>
+
+    <h2>État de vacation pour {{ mois_vacation }}</h2>
+    <br>
+
+    <table class="main">
+        <thead>
+            <tr>
+                <th rowspan="2">Nom</th>
+                <th colspan="3">Cours</th>
+                <th colspan="3">TD</th>
+                <th colspan="3">TP</th>
+                <th colspan="3">PR</th>
+                <th colspan="3">Surveillance</th>
+                <th colspan="3">Encadrement</th>
+                <th colspan="3">Missions</th>
+                <th rowspan="2">Net à payer</th>
+            </tr>
+            <tr>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+                <th>Taux</th><th>Nombre</th><th>Montant</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data_em %}
+            <tr>
+                <td class="name-cell">{{ item.prof_nom }}</td>
+
+                <td>{{ item.taux_effectifs.CM|floatformat:0 }}</td>
+                <td>{{ item.totaux.CM_total|floatformat:1 }}</td>
+                <td>{{ item.montants.CM|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.TD|floatformat:0 }}</td>
+                <td>{{ item.totaux.TD_total|floatformat:1 }}</td>
+                <td>{{ item.montants.TD|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.TP|floatformat:0 }}</td>
+                <td>{{ item.totaux.TP_total|floatformat:1 }}</td>
+                <td>{{ item.montants.TP|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.PR|floatformat:0 }}</td>
+                <td>{{ item.totaux.PR_total|floatformat:1 }}</td>
+                <td>{{ item.montants.PR|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.Surveillance|floatformat:0 }}</td>
+                <td>{{ item.totaux.Surveillance_total|floatformat:1 }}</td>
+                <td>{{ item.montants.Surveillance|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.Encadrement|floatformat:0 }}</td>
+                <td>{{ item.totaux.Encadrement_total|floatformat:1 }}</td>
+                <td>{{ item.montants.Encadrement|floatformat:0 }}</td>
+
+                <td>{{ item.taux_effectifs.Mission|floatformat:0 }}</td>
+                <td>{{ item.totaux.Mission_total|floatformat:1 }}</td>
+                <td>{{ item.montants.Mission|floatformat:0 }}</td>
+
+                <td><strong>{{ item.net_a_payer|floatformat:0 }}</strong></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="22" style="text-align:center; color:#888;">
+                    Aucun vacataire trouvé pour ce mois.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="total-row">
+                <td colspan="22" style="text-align:left; padding-left:8px;">
+                    <strong>Total</strong>
+                </td>
+                <td><strong>{{ montant_global|floatformat:0 }} MRU</strong></td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <table class="signature">
+        <tr>
+            <td colspan="2" style="text-align: right;">
+                <div style="display:inline-block; text-align:center;">
+                    <div>Le Directeur de l&rsquo;{{ inst_sigle|default:inst_nom_fr }}</div>
+                    {% if inst_directeur_fr %}<div><strong>{{ inst_directeur_fr }}</strong></div>{% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

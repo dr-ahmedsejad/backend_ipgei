@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.local
+.env.production
+
+# Dump BD (donnees personnelles). SEUL le dump de deploiement COMPRESSE
+# (dump.sql.gz, ~22 Mo) est suivi par git — repo PRIVE. Il est decompresse
+# au deploiement (gunzip -> dump.sql). Les .sql non compresses sont ignores.
+# ⚠️ Ne JAMAIS activer ce suivi sur un repo PUBLIC — donnees personnelles.
+*.sql
+*.sql.gz
+!dump.sql.gz
+# Schéma canonique PG (référence du gate « fidélité schéma », migration MySQL→PG).
+# Ne contient AUCUNE donnée (pg_dump --schema-only) → versionnable sans risque.
+!canonical_schema.sql
+
+# Certificats HTTPS
+certs/
+
+# Logs Docker
+*.log

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emplois du temps</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+
+        }
+
+        .custom-td {
+            width: 300px;
+            height: 70px;
+            position: relative;
+            padding: 24px 4px 4px 4px;
+        }
+
+        /* Styles des types de séance */
+        .session-type {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+        }
+
+        .session-type.CM { border: 1px solid #3f51b5; color: #3f51b5; }
+        .session-type.TD { border: 1px solid #4CAF50; color: #2E7D32; }
+        .session-type.TP { border: 1px solid #FF9800; color: #EF6C00; }
+        .session-type.PR { border: 1px solid #9C27B0; color: #6A1B9A; }
+
+        /* Cadre salle */
+        .room-frame {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2px 8px;
+            border-radius: 12px;
+            border: 1px solid #607D8B;
+            font-size: 12px;
+            color: #37474F;
+        }
+
+        .course-code {
+            font-weight: bold;
+        }
+        .prof-name {
+            font-weight: bold;
+            margin-top:10px;
+        }
+
+        /* Chips filieres concernees par la seance (vue prof) */
+        .dept-chips {
+            margin-top: 4px;
+        }
+        .dept-chip {
+            display: inline-block;
+            background: rgba(0,102,51,0.08);
+            border: 1px solid rgba(0,102,51,0.35);
+            color: #006633;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 4px;
+            margin: 1px 2px 0 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+            background: white;
+        }
+
+        td, th {
+            border: 1px solid black;
+            padding: 0.5rem;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .rouge {
+            background: #ff4d4d;
+        }
+
+        h2, h4 {
+            text-align: center;
+            margin: 0.1rem 0;
+        }
+
+        /* force une bordure verticale entre deux cellules rouges adjacentes */
+td.rouge + td.rouge {
+  position: relative;
+}
+
+.sport {
+            font-weight: bold;
+            text-align: center;
+        }
+
+/* ligne noire à gauche de la deuxième cellule rouge */
+td.rouge + td.rouge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 100%;
+  background: black;
+  pointer-events: none;
+}
+
+        td.rouge + td.rouge + td.rouge {
+  position: relative;
+}
+
+/* ligne noire à gauche de la deuxième cellule rouge */
+td.rouge  + td.rouge + td.rouge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 100%;
+  background: black;
+  pointer-events: none;
+}
+    </style>
+</head>
+<body>
+{% include '_institution_header.html' %}
+
+<h2>Emplois du temps {{annee_universitaire}}</h2>
+<h4>Professeur : {{ cible }}</h4>
+<h4>Semaine n°{{ semaine }} du {{ debut }} au {{ fin }}</h4>
+
+<table>
+    <tr>
+        <th></th>
+        {% for creneau in creneaux %}
+        <th>{{ creneau.creneau }}</th>
+        {% endfor %}
+    </tr>
+    {% for row in rows %}
+    <tr>
+        <td><b>{{ row.jour }}</b></td>
+        {% for details in row.cells %}
+        <td class="custom-td {% if 'DS' in details.0.type_seance or 'EF' in details.0.type_seance or 'ER' in details.0.type_seance %}rouge{% endif %}">
+            {% for cours_detail in details %}
+                {% if cours_detail.type_seance_is_special %}
+                    <div class="sport">
+                        {{ cours_detail.type_seance }}
+                    </div>
+                {% else %}
+                    <div class="session-type {{ cours_detail.type_seance }}">
+                        {{ cours_detail.type_seance }}
+                    </div>
+
+                    <div class="room-frame">
+                        {% if cours_detail.salle_nom != "Amphi" %}Salle {% endif %}
+                        {{ cours_detail.salle_nom }}
+                    </div>
+
+                    <div class="course-code">
+                        {{ cours_detail.em_code }}
+                    </div>
+                    <div class="course-title">
+                        {{ cours_detail.em_intitule }}
+                    </div>
+
+                    {% if cours_detail.dept_noms %}
+                    <div class="dept-chips">
+                        {% for d in cours_detail.dept_noms %}
+                        <span class="dept-chip">{{ d }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                {% endif %}
+            {% endfor %}
+        </td>
+        {% endfor %}
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Relevé d'absences — {{ etudiant.matricule }}</title>
+    <style>
+        @page { size: A4; margin: 0.75in 0.5in; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; font-size: 12px; color: #000; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { margin: 10px 0; font-size: 20px; font-weight: bold; }
+        .header p { margin: 4px 0; font-size: 13px; }
+        .info-section { margin-bottom: 20px; font-size: 12px; }
+        .info-section p { margin: 3px 0; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 11px; }
+        th { padding: 7px 5px; text-align: center; font-weight: bold; border: 1px solid #000; background: #f0f0f0; }
+        td { padding: 6px 5px; border: 1px solid #000; vertical-align: middle; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: bold; }
+        .badge-absent { background: #dc3545; color: white; }
+        .badge-justifiee { background: #28a745; color: white; }
+        .badge-sanctionne { background: #ffc107; color: black; }
+    </style>
+</head>
+<body>
+    {% include 'suivi_en_tete.html' %}
+
+    <div class="header">
+        <h1>Relevé d'absences</h1>
+        <p><strong>Étudiant :</strong> {{ etudiant.nom }} — {{ etudiant.matricule }}</p>
+        <p><strong>Département :</strong> {{ etudiant.departement.nom }}</p>
+        {% if date_debut %}<p><strong>Période :</strong> {{ date_debut }} au {{ date_fin }}</p>{% endif %}
+    </div>
+
+    <div class="info-section">
+        <p><strong>Total absences :</strong> {{ stats.total_absences }}</p>
+        <p><strong>Non justifiées :</strong> {{ stats.absences_non_justifiees }}</p>
+        <p><strong>Justifiées :</strong> {{ stats.absences_justifiees }}</p>
+        <p><strong>Sanctions :</strong> {{ stats.sanctions }}</p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Créneau</th>
+                <th>Jour</th>
+                <th>Matière (EM)</th>
+                <th>Type séance</th>
+                <th>Professeur</th>
+                <th>Statut</th>
+                <th>Commentaire</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in absences %}
+            <tr>
+                <td>{{ a.date|date:"d/m/Y"|default:"—" }}</td>
+                <td>{{ a.creneau }}</td>
+                <td>{{ a.jour }}</td>
+                <td>{{ a.em }}</td>
+                <td style="text-align:center">{{ a.type_seance }}</td>
+                <td>{{ a.professeur }}</td>
+                <td style="text-align:center">
+                    {% if a.statut == 1 %}<span class="badge badge-absent">Absent</span>
+                    {% elif a.statut == 3 %}<span class="badge badge-justifiee">Justifiée</span>
+                    {% elif a.statut == 2 %}<span class="badge badge-sanctionne">Sanctionné</span>
+                    {% endif %}
+                </td>
+                <td>{{ a.commentaire }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" style="text-align:center; padding:15px;">Aucune absence enregistrée</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

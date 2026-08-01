@@ -1,0 +1,50 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
+Django==4.2.16
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+
+# ── Database ──────────────────────────────────────────────────────────────────
+mysqlclient==2.2.7
+# PG cutover : driver PostgreSQL (bascule pilotée par DB_ENGINE, cf.
+# siga/settings/base.py). mysqlclient reste tant que le cutover n'a pas eu lieu.
+psycopg[binary]==3.3.4
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+django-cors-headers==4.4.0
+
+# ── Filtering ─────────────────────────────────────────────────────────────────
+django-filter==24.3
+
+# ── Security / Brute-force ────────────────────────────────────────────────────
+django-axes==6.5.0
+
+# ── Cache (Redis prod uniquement — fallback LocMemCache si REDIS_URL absent) ──
+# La lib est installee partout pour que prod l'ait, mais Django ne s'y connecte
+# que si REDIS_URL est defini dans l'env (cf siga/settings/base.py:137).
+# En dev local (runserver, mono-worker) -> LocMemCache automatique, Redis non requis.
+redis==5.0.8
+
+# ── File / Static ─────────────────────────────────────────────────────────────
+whitenoise==6.7.0
+Pillow==10.4.0
+
+# ── PDF & QR ───────────────────────────────────────────────────────────────────
+pdfkit==1.0.0
+qrcode[pil]==8.2
+pypdf==6.14.2  # fusion de PDF (génération groupée de documents officiels)
+pyHanko==0.35.1  # signature numérique PAdES des documents officiels (anti-falsification)
+
+# ── Excel export ──────────────────────────────────────────────────────────────
+openpyxl==3.1.5
+
+# ── API Docs (OpenAPI 3) ───────────────────────────────────────────────────────
+drf-spectacular==0.27.2
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-decouple==3.8
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dateutil==2.9.0
+
+# ── Sauvegardes (.7z chiffre AES-256 + LZMA2) ─────────────────────────────────
+py7zr>=1.0.0

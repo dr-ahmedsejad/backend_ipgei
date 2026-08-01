@@ -1,0 +1,57 @@
+# Environnement Python local
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Configuration locale (sera fournie via docker-compose env vars)
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# Logs et caches
+logs/*.log
+*.log
+.cache/
+
+# Backups et dumps
+backups/
+*.sql
+*.sql.gz
+*.json.bak
+*backup*.json
+
+# Fichiers IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Documentation (pas necessaire dans l'image)
+*.md
+docs/
+ANALYSE_*.html
+ANALYSE_*.pdf
+
+# Migrations en attente / scripts ponctuels
+migrate_from_gesafped.py
+null_prof_*.json
+backfill_*.json
+scripts/
+
+# Tests
+tests/
+*.test.py
+
+# Media uploads (monte en volume separe)
+media/

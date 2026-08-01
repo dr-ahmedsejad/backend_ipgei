@@ -1,0 +1,29 @@
+# ════════════════════════════════════════════════════════════════════
+# SIGA — Cron jobs sauvegardes
+# Installe par deploy.sh setup-backup dans /etc/cron.d/siga-backup
+# Format : minute heure jour mois jour-semaine USER commande
+# ════════════════════════════════════════════════════════════════════
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Arbo a plat : /opt contient siga/, gesafped_frontend/, backups/, logs/.
+# Les scripts en heritent (DEPLOY_DIR=/opt/siga/deploy, BACKUP_ROOT=/opt/backups).
+SIGA_ROOT_DIR=/opt
+
+# Backup quotidien — 02h00 (nuit)
+0  2 * * *  root  /opt/siga/deploy/backup-scripts/backup-daily.sh
+
+# Backup quotidien — 14h00 (apres-midi, capture la matinee)
+0 14 * * *  root  /opt/siga/deploy/backup-scripts/backup-daily.sh
+
+# Backup hebdomadaire — dimanche 23h00
+0 23 * * 0  root  /opt/siga/deploy/backup-scripts/backup-weekly.sh
+
+# Backup mensuel — tous les jours a 23h45, le script se court-circuite
+# tout seul sauf le dernier jour du mois (date -d tomorrow == 01)
+45 23 * * * root  /opt/siga/deploy/backup-scripts/backup-monthly.sh
+
+# Test de restauration — 1er du mois 04h00 (apres le full de 02h)
+0  4 1 * *  root  /opt/siga/deploy/backup-scripts/restore-test.sh
+
+# Cleanup retention — tous les jours 05h00
+0  5 * * *  root  /opt/siga/deploy/backup-scripts/cleanup-old.sh

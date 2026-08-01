@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  /* ── CONFIGURATION GÉNÉRALE ─────────────────────────── */
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* On annule les marges de l'imprimante pour tout contrôler manuellement */
+  @page {
+    size: A4;
+
+  }
+
+  /* Contrôle total : La page fait 210mm, avec un padding (marge interne)
+     de 10mm (1cm) de TOUS les côtés. Symétrie garantie. */
+  html, body {
+    width: 240mm;
+    height: 297mm;
+    font-family: Arial, sans-serif;
+    font-size: 13pt;
+    color: #1a1a1a;
+    background: #fff;
+    padding: 5mm 2mm 5mm 2mm;
+    margin: auto;
+  }
+
+  /* ── CONTENEUR PAGE (Tableau maître) ────────────────── */
+  .page-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* Oblige le tableau à respecter les 100% de largeur */
+  }
+
+  /* ── ESPACEMENT VERTICAL DES SECTIONS ───────────────── */
+  .sec-header    { padding-top: 5px !important; padding-bottom: 20px !important; }
+  .sec-annee     { padding-bottom: 15px !important; }
+  .sec-titre     { padding-bottom: 15px !important; }
+  .sec-qr        { padding-bottom: 12px !important; }
+  .sec-etudiant  { padding-bottom: 20px !important; }
+  .sec-notes     { vertical-align: top; padding-bottom: 20px !important; min-height: 400px; }
+  .sec-resume    { padding-bottom: 15px !important; }
+  .sec-decision  { padding-bottom: 25px !important; }
+  .sec-signature { padding-bottom: 15px !important; }
+  .sec-nb        { padding-bottom: 10px !important; }
+
+  /* ── HEADER ─────────────────────────────────────────── */
+  .header-table { width: 100%; border-collapse: collapse; }
+  .header-table td { vertical-align: middle; }
+  .td-fr {
+    text-align: left; width: 38%;
+    font-size: 11pt; font-weight: 700; line-height: 1.4; color: #006633;
+  }
+  .td-logo { text-align: center; width: 24%; }
+  .td-ar {
+    text-align: right; width: 38%;
+    font-size: 12.5pt; font-weight: 700; line-height: 1.4; color: #006633;
+  }
+
+  /* ── LIGNE ANNÉE UNIV ───────────────────────────────── */
+  .annee-bar { width: 100%; border-collapse: collapse; font-size: 12.5pt; }
+  .annee-bar td {
+    border-top: 2px solid #006633;
+    border-bottom: 2px solid #006633;
+    padding: 6px 4px;
+  }
+  .annee-bar .ab-fr  { text-align: left;   font-weight: 600; width: 42%; }
+  .annee-bar .ab-val { text-align: center; font-weight: 700; width: 16%; }
+  .annee-bar .ab-ar  { text-align: right;  font-size: 14pt;  font-weight: 600; width: 42%; }
+
+  /* ── TITRE ───────────────────────────────────────────── */
+  .title-ar { text-align: center; font-size: 22pt; font-weight: 700; color: #cc0000; margin-bottom: 4px; }
+  .title-fr { text-align: center; font-size: 17pt; font-weight: 700; letter-spacing: 0.05em; }
+
+  /* ── BLOC ÉTUDIANT ───────────────────────────────────── */
+  .student-table { width: 100%; border-collapse: collapse; border: 1.5px solid #006633; }
+  .student-table td {
+    padding: 6px 10px;
+    border-bottom: 0.5px solid #c8e6d7;
+    font-size: 13pt;
+    vertical-align: middle;
+  }
+  .student-table tr:last-child td { border-bottom: none; }
+  .st-lbl-fr { color: #006633; font-weight: 700; white-space: nowrap; width: 135px; }
+  .st-val    { text-align: center; font-weight: 600; }
+  .st-lbl-ar { color: #006633; font-weight: 700; text-align: right;
+               white-space: nowrap; width: 135px; font-size: 14pt; }
+
+  /* ── TABLEAU NOTES ───────────────────────────────────── */
+  table.notes {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed; /* OBLIGATOIRE avec le colgroup pour s'étirer parfaitement */
+    font-size: 11pt;
+    border: 2px solid #006633;
+  }
+  table.notes thead tr.th-top { background: #006633; color: #fff; }
+  table.notes thead tr.th-top th {
+    padding: 6px 4px; text-align: center; font-weight: 700;
+    border-right: 1px solid #1a7a45; vertical-align: middle;
+  }
+  table.notes thead tr.th-sub { background: #1a7040; color: #e0f0e8; }
+  table.notes thead tr.th-sub th {
+    padding: 4px; text-align: center; font-size: 10.5pt;
+    border-right: 1px solid #1a7a45;
+  }
+
+  tr.module-row td {
+    background: #fffafa; color: #cc0000; font-weight: 700;
+    font-size: 10pt; padding: 6px;
+    border-top: 1px solid #f0c0c0; border-bottom: 1px solid #f0c0c0;
+  }
+  table.notes tbody tr.em-row td {
+    padding: 5px 4px; border-bottom: 0.5px solid #e0e0e0;
+    text-align: center;
+  }
+
+  /* ── RÉSUMÉ & DÉCISION ───────────────────────────────── */
+  .summary-table {
+    width: 100%; border-collapse: collapse;
+    border: 1.5px solid #006633; font-size: 13pt;
+  }
+  .summary-table td { padding: 8px 12px; border-bottom: 0.5px solid #c8e6d7; }
+  .sum-lbl-fr { font-weight: 700; text-align: left;  width: 42%; color: #1a1a1a; }
+  .sum-val    { text-align: center; font-weight: 700; width: 16%; }
+  .sum-lbl-ar { font-weight: 700; text-align: right; width: 42%; color: #1a1a1a; }
+
+  .decision-band {
+    display: table; width: 100%;
+    padding: 18px 16px; font-weight: 700; font-size: 14pt; color: #fff;
+    border-radius: 4px; min-height: 56px;
+  }
+  .decision-band.valide     { background: #006633; }
+  .decision-band.non-valide { background: #cc0000; }
+  .db-fr { display: table-cell; text-align: left;  }
+  .db-ar { display: table-cell; text-align: right; }
+
+  /* ── SIGNATURE ───────────────────────────────────────── */
+  .sig-date-row { display: table; width: 100%; font-size: 12.5pt; font-weight: 700; margin-bottom: 10px; }
+  .sig-date-fr  { display: table-cell; text-align: left; }
+  .sig-date-ar  { display: table-cell; text-align: right; }
+
+  .nb-bar {
+    display: table; width: 100%;
+    border-top: 1px solid #ccc; padding-top: 5px;
+    font-size: 10pt; color: #666;
+  }
+</style>
+</head>
+<body>
+<table class="page-table">
+<tbody>
+
+  <tr><td class="sec-header">
+    <table class="header-table">
+      <tr>
+        <td class="td-fr">
+          République Islamique de Mauritanie<br>
+          Ministère de l'Enseignement Supérieur<br>
+          et de la Recherche Scientifique<br>
+          {{ institution.nom_fr }}
+        </td>
+        <td class="td-logo">
+          {% if logo_b64 %}
+            <img src="{{ logo_b64 }}" style="height:75px;object-fit:contain;" alt="Logo">
+          {% else %}
+            <div style="width:70px;height:70px;border:2px solid #006633;border-radius:50%;line-height:70px;text-align:center;margin:auto;font-weight:700;font-size:14pt;color:#006633;">ISS</div>
+          {% endif %}
+        </td>
+        <td class="td-ar">
+          <span dir="rtl" lang="ar">الجمهورية الإسلامية الموريتانية<br>
+          وزارة التعليم العالي والبحث العلمي<br>
+          {{ institution.nom_ar }}</span>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-annee">
+    <table class="annee-bar">
+      <tr>
+        <td class="ab-fr">Année Universitaire :</td>
+        <td class="ab-val">{{ annee_univ_label }}</td>
+        <td class="ab-ar" dir="rtl" lang="ar">السنة الجامعية :</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-titre">
+    <div class="title-ar"><span dir="rtl" lang="ar">كشف درجات {{ semestre_label_ar }}</span></div>
+    <div class="title-fr">RELEVÉ DES NOTES DU {{ semestre_label|upper }}</div>
+  </td></tr>
+
+  <tr><td class="sec-qr">
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="width:85px;vertical-align:top;">
+          {% if qr_image %}
+            <img src="{{ qr_image }}" style="width:80px;height:80px;display:block;" alt="QR">
+          {% endif %}
+        </td>
+        <td></td>
+        <td style="width:85px;vertical-align:top;text-align:right;">
+          <div style="width:80px;height:95px;border:1.5px solid #006633;overflow:hidden;background:#fdfdfd;display:inline-block;">
+            {% if photo_b64 %}
+              <img src="{{ photo_b64 }}" style="width:100%;height:100%;object-fit:cover;" alt="Photo">
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-etudiant">
+    <table class="student-table">
+      <tr>
+        <td class="st-lbl-fr">{% if etudiant.genre == 'M' %}L'étudiant :{% else %}L'étudiante :{% endif %}</td>
+        <td class="st-val">{{ etudiant.nom_fr|default:etudiant.nom }}</td>
+        <td class="st-val"><span dir="rtl" lang="ar">{{ etudiant.nom_ar|default:"" }}</span></td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">{% if etudiant.genre == 'M' %}الطالب :{% else %}الطالبة :{% endif %}</span></td>
+      </tr>
+      <tr>
+        <td class="st-lbl-fr">{% if etudiant.genre == 'M' %}Né le :{% else %}Née le :{% endif %}</td>
+        <td colspan="2" style="text-align:center;font-weight:600;">{{ date_naissance|default:"N/A" }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">{% if etudiant.genre == 'M' %}المولود :{% else %}المولودة :{% endif %}</span></td>
+      </tr>
+      <tr>
+        <td class="st-lbl-fr">Matricule :</td>
+        <td colspan="2" style="text-align:center;font-weight:700;font-family:monospace;font-size:13pt;">{{ etudiant.matricule }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">رقم التسجيل :</span></td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-notes">
+    <table class="notes">
+      <colgroup>
+        <col style="width: 12%;"> <col style="width: 28%;"> <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 10%;"> <col style="width: 15%;"> </colgroup>
+      <thead>
+        <tr class="th-top">
+          <th style="text-align:center;"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">العنصر</span><br>Élément</th>
+          <th style="text-align:center;"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">الوحدة</span><br>Module</th>
+          <th colspan="5"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">{{ semestre_label_ar }}</span><br>{{ semestre_label }}</th>
+          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">الدرجة</span><br>Note</th>
+          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">القرار</span><br>Décision</th>
+        </tr>
+        <tr class="th-sub">
+          <th colspan="2"></th>
+          <th>CC</th>
+          <th>EX</th>
+          <th>RAT</th>
+          <th>ME</th>
+          <th>Crédit</th>
+          <th colspan="2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mod in modules %}
+        <tr class="module-row">
+          <td></td>
+          <td><strong>{{ mod.code }}</strong> - {{ mod.intitule_fr }}</td>
+          <td></td><td></td><td></td><td></td><td></td>
+          <td style="text-align:center;">{{ mod.note_module|floatformat:2 }}</td>
+          <td style="text-align:center;">{{ mod.decision }}</td>
+        </tr>
+        {% for e in mod.elements %}
+        <tr class="em-row">
+          <td class="em-code">{{ e.code }}</td>
+          <td class="em-label" style="text-align:left;">{{ e.intitule_fr }}</td>
+          <td>{{ e.cc|floatformat:2|default:"N/A" }}</td>
+          <td>{{ e.exam|floatformat:2|default:"N/A" }}</td>
+          <td>{{ e.exam_rat|floatformat:2|default:"N/A" }}</td>
+          <td>{{ e.me|floatformat:2 }}</td>
+          <td>{{ e.credits }}</td>
+          <td></td>
+          <td style="font-size:9.5pt;">{{ e.decision }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-resume">
+    <table class="summary-table">
+      <tr>
+        <td class="sum-lbl-fr">Total crédits capitalisés</td>
+        <td class="sum-val">{{ credits_valides }} / {{ credits_total }}</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">مجموع الأرصدة المكتسبة</span></td>
+      </tr>
+      <tr>
+        <td class="sum-lbl-fr">Moyenne du semestre</td>
+        <td class="sum-val">{{ moyenne_semestre|floatformat:2 }}</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">معدل السداسي</span></td>
+      </tr>
+      <tr>
+        <td colspan="3" style="padding:8px 12px; border-bottom:0.5px solid #c8e6d7;">
+          <table style="width:100%; border-collapse:collapse;">
+            <tr>
+              <td style="font-weight:700; color:#1a1a1a; width:38%; text-align:left;">Mention :</td>
+              <td style="font-weight:700; color:#006633; width:14%; text-align:center;">
+                {% if moyenne_semestre >= 18 %}Excellent
+                {% elif moyenne_semestre >= 16 %}Très bien
+                {% elif moyenne_semestre >= 14 %}Bien
+                {% elif moyenne_semestre >= 12 %}Assez bien
+                {% elif moyenne_semestre >= 10 %}Passable
+                {% else %}Ajourné
+                {% endif %}
+              </td>
+              <td style="font-weight:700; color:#006633; width:24%; text-align:center;" dir="rtl" lang="ar">
+                {% if moyenne_semestre >= 18 %}ممتاز
+                {% elif moyenne_semestre >= 16 %}جيد جداً
+                {% elif moyenne_semestre >= 14 %}جيد
+                {% elif moyenne_semestre >= 12 %}حسن
+                {% elif moyenne_semestre >= 10 %}مقبول
+                {% else %}راسب
+                {% endif %}
+              </td>
+              <td style="font-weight:700; color:#1a1a1a; width:24%; text-align:right;" dir="rtl" lang="ar">بتقدير :</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-decision">
+    <div class="decision-band {% if decision_semestre == 'Validé' %}valide{% else %}non-valide{% endif %}">
+      <span class="db-fr">Semestre {{ decision_semestre }}</span>
+      <span class="db-ar" dir="rtl">{% if decision_semestre == 'Validé' %}السداسي مستوفى{% else %}السداسي غير مستوفى{% endif %}</span>
+    </div>
+  </td></tr>
+
+  <tr><td class="sec-signature">
+    <div class="sig-date-row">
+      <span class="sig-date-fr">Fait à {{ institution.ville|default:"Nouakchott" }}, Le {{ today }}</span>
+      <span class="sig-date-ar" dir="rtl">نواكشوط، بتاريخ {{ today }}</span>
+    </div>
+    <div style="text-align:center; font-weight:700; margin-top:20px;">
+      Le Directeur &nbsp; &nbsp; &nbsp; المدير
+      <div style="height:60px;"></div> </div>
+  </td></tr>
+
+  <tr><td class="sec-nb">
+    <div class="nb-bar">
+      <span class="nb-fr">NB : Relevé valable après signature, délivré en un seul exemplaire</span>
+      <span dir="rtl" lang="ar" style="float:right;">ملاحظة: كشف الدرجات صالح بعد التوقيع ويسلـّم في نسخة واحدة</span>
+    </div>
+  </td></tr>
+
+</tbody>
+</table>
+</body>
+</html>

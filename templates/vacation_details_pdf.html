@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Détails de Vacation — {{ annee_univ }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 0; }
+        h2   { text-align: center; font-size: 14px; margin: 6px 0 4px 0; color: #006633; }
+        .sous-titre { text-align: center; font-size: 11px; color: #444; margin-bottom: 14px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+        th    { background-color: #006633; color: white; padding: 6px 8px; text-align: left; font-size: 10px; }
+        td    { border: 1px solid #ddd; padding: 5px 7px; font-size: 10px; vertical-align: middle; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .prof-header {
+            background: linear-gradient(135deg, #c2410c, #ea580c) !important;
+            color: white !important;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 6px 8px;
+            border: none;
+        }
+        .prof-header td { border: none; background: transparent !important; color: white; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 8px; font-size: 9px; font-weight: bold; }
+        .badge-cm { background: rgba(0,102,51,0.12);   color: #006633; }
+        .badge-td { background: rgba(26,92,143,0.12);  color: #1a5c8f; }
+        .badge-tp { background: rgba(184,150,12,0.15); color: #8a6a00; }
+        .badge-other { background: rgba(100,116,139,0.12); color: #475569; }
+        .sous-total { background-color: #e8f4ee !important; font-weight: bold; border-top: 1px solid #006633; }
+        .total-row  { background-color: #f0f7f0 !important; font-weight: bold; border-top: 2px solid #006633; }
+        .footer { margin-top: 16px; font-size: 10px; color: #888; text-align: right; }
+    </style>
+</head>
+<body>
+
+{% include 'suivi_en_tete.html' with annee_universitaire=annee_univ %}
+
+<h2>Détails des Vacations</h2>
+<div class="sous-titre">
+    Année universitaire : <strong>{{ annee_univ }}</strong>
+</div>
+
+{% for prof in profs %}
+<table>
+    <thead>
+        <tr class="prof-header">
+            <td colspan="7">
+                {{ prof.nom }} &mdash;
+                {{ prof.total_heures|floatformat:1 }} h &mdash;
+                {{ prof.total_montant|floatformat:0 }} MRU
+            </td>
+        </tr>
+        <tr>
+            <th>Date</th>
+            <th>Élément de module</th>
+            <th>Type</th>
+            <th>Départements</th>
+            <th style="text-align:right;">Durée (h)</th>
+            <th style="text-align:right;">Taux</th>
+            <th style="text-align:right;">Montant (MRU)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in prof.rows %}
+        <tr>
+            <td>{{ r.date }}</td>
+            <td>{{ r.em_intitule|default:"—" }}</td>
+            <td>
+                {% if r.type_label == "CM" %}<span class="badge badge-cm">CM</span>
+                {% elif r.type_label == "TD" %}<span class="badge badge-td">TD</span>
+                {% elif r.type_label == "TP" %}<span class="badge badge-tp">TP</span>
+                {% else %}<span class="badge badge-other">{{ r.type_label|default:"—" }}</span>
+                {% endif %}
+            </td>
+            <td>{{ r.dept_noms|join:", "|default:"—" }}</td>
+            <td style="text-align:right; font-weight:bold;">{{ r.duree|floatformat:1 }}</td>
+            <td style="text-align:right;">{{ r.taux_paiement|floatformat:0 }}</td>
+            <td style="text-align:right; font-weight:bold;">{{ r.montant|floatformat:0 }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="sous-total">
+            <td colspan="4" style="text-align:right;">Sous-total {{ prof.nom }}</td>
+            <td style="text-align:right;">{{ prof.total_heures|floatformat:1 }} h</td>
+            <td></td>
+            <td style="text-align:right; color:#C82020;">{{ prof.total_montant|floatformat:0 }} MRU</td>
+        </tr>
+    </tbody>
+</table>
+{% endfor %}
+
+<table>
+    <tbody>
+        <tr class="total-row">
+            <td colspan="4" style="text-align:right;">Total général</td>
+            <td style="text-align:right; width:80px;">{{ total_heures|floatformat:1 }} h</td>
+            <td style="width:60px;"></td>
+            <td style="text-align:right; width:100px; color:#C82020;">{{ total_montant|floatformat:0 }} MRU</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="footer">Généré le {{ date_impression }} &mdash; {{ inst_nom_fr|default:"ISS" }}</div>
+</body>
+</html>
