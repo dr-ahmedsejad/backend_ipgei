@@ -557,8 +557,8 @@ class SaisieCollectiveSerializer(serializers.Serializer):
 
 # ── Délibération ─────────────────────────────────────────────────────────────
 class DetailLigneDeliberationSerializer(serializers.ModelSerializer):
-    matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
-    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True)
+    matiere_code     = serializers.CharField(source='matiere.code', read_only=True, default='')
+    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True, default='')
     semestre_code    = serializers.CharField(source='semestre.code', read_only=True)
 
     class Meta:
@@ -649,6 +649,21 @@ class DeliberationSerializer(serializers.ModelSerializer):
 
 
 # ── EDT ──────────────────────────────────────────────────────────────────────
+def _exiger_matiere(type_seance, matiere):
+    """
+    La matière n'est facultative que pour une séance spéciale.
+
+    Le modèle l'autorise à être vide — sport et instruction militaire bloquent
+    un créneau sans relever de la maquette. Mais rendre la colonne nullable a
+    aussi levé l'exigence pour les autres types : sans cette règle, un CM
+    pouvait être enregistré sans matière et disparaître de l'avancement.
+    """
+    if matiere is None and not (type_seance and getattr(type_seance, 'is_special', False)):
+        raise serializers.ValidationError(
+            {'matiere': 'La matière est obligatoire pour ce type de séance.'}
+        )
+
+
 class SeanceTypeSerializer(serializers.ModelSerializer):
     sous_groupe      = _champ_sous_groupe()
     # Libellé du référentiel (« CM », « TP », « Sport »…) et caractère spécial :
@@ -660,7 +675,7 @@ class SeanceTypeSerializer(serializers.ModelSerializer):
         source='type_seance.is_special', read_only=True, default=False)
     jour_libelle     = serializers.CharField(source='jour.jour', read_only=True)
     creneau_libelle  = serializers.CharField(source='creneau.creneau', read_only=True)
-    matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
+    matiere_code     = serializers.CharField(source='matiere.code', read_only=True, default='')
     prof_nom         = serializers.CharField(source='prof.nom', read_only=True, default='')
     salle_nom        = serializers.CharField(source='salle.nom', read_only=True, default='')
     sous_groupe_libelle = serializers.CharField(source='sous_groupe.libelle', read_only=True, default='')
@@ -679,6 +694,9 @@ class SeanceTypeSerializer(serializers.ModelSerializer):
         sous_groupe = attrs.get('sous_groupe', getattr(self.instance, 'sous_groupe', None))
         jour        = attrs.get('jour',        getattr(self.instance, 'jour', None))
         creneau     = attrs.get('creneau',     getattr(self.instance, 'creneau', None))
+
+        _exiger_matiere(attrs.get('type_seance', getattr(self.instance, 'type_seance', None)),
+                        attrs.get('matiere',     getattr(self.instance, 'matiere', None)))
 
         if grille and sous_groupe and sous_groupe.classe_id != grille.classe_id:
             raise serializers.ValidationError(
@@ -726,8 +744,8 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
     jour_libelle     = serializers.CharField(source='jour.jour', read_only=True)
     creneau_libelle  = serializers.CharField(source='creneau.creneau', read_only=True)
     creneau_ordre    = serializers.IntegerField(source='creneau.ordre', read_only=True)
-    matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
-    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True)
+    matiere_code     = serializers.CharField(source='matiere.code', read_only=True, default='')
+    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True, default='')
     prof_nom         = serializers.CharField(source='prof.nom', read_only=True, default='')
     prof_initial_nom = serializers.CharField(source='prof_initial.nom', read_only=True, default='')
     salle_nom        = serializers.CharField(source='salle.nom', read_only=True, default='')
@@ -765,6 +783,8 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
         """
         def valeur(champ):
             return attrs.get(champ, getattr(self.instance, champ, None))
+
+        _exiger_matiere(valeur('type_seance'), valeur('matiere'))
 
         sous_groupe = valeur('sous_groupe')
         voisines = SeanceReelle.objects.filter(
@@ -900,7 +920,7 @@ class AbsenceSeanceSerializer(serializers.ModelSerializer):
     etudiant_nom       = serializers.CharField(source='inscription.etudiant.nom_display', read_only=True)
     etudiant_matricule = serializers.CharField(source='inscription.etudiant.matricule', read_only=True)
     statut_display     = serializers.CharField(source='get_statut_display', read_only=True)
-    matiere_code       = serializers.CharField(source='seance.matiere.code', read_only=True)
+    matiere_code       = serializers.CharField(source='seance.matiere.code', read_only=True, default='')
     date_seance        = serializers.DateField(source='seance.date', read_only=True)
     creneau_libelle    = serializers.CharField(source='seance.creneau.creneau', read_only=True)
 

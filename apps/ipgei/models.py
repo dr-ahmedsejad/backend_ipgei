@@ -256,7 +256,8 @@ class SemaineIPGEI(models.Model):
         return {
             (sous_groupe or classe, jour, creneau, em, prof, type_seance)
             for sous_groupe, classe, jour, creneau, em, prof, type_seance
-            in self.seances.filter(annulee=False, **({'classe': classe} if classe else {})).values_list(
+            in self.seances.filter(annulee=False, type_seance__is_special=False,
+                                   **({'classe': classe} if classe else {})).values_list(
                 'sous_groupe_id', 'classe_id', 'jour_id', 'creneau_id',
                 'matiere__em_miroir_id', 'prof_id', 'type_seance__type_seance',
             )
@@ -347,7 +348,8 @@ class SemaineIPGEI(models.Model):
         edt = {s.pk: set() for s in semaines}
         for (sid, sous_groupe, classe_id, jour, creneau, em, prof, type_seance) in (
             SeanceReelle.objects
-            .filter(semaine_id__in=edt, annulee=False, **({'classe': classe} if classe else {}))
+            .filter(semaine_id__in=edt, annulee=False, type_seance__is_special=False,
+                    **({'classe': classe} if classe else {}))
             .values_list('semaine_id', 'sous_groupe_id', 'classe_id', 'jour_id',
                          'creneau_id', 'matiere__em_miroir_id', 'prof_id',
                          'type_seance__type_seance')
@@ -1021,7 +1023,12 @@ class SeanceType(models.Model):
     grille       = models.ForeignKey(GrilleType, on_delete=models.CASCADE, related_name='seances')
     jour         = models.ForeignKey('parametres.Jour', on_delete=models.PROTECT, related_name='+')
     creneau      = models.ForeignKey('parametres.Creneau', on_delete=models.PROTECT, related_name='+')
-    matiere      = models.ForeignKey(Matiere, on_delete=models.PROTECT, related_name='seances_type')
+    # Facultative : une séance spéciale — sport, instruction militaire — bloque
+    # un créneau sans relever d'une matière de la maquette.
+    matiere      = models.ForeignKey(
+        Matiere, on_delete=models.PROTECT, related_name='seances_type',
+        null=True, blank=True,
+    )
     prof         = models.ForeignKey(
         'prof.Prof', on_delete=models.PROTECT, null=True, blank=True, related_name='seances_type_ipgei',
     )
@@ -1054,7 +1061,8 @@ class SeanceType(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.grille.classe.nom} {self.jour} {self.creneau} — {self.matiere.code}'
+        return (f'{self.grille.classe.nom} {self.jour} {self.creneau} — '
+                f'{self.matiere.code if self.matiere else self.type_seance}')
 
     def save(self, *args, **kwargs):
         _vider_si_seance_speciale(self)
@@ -1063,16 +1071,18 @@ class SeanceType(models.Model):
 
 def _vider_si_seance_speciale(seance):
     """
-    Une séance spéciale n'a ni enseignant ni salle.
+    Une séance spéciale n'a ni enseignant, ni salle, ni matière.
 
     Sport, instruction militaire : le créneau est bloqué pour toute la classe,
-    mais aucun enseignant du référentiel ne l'assure et aucune salle n'est
-    réservée. Y laisser un professeur lui compterait des heures, et donc une
-    vacation, pour un cours qu'il ne donne pas.
+    mais aucun enseignant du référentiel ne l'assure, aucune salle n'est
+    réservée, et cela ne relève d'aucune matière de la maquette. Y laisser un
+    professeur lui compterait des heures — donc une vacation — pour un cours
+    qu'il ne donne pas ; y laisser une matière fausserait son avancement.
     """
     if seance.type_seance_id and getattr(seance.type_seance, 'is_special', False):
         seance.prof = None
         seance.salle = None
+        seance.matiere = None
 
 
 class SeanceReelle(models.Model):
@@ -1094,7 +1104,10 @@ class SeanceReelle(models.Model):
     semaine      = models.ForeignKey(SemaineIPGEI, on_delete=models.CASCADE, related_name='seances')
     jour         = models.ForeignKey('parametres.Jour', on_delete=models.PROTECT, related_name='+')
     creneau      = models.ForeignKey('parametres.Creneau', on_delete=models.PROTECT, related_name='+')
-    matiere      = models.ForeignKey(Matiere, on_delete=models.PROTECT, related_name='seances')
+    matiere      = models.ForeignKey(
+        Matiere, on_delete=models.PROTECT, related_name='seances',
+        null=True, blank=True,
+    )
     prof         = models.ForeignKey(
         'prof.Prof', on_delete=models.PROTECT, null=True, blank=True, related_name='seances_ipgei',
     )
@@ -1156,7 +1169,8 @@ class SeanceReelle(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.classe.nom} {self.semaine} {self.jour} {self.creneau} — {self.matiere.code}'
+        return (f'{self.classe.nom} {self.semaine} {self.jour} {self.creneau} — '
+                f'{self.matiere.code if self.matiere else self.type_seance}')
 
     def save(self, *args, **kwargs):
         _vider_si_seance_speciale(self)

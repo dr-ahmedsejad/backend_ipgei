@@ -58,6 +58,10 @@ def _ligne(seance, axe):
     else:                                    # axe classe
         principal, complement = prof, salle
 
+    # Une séance spéciale — sport, instruction militaire — n'a ni enseignant ni
+    # salle : la ligne n'aurait rien à dire, autant ne pas l'écrire.
+    if not principal and not complement and not groupe:
+        return ''
     texte = principal or '—'
     if groupe:
         texte = f'{texte} ({groupe})'
@@ -103,10 +107,13 @@ def construire_grille(seances, *, axe='classe'):
                 # traitement visuel.
                 'est_evaluation': type_affiche in ('DS', 'EF', 'ER'),
                 'em_code':     seance.matiere.code if seance.matiere else '',
-                'em_intitule': seance.matiere.intitule if seance.matiere else '',
+                # Sans matière, le type porte seul le sens de la case.
+                'em_intitule': seance.matiere.intitule if seance.matiere else type_affiche,
                 'lignes':      [],
             }
-        blocs[cle]['lignes'].append(_ligne(seance, axe))
+        ligne = _ligne(seance, axe)
+        if ligne:
+            blocs[cle]['lignes'].append(ligne)
 
     def cellule(jour, creneau_id):
         return list(grille[jour][creneau_id].values())

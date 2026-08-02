@@ -174,8 +174,10 @@ def synchroniser_grille(grille: GrilleType) -> int:
         'matiere', 'prof', 'salle', 'jour', 'creneau', 'sous_groupe',
     )
     for seance in seances:
+        # Une séance spéciale n'a pas de matière, donc pas d'EM : elle bloque
+        # le créneau sans porter d'enseignement.
         matiere = seance.matiere
-        em = matiere.em_miroir or synchroniser_matiere(matiere)
+        em = (matiere.em_miroir or synchroniser_matiere(matiere)) if matiere else None
         lignes.append(Emplois(
             annee_universitaire=classe.annee_universitaire,
             type_semestre=grille.type_semestre,
@@ -183,7 +185,7 @@ def synchroniser_grille(grille: GrilleType) -> int:
             em=em,
             departement_id=seance.sous_groupe_id or classe.pk,
             salle=seance.salle,
-            semestre=semestre_socle(matiere.code_semestre),
+            semestre=semestre_socle(matiere.code_semestre) if matiere else None,
             creneau_fk=seance.creneau,
             type_seance_fk=seance.type_seance,
             jour_fk=seance.jour,
@@ -247,8 +249,10 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
 
     lignes = []
     for seance in seances:
+        # Une séance spéciale n'a pas de matière, donc pas d'EM : elle bloque
+        # le créneau sans porter d'enseignement.
         matiere = seance.matiere
-        em = matiere.em_miroir or synchroniser_matiere(matiere)
+        em = (matiere.em_miroir or synchroniser_matiere(matiere)) if matiere else None
         lignes.append(Emplois(
             annee_universitaire=annee_universitaire,
             type_semestre=type_semestre,
@@ -256,7 +260,7 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
             em=em,
             departement_id=seance.sous_groupe_id or seance.classe_id,
             salle=seance.salle,
-            semestre=semestre_socle(matiere.code_semestre),
+            semestre=semestre_socle(matiere.code_semestre) if matiere else None,
             creneau_fk=seance.creneau,
             type_seance_fk=seance.type_seance,
             jour_fk=seance.jour,
