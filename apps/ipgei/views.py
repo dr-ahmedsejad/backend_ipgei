@@ -864,6 +864,66 @@ class SeanceReelleViewSet(_ErreurMetierMixin, ModelViewSet):
         qs = self.get_queryset().filter(classe_id=classe_id, semaine_id=semaine_id)
         return Response(self.get_serializer(qs, many=True).data)
 
+    @action(detail=False, methods=['get'], url_path='occupation')
+    def occupation(self, request):
+        """
+        Enseignants et salles déjà pris, sur les AUTRES classes.
+
+        L'écran de saisie retirait déjà de la liste un enseignant occupé, mais
+        il ne connaissait que la grille affichée : en passant d'une classe à
+        l'autre il repartait de zéro, et le même professeur pouvait être placé
+        deux fois sur le même créneau. La contrainte est de portée
+        établissement, elle ne peut donc venir que du serveur.
+
+        Le périmètre suit celui de l'écran : une semaine précise si l'on édite
+        une semaine, sinon toutes les grilles types de la même année et du même
+        type de semestre — deux grilles types qui se recouvrent produiraient le
+        conflit à chaque semaine dupliquée.
+        """
+        classe_id = request.query_params.get('classe')
+        if not classe_id:
+            raise ValidationError({'classe': 'Classe requise.'})
+        classe = Classe.objects.filter(pk=classe_id).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe introuvable.'})
+
+        semaine_id = request.query_params.get('semaine')
+        if semaine_id:
+            seances = (
+                SeanceReelle.objects
+                .filter(semaine_id=semaine_id, annulee=False)
+                .exclude(classe_id=classe.pk)
+                .select_related('classe', 'prof', 'salle', 'sous_groupe')
+            )
+            contexte = lambda s: s.classe.nom            # noqa: E731
+        else:
+            type_semestre = request.query_params.get('type_semestre', 'I')
+            if type_semestre not in ('I', 'P'):
+                raise ValidationError(
+                    {'type_semestre': "Type de semestre attendu : 'I' ou 'P'."})
+            seances = (
+                SeanceType.objects
+                .filter(grille__type_semestre=type_semestre,
+                        grille__classe__annee_universitaire=classe.annee_universitaire)
+                .exclude(grille__classe_id=classe.pk)
+                .select_related('grille__classe', 'prof', 'salle', 'sous_groupe')
+            )
+            contexte = lambda s: s.grille.classe.nom     # noqa: E731
+
+        # Le front a besoin de savoir OÙ la personne est prise : masquer un nom
+        # sans pouvoir dire pourquoi rend l'écran incompréhensible.
+        return Response([
+            {
+                'jour':    s.jour_id,
+                'creneau': s.creneau_id,
+                'prof':    s.prof_id,
+                'salle':   s.salle_id,
+                'classe':  contexte(s) + (f' ({s.sous_groupe.groupe})'
+                                          if s.sous_groupe_id else ''),
+            }
+            for s in seances if s.prof_id or s.salle_id
+        ])
+
     # ── Impression ───────────────────────────────────────────────────────────
     def _semaine_demandee(self, request):
         """Semaine du calendrier IPGEI passée en paramètre, ou 400."""

@@ -649,6 +649,45 @@ class DeliberationSerializer(serializers.ModelSerializer):
 
 
 # ── EDT ──────────────────────────────────────────────────────────────────────
+def _refuser_double_affectation(voisines, instance, prof, salle):
+    """
+    Un enseignant, une salle : un seul endroit à la fois.
+
+    L'écran de saisie masque déjà ce qui est pris, mais il ne peut pas tout :
+    deux responsables qui éditent deux classes en parallèle ne voient pas les
+    listes l'un de l'autre, et l'API reste accessible directement. Sans cette
+    règle au serveur, un professeur se retrouve sur deux classes au même
+    moment — et ses heures sont comptées deux fois jusque dans la vacation.
+
+    `voisines` couvre les séances des AUTRES classes sur le même créneau.
+    """
+    if instance is not None:
+        voisines = voisines.exclude(pk=instance.pk)
+
+    if prof is not None:
+        ailleurs = voisines.filter(prof=prof).first()
+        if ailleurs is not None:
+            raise serializers.ValidationError(
+                {'prof': f'{prof} assure déjà une séance sur ce créneau '
+                         f'({_ou_est(ailleurs)}).'}
+            )
+    if salle is not None:
+        ailleurs = voisines.filter(salle=salle).first()
+        if ailleurs is not None:
+            raise serializers.ValidationError(
+                {'salle': f'La salle {salle} est déjà occupée sur ce créneau '
+                          f'({_ou_est(ailleurs)}).'}
+            )
+
+
+def _ou_est(seance):
+    """Nomme la classe — masquer un nom sans dire où il est pris est stérile."""
+    classe = (seance.classe if hasattr(seance, 'classe')
+              else seance.grille.classe)
+    groupe = f' {seance.sous_groupe.groupe}' if seance.sous_groupe_id else ''
+    return f'{classe.nom}{groupe}'
+
+
 def _exiger_matiere(type_seance, matiere):
     """
     La matière n'est facultative que pour une séance spéciale.
@@ -697,6 +736,18 @@ class SeanceTypeSerializer(serializers.ModelSerializer):
 
         _exiger_matiere(attrs.get('type_seance', getattr(self.instance, 'type_seance', None)),
                         attrs.get('matiere',     getattr(self.instance, 'matiere', None)))
+
+        if grille is not None:
+            _refuser_double_affectation(
+                SeanceType.objects.filter(
+                    grille__type_semestre=grille.type_semestre,
+                    grille__classe__annee_universitaire=grille.classe.annee_universitaire,
+                    jour=jour, creneau=creneau,
+                ).exclude(grille__classe_id=grille.classe_id),
+                self.instance,
+                attrs.get('prof',  getattr(self.instance, 'prof',  None)),
+                attrs.get('salle', getattr(self.instance, 'salle', None)),
+            )
 
         if grille and sous_groupe and sous_groupe.classe_id != grille.classe_id:
             raise serializers.ValidationError(
@@ -785,6 +836,14 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
             return attrs.get(champ, getattr(self.instance, champ, None))
 
         _exiger_matiere(valeur('type_seance'), valeur('matiere'))
+
+        _refuser_double_affectation(
+            SeanceReelle.objects.filter(
+                semaine=valeur('semaine'), jour=valeur('jour'),
+                creneau=valeur('creneau'), annulee=False,
+            ).exclude(classe=valeur('classe')),
+            self.instance, valeur('prof'), valeur('salle'),
+        )
 
         sous_groupe = valeur('sous_groupe')
         voisines = SeanceReelle.objects.filter(
