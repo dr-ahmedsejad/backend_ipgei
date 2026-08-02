@@ -1208,18 +1208,24 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
         if not seances:
             raise ValidationError('Aucune archive pour cette semaine.')
 
+        axe      = self._axe(request)
         premiere = seances[0]
         semaine  = SemaineIPGEI.objects.select_related('semestre').filter(
             pk=request.query_params.get('semaine')).first()
-        creneaux, lignes = edt_pdf.construire_grille(seances, axe='classe')
+        creneaux, lignes = edt_pdf.construire_grille(seances, axe=axe)
+
+        libelle, cible = {
+            'prof':  ('Enseignant', premiere.prof_nom),
+            'salle': ('Salle',      premiere.salle_nom),
+        }.get(axe, ('Classe', premiere.classe_nom))
 
         return edt_pdf.reponse_pdf(
             'ipgei/emploi_pdf.html',
             {
                 'annee_universitaire': (semaine.semestre.annee_universitaire
                                         if semaine and semaine.semestre_id else ''),
-                'cible_libelle':       'Classe',
-                'cible':               premiere.classe_nom,
+                'cible_libelle':       libelle,
+                'cible':               cible,
                 'creneaux':            creneaux,
                 'rows':                lignes,
                 'semaine':      semaine.numero if semaine else '',
@@ -1232,31 +1238,71 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
                 # courant, alors qu'ils diffèrent souvent — c'est la raison même
                 # de sa conservation.
                 'etat_semaine': (
-                    f'Archive · version {premiere.version} · emploi du temps '
-                    f'ayant servi à la génération du suivi du '
-                    f'{edt_pdf._date_fr(premiere.genere_le.date())}'
+                    f'Publié le {edt_pdf._date_fr(premiere.genere_le.date())}'
+                    + (f' · version {premiere.version}'
+                       if axe == 'classe' and premiere.version > 1 else '')
                 ),
                 'est_divergent': False,
             },
-            f'Archive_{_nom_fichier(premiere.classe_nom)}'
-            f'_S{semaine.numero if semaine else 0}_v{premiere.version}.pdf',
+            f'Emploi_{_nom_fichier(cible)}'
+            f'_S{semaine.numero if semaine else 0}.pdf',
         )
 
     def _prise_de_vue(self, request):
-        """Séances d'une (semaine, classe, version) — la dernière par défaut."""
-        semaine_id = request.query_params.get('semaine')
-        classe_id  = request.query_params.get('classe')
-        if not (semaine_id and classe_id):
-            raise ValidationError('Paramètres requis : semaine, classe.')
+        """
+        Séances publiées d'une semaine, selon l'axe demandé.
 
-        qs = EmploiArchive.objects.filter(semaine_id=semaine_id, classe_id=classe_id)
-        version = request.query_params.get('version')
-        if version:
-            qs = qs.filter(version=version)
-        else:
-            derniere = qs.aggregate(v=Max('version'))['v']
-            qs = qs.filter(version=derniere) if derniere else qs.none()
-        return qs.order_by('jour_ref', 'creneau_ordre')
+        `classe` donne la grille d'une classe — c'est là que la notion de
+        version a un sens, puisque c'est classe par classe qu'on régénère.
+        `prof` et `salle` traversent les classes : chacune y apporte sa
+        dernière version, une classe régénérée ne devant pas ressortir deux
+        fois dans l'emploi du temps d'un enseignant.
+        """
+        semaine_id = request.query_params.get('semaine')
+        if not semaine_id:
+            raise ValidationError('Paramètre requis : semaine.')
+
+        classe_id = request.query_params.get('classe')
+        prof_id   = request.query_params.get('prof')
+        salle_id  = request.query_params.get('salle')
+        if not (classe_id or prof_id or salle_id):
+            raise ValidationError('Paramètre requis : classe, prof ou salle.')
+
+        qs = EmploiArchive.objects.filter(semaine_id=semaine_id)
+        if classe_id:
+            qs = qs.filter(classe_id=classe_id)
+            version = request.query_params.get('version')
+            if version:
+                return qs.filter(version=version).order_by('jour_ref', 'creneau_ordre')
+        if prof_id:
+            qs = qs.filter(prof_ref=prof_id)
+        if salle_id:
+            qs = qs.filter(salle_ref=salle_id)
+
+        # Dernière version DE CHAQUE CLASSE. Un `Max` global retiendrait la
+        # version 2 d'une classe régénérée et effacerait les classes restées
+        # en version 1.
+        dernieres = {
+            l['classe_id']: l['v']
+            for l in (EmploiArchive.objects
+                      .filter(semaine_id=semaine_id)
+                      .values('classe_id')
+                      .annotate(v=Max('version')))
+        }
+        retenues = [
+            a.pk for a in qs.only('id', 'classe_id', 'version')
+            if a.version == dernieres.get(a.classe_id)
+        ]
+        return (EmploiArchive.objects.filter(pk__in=retenues)
+                .order_by('jour_ref', 'creneau_ordre'))
+
+    def _axe(self, request):
+        """Axe de lecture, déduit du filtre demandé."""
+        if request.query_params.get('prof'):
+            return 'prof'
+        if request.query_params.get('salle'):
+            return 'salle'
+        return 'classe'
 
 
 class AbsenceSeanceViewSet(ModelViewSet):

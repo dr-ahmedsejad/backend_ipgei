@@ -36,6 +36,8 @@ def _instantane(seance, semaine, version, genere_le):
         matiere_ref=seance.matiere_id,
         type_seance_ref=seance.type_seance_id,
         sous_groupe_ref=seance.sous_groupe_id,
+        prof_ref=seance.prof_id,
+        salle_ref=seance.salle_id,
 
         jour_libelle=seance.jour.jour if seance.jour_id else '',
         creneau_libelle=seance.creneau.creneau if seance.creneau_id else '',

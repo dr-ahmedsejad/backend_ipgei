@@ -1361,6 +1361,11 @@ class EmploiArchive(models.Model):
     matiere_ref     = models.IntegerField(null=True, blank=True)
     type_seance_ref = models.IntegerField(null=True, blank=True)
     sous_groupe_ref = models.IntegerField(null=True, blank=True)
+    # L'emploi du temps publié se consulte aussi par enseignant et par salle.
+    # Le nom figé ne suffit pas à filtrer : deux homonymes, une orthographe
+    # corrigée, et la grille d'un enseignant se mélange à celle d'un autre.
+    prof_ref        = models.IntegerField(null=True, blank=True)
+    salle_ref       = models.IntegerField(null=True, blank=True)
 
     # Libellés figés
     jour_libelle        = models.CharField(max_length=30,  blank=True, default='')
@@ -1385,6 +1390,8 @@ class EmploiArchive(models.Model):
         ordering            = ['-genere_le', 'jour_ref', 'creneau_ordre']
         indexes = [
             models.Index(fields=['semaine', 'classe', 'version']),
+            models.Index(fields=['semaine', 'prof_ref']),
+            models.Index(fields=['semaine', 'salle_ref']),
         ]
 
     def __str__(self):
