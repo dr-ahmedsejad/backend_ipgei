@@ -717,3 +717,116 @@ def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> di
         'valide':              moyenne is not None and moyenne >= params.seuil_validation,
         'absences':            bilan_absences(inscription),
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Inscription
+# ═════════════════════════════════════════════════════════════════════════════
+def semestres_du_niveau(niveau: str, annee_universitaire: str):
+    """Les deux semestres d'une année d'étude : S1/S2 en MPSI, S3/S4 en MP."""
+    return SemestreIPGEI.objects.filter(
+        code__in=SEMESTRES_PAR_NIVEAU[niveau],
+        annee_universitaire=annee_universitaire,
+    ).order_by('code')
+
+
+@transaction.atomic
+def inscrire_aux_matieres(inscription: InscriptionIPGEI) -> int:
+    """
+    Inscription pédagogique — automatique et entière.
+
+    À l'IPGEI il n'y a ni dette ni crédit : on ne choisit pas ses matières, et
+    on n'en traîne aucune d'une année sur l'autre. Inscrire un étudiant dans
+    une classe, c'est donc l'inscrire à TOUTES les matières des deux semestres
+    de son niveau — l'étape pédagogique de l'inscription universitaire, mais
+    sans rien à décider, donc sans rien à oublier.
+
+    Idempotent : relancer ne crée que ce qui manque et n'écrase aucune note.
+    """
+    total = 0
+    for semestre in semestres_du_niveau(
+        inscription.classe.niveau_code, inscription.annee_universitaire,
+    ):
+        total += initialiser_notes(inscription, semestre)
+    return total
+
+
+def controler_reinscription(etudiant, classe) -> tuple:
+    """
+    Dit si l'étudiant peut être inscrit dans cette classe, et à quel titre.
+
+    Se réinscrire dans le niveau déjà suivi, c'est redoubler. Or le
+    redoublement n'existe pas en 1re année : un MPSI est admis en 2e année ou
+    réorienté, jamais maintenu. En 2e année il est possible, mais il se
+    décide — c'est le jury qui l'accorde, en posant le statut « redoublant »
+    sur l'inscription de l'année écoulée, et le droit s'épuise.
+
+    Refuser ici plutôt qu'au jury évite le cas où l'on rattrape la règle trop
+    tard : une fois l'étudiant inscrit, ses notes et ses absences existent.
+
+    Retourne `(statut, nb_redoublements)` à poser sur la nouvelle inscription.
+    Lève `ValidationError` si l'inscription est interdite.
+    """
+    anterieures = list(
+        InscriptionIPGEI.objects
+        .filter(etudiant=etudiant)
+        .exclude(annee_universitaire=classe.annee_universitaire)
+        .select_related('classe')
+        .order_by('-annee_universitaire')
+    )
+    memes = [i for i in anterieures if i.classe.niveau_code == classe.niveau_code]
+    if not memes:
+        return InscriptionIPGEI.STATUT_ACTIF, 0
+
+    precedente = memes[0]
+    if classe.niveau_code == NIVEAU_MPSI:
+        raise ValidationError(
+            f"Le redoublement n'est pas autorisé en 1re année. "
+            f'{etudiant} a déjà suivi {precedente.classe.niveau_code} en '
+            f'{precedente.annee_universitaire}.'
+        )
+
+    if precedente.statut != InscriptionIPGEI.STATUT_REDOUBLANT:
+        raise ValidationError(
+            f'Le redoublement en 2e année se décide en jury. '
+            f"L'inscription de {precedente.annee_universitaire} porte le statut "
+            f'« {precedente.get_statut_display()} », pas « Redoublant ».'
+        )
+
+    droit_max = ParametresIPGEI.pour(classe.institution).droit_redoublement_max
+    if precedente.nb_redoublements > droit_max:
+        raise ValidationError(
+            f'Droit de redoublement épuisé : {precedente.nb_redoublements} '
+            f'redoublement(s) pour un maximum de {droit_max}.'
+        )
+
+    # Le compteur suit l'étudiant : c'est lui qui borne le droit, et le jury
+    # l'a déjà incrémenté en accordant le redoublement.
+    return InscriptionIPGEI.STATUT_REDOUBLANT, precedente.nb_redoublements
+
+
+@transaction.atomic
+def rattacher_inscrits(semestre: SemestreIPGEI) -> int:
+    """
+    Inscrit aux matières d'un semestre tous les étudiants déjà inscrits.
+
+    L'automatisme ne peut pas être à sens unique. Un étudiant inscrit en
+    septembre l'est pour l'année, mais le semestre pair n'existe souvent pas
+    encore à cette date, et la matière d'un semestre s'ajoute parfois après la
+    rentrée. Sans ce rattrapage, ces étudiants n'auraient jamais la ligne de
+    note correspondante — et rien ne le signalerait avant la délibération.
+
+    Idempotent.
+    """
+    inscriptions = (
+        InscriptionIPGEI.objects
+        .filter(actif=True,
+                annee_universitaire=semestre.annee_universitaire,
+                classe__annee_universitaire=semestre.annee_universitaire)
+        .select_related('classe')
+    )
+    total = 0
+    for inscription in inscriptions:
+        if inscription.classe.niveau_code == semestre.niveau:
+            total += initialiser_notes(inscription, semestre)
+    return total

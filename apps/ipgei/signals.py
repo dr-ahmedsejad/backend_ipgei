@@ -15,7 +15,7 @@ import logging
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from .models import Matiere, SeanceType
+from .models import Matiere, SeanceType, SemestreIPGEI
 
 logger = logging.getLogger('siga')
 
@@ -50,3 +50,43 @@ def _miroir_matiere(sender, instance, **kwargs):
         synchroniser_matiere(instance)
     except Exception:
         logger.exception('Miroir EM impossible pour la matiere #%s', instance.pk)
+
+
+@receiver(post_save, sender=SemestreIPGEI, dispatch_uid='ipgei_inscrire_semestre')
+def _inscrire_au_nouveau_semestre(sender, instance, created, **kwargs):
+    """
+    Un semestre qui s'ouvre inscrit d'office les étudiants de son niveau.
+
+    À l'IPGEI on s'inscrit à une année, pas à un semestre : le semestre pair,
+    créé plus tard, ne doit pas obliger à repasser sur chaque dossier.
+    """
+    if not created:
+        return
+    from . import services
+    try:
+        n = services.rattacher_inscrits(instance)
+        if n:
+            logger.info('Semestre %s : %s ligne(s) de note créée(s).', instance.code, n)
+    except Exception:
+        logger.exception('Rattachement des inscrits au semestre %s impossible', instance.pk)
+
+
+@receiver(post_save, sender=Matiere, dispatch_uid='ipgei_inscrire_matiere')
+def _inscrire_a_la_nouvelle_matiere(sender, instance, created, **kwargs):
+    """
+    Une matière ajoutée après la rentrée vaut pour les inscrits du semestre.
+
+    Sans cela elle n'existerait que pour les inscriptions postérieures, et deux
+    étudiants de la même classe n'auraient pas la même maquette.
+    """
+    if not (created and instance.actif):
+        return
+    from . import services
+    from .models import SemestreIPGEI as _Semestre
+    try:
+        for semestre in _Semestre.objects.filter(
+            code=instance.code_semestre, institution=instance.institution,
+        ):
+            services.rattacher_inscrits(semestre)
+    except Exception:
+        logger.exception('Rattachement des inscrits à la matière %s impossible', instance.pk)

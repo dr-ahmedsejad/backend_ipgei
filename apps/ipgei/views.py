@@ -308,18 +308,29 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
                     f'{classe.annee_universitaire}.'
                 )
 
+            # Redoubler se contrôle AVANT d'écrire : une fois l'inscription
+            # créée, ses notes et ses absences existent, et la défaire coûte
+            # plus que de la refuser.
+            statut, nb_redoublements = services.controler_reinscription(etudiant, classe)
+
             inscription = InscriptionIPGEI.objects.create(
                 etudiant=etudiant,
                 classe=classe,
                 sous_groupe_id=sous_groupe_id or None,
                 numero_ordre=donnees.get('numero_ordre'),
                 annee_universitaire=classe.annee_universitaire,
+                statut=statut,
+                nb_redoublements=nb_redoublements,
             )
 
-        return Response(
-            InscriptionIPGEISerializer(inscription).data,
-            status=status.HTTP_201_CREATED,
-        )
+            # Inscription pédagogique, dans la même transaction : un étudiant
+            # inscrit sans ses matières n'apparaîtrait ni dans les grilles de
+            # notes ni dans les délibérations, et rien ne le signalerait.
+            matieres = services.inscrire_aux_matieres(inscription)
+
+        donnees_reponse = InscriptionIPGEISerializer(inscription).data
+        donnees_reponse['matieres_inscrites'] = matieres
+        return Response(donnees_reponse, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='initialiser-notes')
     def initialiser_notes(self, request, pk=None):
