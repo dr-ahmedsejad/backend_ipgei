@@ -58,6 +58,28 @@ Une case à deux groupes garde ainsi la hauteur d'une case ordinaire.
         .session-type.ER,
         .session-type.PR { border: 1px solid #C82020; color: #B71C1C; background: #fdecea; }
 
+        /* Une séance spéciale — sport, instruction militaire — ne porte que son
+           nom. Le badge de type le répéterait dans un coin ; on l'écarte et on
+           centre le texte, qui occupe alors la case entière. Le positionnement
+           absolu remonte par-dessus le retrait réservé au badge, et le
+           `display: table` reste ce que webkit centre le plus sûrement à la
+           verticale. */
+        .custom-td-special {
+            /* Le retrait du haut ménageait la place du badge : sans badge, il
+               décalerait le texte vers le haut. C'est la cellule elle-même qui
+               centre — `vertical-align` sur un <td> est ce que webkit rend le
+               plus fidèlement, là où un calque en position absolue se calait
+               au-dessus du milieu. */
+            padding: 5px;
+            vertical-align: middle;
+            text-align: center;
+        }
+        .bloc-special {
+            font-size: 15px;
+            font-weight: bold;
+            color: #000;
+        }
+
         /* La case entiere se teinte, comme a l'ecran. */
         .bloc-evaluation { background: #fdecea; border-radius: 4px; padding: 2px 3px; }
 
@@ -151,17 +173,19 @@ donc après que des heures ont été pointées et payées sur une autre version.
     <tr>
         <td class="jour">{{ row.jour }}</td>
         {% for blocs in row.cells %}
-        <td class="custom-td">
+        <td class="custom-td{% if blocs|length == 1 and blocs.0.est_speciale %} custom-td-special{% endif %}">
             {% for bloc in blocs %}
+            {% if bloc.est_speciale and blocs|length == 1 %}
+            <div class="bloc-special">{{ bloc.em_intitule }}</div>
+            {% else %}
             <div class="bloc{% if bloc.est_evaluation %} bloc-evaluation{% endif %}">
                 <div class="session-type {{ bloc.type_seance }}">{{ bloc.type_seance }}</div>
-                {% if bloc.em_intitule != bloc.type_seance %}
                 <div class="course-title">{{ bloc.em_intitule }}</div>
-                {% endif %}
                 {% for ligne in bloc.lignes %}
                 <div class="ligne-seance">{{ ligne }}</div>
                 {% endfor %}
             </div>
+            {% endif %}
             {% endfor %}
         </td>
         {% endfor %}

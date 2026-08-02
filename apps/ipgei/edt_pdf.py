@@ -106,6 +106,10 @@ def construire_grille(seances, *, axe='classe'):
                 # qu'un etudiant ne peut pas manquer. Ils partagent le meme
                 # traitement visuel.
                 'est_evaluation': type_affiche in ('DS', 'EF', 'ER'),
+                # Une séance spéciale n'a rien d'autre à montrer que son nom :
+                # ni matière, ni intervenant, ni salle. Le badge de type ferait
+                # doublon avec le seul texte de la case.
+                'est_speciale': getattr(seance.type_seance, 'is_special', False),
                 'em_code':     seance.matiere.code if seance.matiere else '',
                 # Sans matière, le type porte seul le sens de la case.
                 'em_intitule': seance.matiere.intitule if seance.matiere else type_affiche,
