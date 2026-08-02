@@ -39,6 +39,37 @@ class ChampNiveauPrepa(serializers.Field):
         return niveau_socle(donnee)
 
 
+def _refuser_case_mixte(voisines, instance, sous_groupe):
+    """
+    Une case horaire est à la classe entière OU à ses sous-groupes, jamais aux
+    deux.
+
+    Si toute la classe est en cours, aucun de ses groupes ne peut être ailleurs
+    au même moment — et réciproquement. Rien ne l'interdisait, et l'écran ne
+    montrait pas les séances de l'autre plan : on pouvait donc poser un cours en
+    classe entière sur un créneau déjà occupé par un TP dédoublé, sans rien voir.
+    """
+    if instance is not None:
+        voisines = voisines.exclude(pk=instance.pk)
+
+    if sous_groupe is None:
+        conflit = voisines.filter(sous_groupe__isnull=False).first()
+        if conflit is not None:
+            raise serializers.ValidationError({'sous_groupe': (
+                f'Ce créneau est déjà occupé par un enseignement en sous-groupe '
+                f'({conflit.sous_groupe.groupe}). La classe entière ne peut pas '
+                f'avoir cours au même moment.'
+            )})
+    else:
+        conflit = voisines.filter(sous_groupe__isnull=True).first()
+        if conflit is not None:
+            raise serializers.ValidationError({'sous_groupe': (
+                'Ce créneau porte déjà un cours en classe entière. Un sous-groupe '
+                'ne peut pas avoir cours au même moment — retirez d’abord la '
+                'séance de la classe.'
+            )})
+
+
 def _champ_sous_groupe():
     """
     Sous-groupe de TP — facultatif : une séance sans sous-groupe concerne la
@@ -632,10 +663,18 @@ class SeanceTypeSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         grille      = attrs.get('grille',      getattr(self.instance, 'grille', None))
         sous_groupe = attrs.get('sous_groupe', getattr(self.instance, 'sous_groupe', None))
+        jour        = attrs.get('jour',        getattr(self.instance, 'jour', None))
+        creneau     = attrs.get('creneau',     getattr(self.instance, 'creneau', None))
+
         if grille and sous_groupe and sous_groupe.classe_id != grille.classe_id:
             raise serializers.ValidationError(
                 {'sous_groupe': "Ce sous-groupe n'appartient pas à la classe de la grille."}
             )
+
+        _refuser_case_mixte(
+            SeanceType.objects.filter(grille=grille, jour=jour, creneau=creneau),
+            self.instance, sous_groupe,
+        )
         return attrs
 
 
@@ -687,6 +726,40 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
             'nb_absents',
         ]
         read_only_fields = ['prof_initial']
+        # DRF dérive un validateur d'unicité de chaque UniqueConstraint du
+        # modèle — mais en IGNORANT sa condition. La contrainte partielle qui
+        # protège les cases de classe entière (`sous_groupe IS NULL`) se
+        # transformait donc en interdiction générale, et ajouter le second
+        # groupe d'un TP dédoublé était refusé. L'unicité reste garantie par la
+        # base ; `validate()` ci-dessous la formule en messages lisibles.
+        validators = []
+
+    def validate(self, attrs):
+        """
+        Deux règles sur une même case horaire.
+
+        L'une contre le doublon, l'autre contre le mélange : une case appartient
+        à la classe entière OU à ses sous-groupes, jamais aux deux.
+        """
+        def valeur(champ):
+            return attrs.get(champ, getattr(self.instance, champ, None))
+
+        sous_groupe = valeur('sous_groupe')
+        voisines = SeanceReelle.objects.filter(
+            classe=valeur('classe'), semaine=valeur('semaine'),
+            jour=valeur('jour'), creneau=valeur('creneau'),
+        )
+        if self.instance is not None:
+            voisines = voisines.exclude(pk=self.instance.pk)
+
+        if voisines.filter(sous_groupe=sous_groupe).exists():
+            cible = f'le sous-groupe {sous_groupe.groupe}' if sous_groupe else 'la classe entière'
+            raise serializers.ValidationError(
+                {'creneau': f'Une séance existe déjà sur ce créneau pour {cible}.'}
+            )
+
+        _refuser_case_mixte(voisines, self.instance, sous_groupe)
+        return attrs
 
     def get_nb_absents(self, obj) -> int:
         # `nb_absents_annote` vient du queryset de la vue (un seul COUNT groupe).
