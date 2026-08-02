@@ -51,8 +51,13 @@ Une case à deux groupes garde ainsi la hauteur d'une case ordinaire.
         .session-type.CM { border: 1px solid #3f51b5; color: #3f51b5; }
         .session-type.TD { border: 1px solid #4CAF50; color: #2E7D32; }
         .session-type.TP { border: 1px solid #FF9800; color: #EF6C00; }
-        .session-type.DS { border: 1px solid #9C27B0; color: #6A1B9A; }
-        .session-type.PR { border: 1px solid #9C27B0; color: #6A1B9A; }
+        /* Une evaluation n'est pas un cours parmi d'autres : sur une grille
+           distribuee aux etudiants, elle doit sauter aux yeux. */
+        .session-type.DS { border: 1px solid #C82020; color: #B71C1C; background: #fdecea; }
+        .session-type.PR { border: 1px solid #C82020; color: #B71C1C; background: #fdecea; }
+
+        /* La case entiere se teinte, comme a l'ecran. */
+        .bloc-evaluation { background: #fdecea; border-radius: 4px; padding: 2px 3px; }
 
         /* Un bloc = une matière. Deux blocs dans la même case restent rares
            (deux matières sur le même créneau) mais doivent rester lisibles. */
@@ -148,7 +153,7 @@ donc après que des heures ont été pointées et payées sur une autre version.
         {% for blocs in row.cells %}
         <td class="custom-td{% if blocs and 'DS' in blocs.0.type_seance %} rouge{% endif %}">
             {% for bloc in blocs %}
-            <div class="bloc">
+            <div class="bloc{% if bloc.type_seance == 'DS' %} bloc-evaluation{% endif %}">
                 <div class="session-type {{ bloc.type_seance }}">{{ bloc.type_seance }}</div>
                 <div class="course-title">{{ bloc.em_intitule }}</div>
                 {% for ligne in bloc.lignes %}
