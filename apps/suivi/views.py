@@ -738,6 +738,15 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         # a `SeanceReelle.modifiee_le`, qui permettra de savoir si l'emploi du
         # temps a bouge DEPUIS que le suivi en a ete tire — la divergence etait
         # jusqu'ici indetectable. Sans effet hors IPGEI.
+        # IPGEI : figer l'emploi du temps qui vient de servir. Il sera modifié
+        # plus tard — une correction, une permutation — et la version sur
+        # laquelle les heures ont été pointées serait alors introuvable.
+        try:
+            from apps.ipgei.archive import archiver_semaine
+            archiver_semaine(annee, type_semestre, numero_sem)
+        except Exception:
+            logger.exception('Archivage EDT IPGEI de la semaine %s impossible', numero_sem)
+
         semaine_ipgei = False
         try:
             from apps.ipgei.models import SemaineIPGEI

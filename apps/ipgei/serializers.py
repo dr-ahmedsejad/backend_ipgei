@@ -4,7 +4,8 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .models import (
-    AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, Evaluation,
+    AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, EmploiArchive,
+    Evaluation,
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
     SeanceType, SemaineIPGEI, SemestreIPGEI, SousGroupeTP,
@@ -1007,3 +1008,43 @@ class SaisieAbsencesSerializer(serializers.Serializer):
     Une liste vide signifie donc « classe au complet ».
     """
     absents = LigneSaisieAbsenceSerializer(many=True)
+
+
+# ── Emplois du temps archivés ────────────────────────────────────────────────
+
+class EmploiArchiveSerializer(serializers.ModelSerializer):
+    """
+    Une séance archivée, **au format d'une séance vivante**.
+
+    Volontairement : l'écran d'historique réutilise tel quel le composant de
+    consultation de l'emploi du temps. Une archive qui s'afficherait autrement
+    que l'original ne permettrait pas la comparaison, qui est sa seule raison
+    d'être.
+    """
+    jour        = serializers.IntegerField(source='jour_ref',        read_only=True)
+    creneau     = serializers.IntegerField(source='creneau_ref',     read_only=True)
+    matiere     = serializers.IntegerField(source='matiere_ref',     read_only=True)
+    type_seance = serializers.IntegerField(source='type_seance_ref', read_only=True)
+    sous_groupe = serializers.IntegerField(source='sous_groupe_ref', read_only=True)
+
+    class Meta:
+        model  = EmploiArchive
+        fields = [
+            'id', 'jour', 'creneau', 'matiere', 'type_seance', 'sous_groupe',
+            'matiere_code', 'matiere_intitule', 'type_seance_libelle',
+            'type_seance_special', 'prof_nom', 'prof_initial_nom', 'salle_nom',
+            'classe_nom', 'sous_groupe_libelle', 'annulee', 'origine',
+            'date_seance', 'version', 'genere_le',
+        ]
+
+
+class VersionArchiveSerializer(serializers.Serializer):
+    """Une prise de vue disponible : quelle semaine, quelle version, quand."""
+    semaine      = serializers.IntegerField()
+    numero       = serializers.IntegerField()
+    date_debut   = serializers.DateField(allow_null=True)
+    date_fin     = serializers.DateField(allow_null=True)
+    semestre     = serializers.CharField()
+    version      = serializers.IntegerField()
+    genere_le    = serializers.DateTimeField()
+    nb_seances   = serializers.IntegerField()

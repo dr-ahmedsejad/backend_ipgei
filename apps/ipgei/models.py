@@ -1311,6 +1311,127 @@ class PermutationEtudiant(models.Model):
 # ═════════════════════════════════════════════════════════════════════════════
 # 9. Absences par exception
 # ═════════════════════════════════════════════════════════════════════════════
+
+class _Fige:
+    """
+    Valeur figée, présentée comme l'objet dont elle vient.
+
+    L'archive ne pointe plus vers le référentiel : elle porte ses libellés en
+    dur. Mais le constructeur de grille du PDF, lui, lit `seance.prof.nom` ou
+    `seance.type_seance.is_special`. Cette coquille lui rend cette forme, sans
+    quoi il aurait fallu deux constructeurs — et deux grilles imprimées qui
+    finissent par diverger, alors que tout l'intérêt de l'archive est de se
+    superposer à l'emploi du temps vivant.
+    """
+
+    def __init__(self, **valeurs):
+        self.__dict__.update(valeurs)
+
+
+class EmploiArchive(models.Model):
+    """
+    Photographie de l'emploi du temps d'une semaine, prise à la génération du
+    suivi.
+
+    Les séances vivent dans `SeanceReelle`, qui est modifiée sur place : la
+    version d'avant est perdue. Or c'est sur une version précise que les heures
+    ont été pointées, et parfois payées. Sans cette table, vérifier après coup
+    ce qui avait été planifié demandait de relire le journal d'audit ligne à
+    ligne.
+
+    Rien n'y pointe vers le référentiel. Un archive dont le contenu change
+    quand on renomme une salle ou qu'on supprime un enseignant n'archive rien :
+    les libellés sont donc figés au moment de la prise. Les identifiants sont
+    conservés en simples entiers, pour regrouper et ordonner la grille sans
+    créer de dépendance.
+
+    Une régénération ne remplace pas la précédente : elle ajoute une version.
+    """
+
+    semaine   = models.ForeignKey(SemaineIPGEI, on_delete=models.CASCADE, related_name='archives')
+    classe    = models.ForeignKey(Classe, on_delete=models.CASCADE, related_name='archives_edt')
+    version   = models.PositiveSmallIntegerField(default=1)
+    genere_le = models.DateTimeField()
+
+    # Repères de grille — entiers nus, sans contrainte : ils servent à ordonner
+    # et à regrouper, pas à retrouver une ligne du référentiel.
+    jour_ref        = models.IntegerField(null=True, blank=True)
+    creneau_ref     = models.IntegerField(null=True, blank=True)
+    creneau_ordre   = models.IntegerField(default=0)
+    matiere_ref     = models.IntegerField(null=True, blank=True)
+    type_seance_ref = models.IntegerField(null=True, blank=True)
+    sous_groupe_ref = models.IntegerField(null=True, blank=True)
+
+    # Libellés figés
+    jour_libelle        = models.CharField(max_length=30,  blank=True, default='')
+    creneau_libelle     = models.CharField(max_length=30,  blank=True, default='')
+    classe_nom          = models.CharField(max_length=100, blank=True, default='')
+    sous_groupe_libelle = models.CharField(max_length=30,  blank=True, default='')
+    matiere_code        = models.CharField(max_length=30,  blank=True, default='')
+    matiere_intitule    = models.CharField(max_length=150, blank=True, default='')
+    type_seance_libelle = models.CharField(max_length=50,  blank=True, default='')
+    type_seance_special = models.BooleanField(default=False)
+    prof_nom            = models.CharField(max_length=150, blank=True, default='')
+    prof_initial_nom    = models.CharField(max_length=150, blank=True, default='')
+    salle_nom           = models.CharField(max_length=100, blank=True, default='')
+
+    date_seance = models.DateField(null=True, blank=True)
+    origine     = models.CharField(max_length=12, blank=True, default='')
+    annulee     = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name        = 'Emploi du temps archivé'
+        verbose_name_plural = 'Emplois du temps archivés'
+        ordering            = ['-genere_le', 'jour_ref', 'creneau_ordre']
+        indexes = [
+            models.Index(fields=['semaine', 'classe', 'version']),
+        ]
+
+    def __str__(self):
+        return (f'{self.classe_nom} {self.semaine} v{self.version} — '
+                f'{self.jour_libelle} {self.creneau_libelle}')
+
+    # ── Surface attendue par le constructeur de grille du PDF ────────────────
+    @property
+    def jour_id(self):        return self.jour_ref
+    @property
+    def creneau_id(self):     return self.creneau_ref
+    @property
+    def matiere_id(self):     return self.matiere_ref
+    @property
+    def sous_groupe_id(self): return self.sous_groupe_ref
+
+    @property
+    def jour(self):
+        return _Fige(jour=self.jour_libelle)
+
+    @property
+    def creneau(self):
+        return _Fige(creneau=self.creneau_libelle, ordre=self.creneau_ordre)
+
+    @property
+    def type_seance(self):
+        return _Fige(type_seance=self.type_seance_libelle,
+                     is_special=self.type_seance_special)
+
+    @property
+    def matiere(self):
+        if not (self.matiere_code or self.matiere_intitule):
+            return None
+        return _Fige(code=self.matiere_code, intitule=self.matiere_intitule)
+
+    @property
+    def prof(self):
+        return _Fige(nom=self.prof_nom) if self.prof_nom else None
+
+    @property
+    def salle(self):
+        return _Fige(nom=self.salle_nom) if self.salle_nom else None
+
+    @property
+    def sous_groupe(self):
+        return _Fige(groupe=self.sous_groupe_libelle) if self.sous_groupe_libelle else None
+
 class AbsenceSeance(models.Model):
     """
     Saisie **par exception** : présent par défaut, seules les lignes créées ici

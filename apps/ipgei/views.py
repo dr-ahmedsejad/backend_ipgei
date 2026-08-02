@@ -9,14 +9,15 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Max, Prefetch, Q
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet, ModelViewSet
+from rest_framework.viewsets import (GenericViewSet, ModelViewSet,
+                                     ReadOnlyModelViewSet)
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
 
 from apps.prof.models import Prof
@@ -28,7 +29,8 @@ from core.permissions import RBACPermission
 from . import edt_pdf, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
-    AbsenceSeance, Classe, Deliberation, Evaluation, GrilleType, HistoriqueClasse,
+    AbsenceSeance, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
+    HistoriqueClasse,
     InscriptionIPGEI, LigneDeliberation, Matiere, Note, ParametresIPGEI,
     PermutationEtudiant, PermutationProf, SeanceReelle, SeanceType, SemaineIPGEI,
     SemestreIPGEI, SousGroupeTP, StatutWorkflow,
@@ -36,7 +38,7 @@ from .models import (
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
     DeliberationSerializer, DupliquerGrilleSerializer, EditionLotSerializer,
-    EvaluationSerializer, GrilleTypeListSerializer, GrilleTypeSerializer,
+    EmploiArchiveSerializer, EvaluationSerializer, GrilleTypeListSerializer, GrilleTypeSerializer,
     HistoriqueClasseSerializer, InscriptionCompleteSerializer,
     InscriptionIPGEISerializer,
     LigneDeliberationListSerializer, LigneDeliberationSerializer,
@@ -45,6 +47,7 @@ from .serializers import (
     PermutationProfSerializer, SaisieAbsencesSerializer,
     SaisieCollectiveSerializer, SeanceReelleSerializer, SeanceTypeSerializer,
     SemaineIPGEISerializer, SemestreIPGEISerializer, SousGroupeTPSerializer,
+    VersionArchiveSerializer,
 )
 
 
@@ -1136,6 +1139,124 @@ class SeanceReelleViewSet(_ErreurMetierMixin, ModelViewSet):
                 seance.absences.select_related('inscription__etudiant'), many=True,
             ).data,
         })
+
+
+
+class EmploiArchiveViewSet(ReadOnlyModelViewSet):
+    """
+    Emplois du temps figés à la génération du suivi — lecture seule.
+
+    On ne modifie pas une archive : la seule écriture possible est la prise de
+    vue, faite par `apps.ipgei.archive` au moment où le suivi est généré.
+    """
+    serializer_class   = EmploiArchiveSerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_edt'
+    queryset           = EmploiArchive.objects.all()
+    pagination_class   = NoPagination
+
+    @action(detail=False, methods=['get'], url_path='versions')
+    def versions(self, request):
+        """
+        Prises de vue disponibles pour une classe, de la plus récente à la plus
+        ancienne.
+
+        Une semaine régénérée en compte plusieurs : c'est précisément ce qu'on
+        veut pouvoir comparer.
+        """
+        classe_id = request.query_params.get('classe')
+        if not classe_id:
+            raise ValidationError({'classe': 'Classe requise.'})
+
+        qs = (
+            EmploiArchive.objects
+            .filter(classe_id=classe_id)
+            .values('semaine_id', 'version', 'genere_le',
+                    'semaine__numero', 'semaine__date_debut',
+                    'semaine__date_fin', 'semaine__semestre__code')
+            .annotate(nb=Count('id'))
+            .order_by('-semaine__numero', '-version')
+        )
+        semestre = request.query_params.get('semestre')
+        if semestre:
+            qs = qs.filter(semaine__semestre_id=semestre)
+
+        return Response(VersionArchiveSerializer([
+            {
+                'semaine':    l['semaine_id'],
+                'numero':     l['semaine__numero'],
+                'date_debut': l['semaine__date_debut'],
+                'date_fin':   l['semaine__date_fin'],
+                'semestre':   l['semaine__semestre__code'] or '',
+                'version':    l['version'],
+                'genere_le':  l['genere_le'],
+                'nb_seances': l['nb'],
+            }
+            for l in qs
+        ], many=True).data)
+
+    @action(detail=False, methods=['get'], url_path='grille')
+    def grille(self, request):
+        """Séances d'une prise de vue, au format de l'emploi du temps vivant."""
+        seances = self._prise_de_vue(request)
+        return Response(self.get_serializer(seances, many=True).data)
+
+    @action(detail=False, methods=['get'], url_path='pdf')
+    def pdf(self, request):
+        """La même grille, au même gabarit que l'emploi du temps courant."""
+        seances = list(self._prise_de_vue(request))
+        if not seances:
+            raise ValidationError('Aucune archive pour cette semaine.')
+
+        premiere = seances[0]
+        semaine  = SemaineIPGEI.objects.select_related('semestre').filter(
+            pk=request.query_params.get('semaine')).first()
+        creneaux, lignes = edt_pdf.construire_grille(seances, axe='classe')
+
+        return edt_pdf.reponse_pdf(
+            'ipgei/emploi_pdf.html',
+            {
+                'annee_universitaire': (semaine.semestre.annee_universitaire
+                                        if semaine and semaine.semestre_id else ''),
+                'cible_libelle':       'Classe',
+                'cible':               premiere.classe_nom,
+                'creneaux':            creneaux,
+                'rows':                lignes,
+                'semaine':      semaine.numero if semaine else '',
+                'debut':        edt_pdf._date_fr(semaine.date_debut) if semaine else '',
+                'fin':          edt_pdf._date_fr(semaine.date_fin) if semaine else '',
+                'semestre_nom': (f'Semestre {semaine.semestre.code}'
+                                 if semaine and semaine.semestre_id else ''),
+                # Un document d'archive doit dire qu'il en est un, et de quand.
+                # Sans cette mention il se confondrait avec l'emploi du temps
+                # courant, alors qu'ils diffèrent souvent — c'est la raison même
+                # de sa conservation.
+                'etat_semaine': (
+                    f'Archive · version {premiere.version} · emploi du temps '
+                    f'ayant servi à la génération du suivi du '
+                    f'{edt_pdf._date_fr(premiere.genere_le.date())}'
+                ),
+                'est_divergent': False,
+            },
+            f'Archive_{_nom_fichier(premiere.classe_nom)}'
+            f'_S{semaine.numero if semaine else 0}_v{premiere.version}.pdf',
+        )
+
+    def _prise_de_vue(self, request):
+        """Séances d'une (semaine, classe, version) — la dernière par défaut."""
+        semaine_id = request.query_params.get('semaine')
+        classe_id  = request.query_params.get('classe')
+        if not (semaine_id and classe_id):
+            raise ValidationError('Paramètres requis : semaine, classe.')
+
+        qs = EmploiArchive.objects.filter(semaine_id=semaine_id, classe_id=classe_id)
+        version = request.query_params.get('version')
+        if version:
+            qs = qs.filter(version=version)
+        else:
+            derniere = qs.aggregate(v=Max('version'))['v']
+            qs = qs.filter(version=derniere) if derniere else qs.none()
+        return qs.order_by('jour_ref', 'creneau_ordre')
 
 
 class AbsenceSeanceViewSet(ModelViewSet):

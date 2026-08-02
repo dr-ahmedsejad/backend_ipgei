@@ -2,7 +2,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AbsenceSeanceViewSet, ClasseViewSet, DeliberationViewSet, DocumentIPGEIViewSet,
-    EvaluationViewSet,
+    EmploiArchiveViewSet, EvaluationViewSet,
     GrilleTypeViewSet, HistoriqueClasseViewSet, InscriptionIPGEIViewSet,
     LigneDeliberationViewSet, MatiereViewSet, NoteViewSet, ParametresIPGEIViewSet,
     PermutationEtudiantViewSet, PermutationProfViewSet, SeanceReelleViewSet,
@@ -30,6 +30,7 @@ router.register(r'lignes-deliberation', LigneDeliberationViewSet, basename='ipge
 router.register(r'grilles',         GrilleTypeViewSet,           basename='ipgei-grille')
 router.register(r'seances-type',    SeanceTypeViewSet,           basename='ipgei-seance-type')
 router.register(r'seances',         SeanceReelleViewSet,         basename='ipgei-seance')
+router.register(r'archives-edt',    EmploiArchiveViewSet,        basename='ipgei-archive-edt')
 router.register(r'absences',        AbsenceSeanceViewSet,        basename='ipgei-absence')
 router.register(r'permutations-prof',     PermutationProfViewSet,     basename='ipgei-permutation-prof')
 router.register(r'permutations-etudiant', PermutationEtudiantViewSet, basename='ipgei-permutation-etudiant')
