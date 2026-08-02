@@ -262,6 +262,24 @@ class SemaineIPGEI(models.Model):
             )
         }
 
+    def _unites_du_semestre(self) -> list:
+        """
+        Départements (classes et sous-groupes) que ce semestre concerne.
+
+        Indispensable pour comparer ce qui est comparable : S1 et S3 sont tous
+        deux impairs et partagent leurs numéros de semaine. Sans ce filtre, la
+        semaine 2 de MPSI se comparait au suivi de MPSI **et** de MP, et se
+        déclarait divergente — ou alignée — pour des séances qui ne la
+        concernaient pas.
+        """
+        classes = Classe.objects.filter(
+            annee_universitaire=self.semestre.annee_universitaire,
+            niveau__niveau=self.semestre.niveau,
+        )
+        ids = list(classes.values_list('pk', flat=True))
+        ids += list(SousGroupeTP.objects.filter(classe__in=ids).values_list('pk', flat=True))
+        return ids
+
     def _empreinte_suivi(self) -> set:
         """La même empreinte, vue depuis les lignes de suivi de la semaine."""
         from apps.suivi.models import Suivie
@@ -271,6 +289,7 @@ class SemaineIPGEI(models.Model):
             Suivie.objects
             .filter(annee_universitaire=self.semestre.annee_universitaire,
                     type_semestre=type_semestre, numero_semaine=self.numero,
+                    departement_id__in=self._unites_du_semestre(),
                     em__isnull=False)
             .values_list('departement_id', 'jour_fk_id', 'creneau_fk_id',
                          'em_id', 'prof_id', 'type_seance_fk__type_seance')
@@ -328,11 +347,16 @@ class SemaineIPGEI(models.Model):
         # Côté suivi : une passe sur les lignes des années et périodes visées.
         annees   = {s.semestre.annee_universitaire for s in semaines}
         numeros  = {s.numero for s in semaines if s.numero is not None}
+        # Même portée que le calcul unitaire : on ne compare une semaine qu'aux
+        # unités de SON niveau, S1 et S3 partageant leurs numéros de semaine.
+        unites = set()
+        for semaine in semaines:
+            unites.update(semaine._unites_du_semestre())
         suivi = {}
         for (annee, type_semestre, numero, dept, jour, creneau, em, prof, type_seance) in (
             Suivie.objects
             .filter(annee_universitaire__in=annees, numero_semaine__in=numeros,
-                    em__isnull=False)
+                    departement_id__in=unites, em__isnull=False)
             .values_list('annee_universitaire', 'type_semestre', 'numero_semaine',
                          'departement_id', 'jour_fk_id', 'creneau_fk_id',
                          'em_id', 'prof_id', 'type_seance_fk__type_seance')
