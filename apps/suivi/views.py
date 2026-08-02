@@ -738,20 +738,32 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         # a `SeanceReelle.modifiee_le`, qui permettra de savoir si l'emploi du
         # temps a bouge DEPUIS que le suivi en a ete tire — la divergence etait
         # jusqu'ici indetectable. Sans effet hors IPGEI.
+        semaine_ipgei = False
         try:
             from apps.ipgei.models import SemaineIPGEI
             from apps.ipgei.socle import SEMESTRES
             codes = [c for c, (_, t) in SEMESTRES.items() if t == type_semestre]
-            SemaineIPGEI.objects.filter(
+            semaine_ipgei = bool(SemaineIPGEI.objects.filter(
                 numero=numero_sem,
                 semestre__annee_universitaire=annee,
                 semestre__code__in=codes,
-            ).update(suivi_genere_le=_tz.now())
+            ).update(suivi_genere_le=_tz.now()))
         except Exception:
             logger.exception('Horodatage IPGEI de la semaine %s impossible', numero_sem)
 
+        # Le message dit ce qui s'est passe DU POINT DE VUE DE L'UTILISATEUR.
+        # « EDT archive et vide » decrit `Emplois`, une table de projection : a
+        # l'IPGEI l'emploi du temps vit dans la grille et n'a pas bouge. Lu tel
+        # quel, il laissait croire qu'il fallait tout ressaisir avant la
+        # semaine suivante.
+        if semaine_ipgei:
+            message = (f"Suivi de la semaine {numero_sem} généré à partir de "
+                       f"l'emploi du temps. Celui-ci reste en place.")
+        else:
+            message = f"Suivi semaine {numero_sem} généré. EDT archivé et vidé."
+
         return Response({
-            'message': f"Suivi semaine {numero_sem} genere. EDT archive et vide.",
+            'message': message,
             'suivies_created': len(suivie_objects),
             'pointages_created': len(pointage_objects),
             'authorization_used': consumed_authorization.pk if consumed_authorization else None,
