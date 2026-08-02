@@ -149,8 +149,20 @@ class SemestreIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin,
 
     @action(detail=True, methods=['get'], url_path='semaines')
     def semaines(self, request, pk=None):
+        """
+        Semaines du semestre.
+
+        `?classe=` restreint l'état de cohérence à cette classe. Sans lui,
+        l'état porte sur tout le niveau — ce qui ferait dire à une classe sans
+        emploi du temps que son suivi est « à jour », alors qu'il décrit celui
+        de sa voisine.
+        """
         semestre = self.get_object()
-        return Response(SemaineIPGEISerializer(semestre.semaines.all(), many=True).data)
+        classe = Classe.objects.filter(pk=request.query_params.get('classe')).first()
+        return Response(SemaineIPGEISerializer(
+            semestre.semaines.all(), many=True,
+            context={'classe_coherence': classe},
+        ).data)
 
     @action(detail=True, methods=['post'], url_path='cloturer')
     def cloturer(self, request, pk=None):

@@ -238,7 +238,7 @@ class SemaineIPGEI(models.Model):
             return f'[{self.get_type_semaine_display()}] {self.date_debut}'
         return f'S{self.numero} — {self.date_debut}'
 
-    def _empreinte_edt(self) -> set:
+    def _empreinte_edt(self, classe=None) -> set:
         """
         Ce que l'emploi du temps de la semaine contient réellement.
 
@@ -256,22 +256,28 @@ class SemaineIPGEI(models.Model):
         return {
             (sous_groupe or classe, jour, creneau, em, prof, type_seance)
             for sous_groupe, classe, jour, creneau, em, prof, type_seance
-            in self.seances.filter(annulee=False).values_list(
+            in self.seances.filter(annulee=False, **({'classe': classe} if classe else {})).values_list(
                 'sous_groupe_id', 'classe_id', 'jour_id', 'creneau_id',
                 'matiere__em_miroir_id', 'prof_id', 'type_seance__type_seance',
             )
         }
 
-    def _unites_du_semestre(self) -> list:
+    def _unites_du_semestre(self, classe=None) -> list:
         """
-        Départements (classes et sous-groupes) que ce semestre concerne.
+        Départements (classes et sous-groupes) sur lesquels porte la comparaison.
 
-        Indispensable pour comparer ce qui est comparable : S1 et S3 sont tous
-        deux impairs et partagent leurs numéros de semaine. Sans ce filtre, la
-        semaine 2 de MPSI se comparait au suivi de MPSI **et** de MP, et se
-        déclarait divergente — ou alignée — pour des séances qui ne la
-        concernaient pas.
+        Sans `classe`, tout le niveau du semestre : c'est nécessaire car S1 et
+        S3 sont tous deux impairs et partagent leurs numéros de semaine —
+        comparer sans ce filtre revenait à confronter MPSI au suivi de MP.
+
+        Avec `classe`, la comparaison se restreint à elle et à ses sous-groupes.
+        L'état est alors celui de CETTE classe : une classe sans emploi du temps
+        ne doit pas hériter du verdict de sa voisine du même niveau.
         """
+        if classe is not None:
+            return [classe.pk] + list(
+                SousGroupeTP.objects.filter(classe=classe).values_list('pk', flat=True))
+
         classes = Classe.objects.filter(
             annee_universitaire=self.semestre.annee_universitaire,
             niveau__niveau=self.semestre.niveau,
@@ -280,7 +286,7 @@ class SemaineIPGEI(models.Model):
         ids += list(SousGroupeTP.objects.filter(classe__in=ids).values_list('pk', flat=True))
         return ids
 
-    def _empreinte_suivi(self) -> set:
+    def _empreinte_suivi(self, classe=None) -> set:
         """La même empreinte, vue depuis les lignes de suivi de la semaine."""
         from apps.suivi.models import Suivie
 
@@ -289,7 +295,7 @@ class SemaineIPGEI(models.Model):
             Suivie.objects
             .filter(annee_universitaire=self.semestre.annee_universitaire,
                     type_semestre=type_semestre, numero_semaine=self.numero,
-                    departement_id__in=self._unites_du_semestre(),
+                    departement_id__in=self._unites_du_semestre(classe),
                     em__isnull=False)
             .values_list('departement_id', 'jour_fk_id', 'creneau_fk_id',
                          'em_id', 'prof_id', 'type_seance_fk__type_seance')
@@ -311,15 +317,19 @@ class SemaineIPGEI(models.Model):
         différentes. Les heures pointées, la charge et les vacations ne
         correspondent plus à ce qu'on imprime.
         """
-        empreinte_suivi = self._empreinte_suivi()
+        return self.etat_coherence_pour()
+
+    def etat_coherence_pour(self, classe=None) -> str:
+        """État vu depuis une classe donnée, ou depuis tout le niveau."""
+        empreinte_suivi = self._empreinte_suivi(classe)
         if not empreinte_suivi:
             return self.ETAT_PREVISIONNEL
-        if self._empreinte_edt() != empreinte_suivi:
+        if self._empreinte_edt(classe) != empreinte_suivi:
             return self.ETAT_DIVERGENT
         return self.ETAT_ALIGNE
 
     @classmethod
-    def etats_en_lot(cls, semaines) -> dict:
+    def etats_en_lot(cls, semaines, classe=None) -> dict:
         """
         États de plusieurs semaines en **deux requêtes**, pas deux par semaine.
 
@@ -335,14 +345,14 @@ class SemaineIPGEI(models.Model):
 
         # Côté emploi du temps : une passe sur toutes les séances concernées.
         edt = {s.pk: set() for s in semaines}
-        for (sid, sous_groupe, classe, jour, creneau, em, prof, type_seance) in (
+        for (sid, sous_groupe, classe_id, jour, creneau, em, prof, type_seance) in (
             SeanceReelle.objects
-            .filter(semaine_id__in=edt, annulee=False)
+            .filter(semaine_id__in=edt, annulee=False, **({'classe': classe} if classe else {}))
             .values_list('semaine_id', 'sous_groupe_id', 'classe_id', 'jour_id',
                          'creneau_id', 'matiere__em_miroir_id', 'prof_id',
                          'type_seance__type_seance')
         ):
-            edt[sid].add((sous_groupe or classe, jour, creneau, em, prof, type_seance))
+            edt[sid].add((sous_groupe or classe_id, jour, creneau, em, prof, type_seance))
 
         # Côté suivi : une passe sur les lignes des années et périodes visées.
         annees   = {s.semestre.annee_universitaire for s in semaines}
@@ -351,7 +361,7 @@ class SemaineIPGEI(models.Model):
         # unités de SON niveau, S1 et S3 partageant leurs numéros de semaine.
         unites = set()
         for semaine in semaines:
-            unites.update(semaine._unites_du_semestre())
+            unites.update(semaine._unites_du_semestre(classe))
         suivi = {}
         for (annee, type_semestre, numero, dept, jour, creneau, em, prof, type_seance) in (
             Suivie.objects

@@ -135,7 +135,11 @@ class _ListeSemaines(serializers.ListSerializer):
     """
     def to_representation(self, data):
         semaines = list(data)
-        self.child.context['etats_coherence'] = SemaineIPGEI.etats_en_lot(semaines)
+        # `classe` vient de la vue : l'état doit décrire la classe qu'on
+        # regarde, pas son niveau. Une classe sans emploi du temps ne peut pas
+        # hériter du verdict de sa voisine.
+        self.child.context['etats_coherence'] = SemaineIPGEI.etats_en_lot(
+            semaines, classe=self.context.get('classe_coherence'))
         return super().to_representation(semaines)
 
 
@@ -151,7 +155,9 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
         # Le lot prime quand il est disponible ; sinon calcul unitaire, pour
         # que le serializer reste correct hors liste.
         etats = self.context.get('etats_coherence')
-        return etats.get(obj.pk) if etats else obj.etat_coherence
+        if etats:
+            return etats.get(obj.pk)
+        return obj.etat_coherence_pour(self.context.get('classe_coherence'))
 
     def get_libelle_coherence(self, obj) -> str:
         return {
