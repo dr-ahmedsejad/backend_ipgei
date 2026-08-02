@@ -98,6 +98,10 @@ def construire_grille(seances, *, axe='classe'):
                 # Le référentiel porte lui-même la distinction : sport et
                 # instruction militaire n'ont ni enseignant ni salle.
                 'type_seance_is_special': seance.type_seance.is_special,
+                # Devoir, examen final et rattrapage : les trois creneaux
+                # qu'un etudiant ne peut pas manquer. Ils partagent le meme
+                # traitement visuel.
+                'est_evaluation': type_affiche in ('DS', 'EF', 'ER'),
                 'em_code':     seance.matiere.code if seance.matiere else '',
                 'em_intitule': seance.matiere.intitule if seance.matiere else '',
                 'lignes':      [],
