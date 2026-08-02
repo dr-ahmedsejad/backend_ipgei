@@ -50,7 +50,7 @@ from .models import (
     SousGroupeTP,
 )
 from .socle import (
-    INDEX_JOUR, SEMESTRES, filiere_socle, seance_socle, semestre_socle,
+    INDEX_JOUR, SEMESTRES, filiere_socle, semestre_socle,
 )
 
 logger = logging.getLogger('siga')
@@ -185,7 +185,7 @@ def synchroniser_grille(grille: GrilleType) -> int:
             salle=seance.salle,
             semestre=semestre_socle(matiere.code_semestre),
             creneau_fk=seance.creneau,
-            type_seance_fk=seance_socle(seance.type_seance),
+            type_seance_fk=seance.type_seance,
             jour_fk=seance.jour,
             institution=classe.institution,
         ))
@@ -258,7 +258,7 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
             salle=seance.salle,
             semestre=semestre_socle(matiere.code_semestre),
             creneau_fk=seance.creneau,
-            type_seance_fk=seance_socle(seance.type_seance),
+            type_seance_fk=seance.type_seance,
             jour_fk=seance.jour,
             institution=seance.classe.institution,
         ))

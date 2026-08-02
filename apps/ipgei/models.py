@@ -247,18 +247,18 @@ class SemaineIPGEI(models.Model):
         ni les heures dues ni le programme avancé, donc ne rend pas le suivi
         faux.
         """
-        from .socle import TYPE_SEANCE_SOCLE
-
         # `values_list` plutôt que des instances : l'empreinte ne lit que six
         # colonnes, en construire des objets complets coûtait l'essentiel du
         # temps de calcul sur un semestre entier.
+        #
+        # Les deux côtés désignent désormais la MÊME ligne de référentiel : le
+        # type se compare directement, sans traduction.
         return {
-            (sous_groupe or classe, jour, creneau, em, prof,
-             TYPE_SEANCE_SOCLE.get(type_seance))
+            (sous_groupe or classe, jour, creneau, em, prof, type_seance)
             for sous_groupe, classe, jour, creneau, em, prof, type_seance
             in self.seances.filter(annulee=False).values_list(
                 'sous_groupe_id', 'classe_id', 'jour_id', 'creneau_id',
-                'matiere__em_miroir_id', 'prof_id', 'type_seance',
+                'matiere__em_miroir_id', 'prof_id', 'type_seance__type_seance',
             )
         }
 
@@ -310,8 +310,6 @@ class SemaineIPGEI(models.Model):
         """
         from apps.suivi.models import Suivie
 
-        from .socle import TYPE_SEANCE_SOCLE
-
         semaines = list(semaines)
         if not semaines:
             return {}
@@ -322,10 +320,10 @@ class SemaineIPGEI(models.Model):
             SeanceReelle.objects
             .filter(semaine_id__in=edt, annulee=False)
             .values_list('semaine_id', 'sous_groupe_id', 'classe_id', 'jour_id',
-                         'creneau_id', 'matiere__em_miroir_id', 'prof_id', 'type_seance')
+                         'creneau_id', 'matiere__em_miroir_id', 'prof_id',
+                         'type_seance__type_seance')
         ):
-            edt[sid].add((sous_groupe or classe, jour, creneau, em, prof,
-                          TYPE_SEANCE_SOCLE.get(type_seance)))
+            edt[sid].add((sous_groupe or classe, jour, creneau, em, prof, type_seance))
 
         # Côté suivi : une passe sur les lignes des années et périodes visées.
         annees   = {s.semestre.annee_universitaire for s in semaines}
@@ -1000,7 +998,14 @@ class SeanceType(models.Model):
         SousGroupeTP, on_delete=models.CASCADE, null=True, blank=True, related_name='seances_type',
         help_text='Renseigné pour une séance de TP dédoublée ; vide = classe entière.',
     )
-    type_seance  = models.CharField(max_length=6, choices=TYPE_SEANCE_CHOICES, default=TYPE_SEANCE_COURS)
+    # Référentiel commun avec le socle (« Paramètres → Séances ») : CM, TD, TP,
+    # DS, EF, ER… Auparavant une liste figée dans le code, qu'il fallait
+    # traduire à chaque échange avec le Suivi. Un seul vocabulaire supprime la
+    # traduction, et un type ajouté dans Paramètres devient disponible ici sans
+    # toucher au code.
+    type_seance  = models.ForeignKey(
+        'parametres.Seance', on_delete=models.PROTECT, related_name='+',
+    )
 
     class Meta:
         db_table    = 'ipgei_seance_type'
@@ -1016,6 +1021,24 @@ class SeanceType(models.Model):
 
     def __str__(self):
         return f'{self.grille.classe.nom} {self.jour} {self.creneau} — {self.matiere.code}'
+
+    def save(self, *args, **kwargs):
+        _vider_si_seance_speciale(self)
+        super().save(*args, **kwargs)
+
+
+def _vider_si_seance_speciale(seance):
+    """
+    Une séance spéciale n'a ni enseignant ni salle.
+
+    Sport, instruction militaire : le créneau est bloqué pour toute la classe,
+    mais aucun enseignant du référentiel ne l'assure et aucune salle n'est
+    réservée. Y laisser un professeur lui compterait des heures, et donc une
+    vacation, pour un cours qu'il ne donne pas.
+    """
+    if seance.type_seance_id and getattr(seance.type_seance, 'is_special', False):
+        seance.prof = None
+        seance.salle = None
 
 
 class SeanceReelle(models.Model):
@@ -1047,7 +1070,14 @@ class SeanceReelle(models.Model):
     sous_groupe  = models.ForeignKey(
         SousGroupeTP, on_delete=models.CASCADE, null=True, blank=True, related_name='seances',
     )
-    type_seance  = models.CharField(max_length=6, choices=TYPE_SEANCE_CHOICES, default=TYPE_SEANCE_COURS)
+    # Référentiel commun avec le socle (« Paramètres → Séances ») : CM, TD, TP,
+    # DS, EF, ER… Auparavant une liste figée dans le code, qu'il fallait
+    # traduire à chaque échange avec le Suivi. Un seul vocabulaire supprime la
+    # traduction, et un type ajouté dans Paramètres devient disponible ici sans
+    # toucher au code.
+    type_seance  = models.ForeignKey(
+        'parametres.Seance', on_delete=models.PROTECT, related_name='+',
+    )
     date         = models.DateField(null=True, blank=True, help_text='Date réelle, déduite de la semaine et du jour.')
 
     origine      = models.CharField(max_length=12, choices=ORIGINE_CHOICES, default=ORIGINE_GRILLE)
@@ -1093,6 +1123,10 @@ class SeanceReelle(models.Model):
 
     def __str__(self):
         return f'{self.classe.nom} {self.semaine} {self.jour} {self.creneau} — {self.matiere.code}'
+
+    def save(self, *args, **kwargs):
+        _vider_si_seance_speciale(self)
+        super().save(*args, **kwargs)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

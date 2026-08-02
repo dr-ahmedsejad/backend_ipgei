@@ -88,16 +88,16 @@ def construire_grille(seances, *, axe='classe'):
     grille = defaultdict(lambda: defaultdict(dict))
     for seance in seances:
         jour = seance.jour.jour if seance.jour_id else ''
-        type_affiche = TYPE_AFFICHE.get(seance.type_seance, 'CM')
+        type_affiche = seance.type_seance.type_seance
         cle = (seance.matiere_id, type_affiche)
 
         blocs = grille[jour][seance.creneau_id]
         if cle not in blocs:
             blocs[cle] = {
                 'type_seance': type_affiche,
-                # Aucun type IPGEI n'est « spécial » au sens du socle (sport,
-                # stage…) : la grille de prépa ne contient que des cours.
-                'type_seance_is_special': False,
+                # Le référentiel porte lui-même la distinction : sport et
+                # instruction militaire n'ont ni enseignant ni salle.
+                'type_seance_is_special': seance.type_seance.is_special,
                 'em_code':     seance.matiere.code if seance.matiere else '',
                 'em_intitule': seance.matiere.intitule if seance.matiere else '',
                 'lignes':      [],

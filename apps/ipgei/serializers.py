@@ -645,6 +645,13 @@ class DeliberationSerializer(serializers.ModelSerializer):
 # ── EDT ──────────────────────────────────────────────────────────────────────
 class SeanceTypeSerializer(serializers.ModelSerializer):
     sous_groupe      = _champ_sous_groupe()
+    # Libellé du référentiel (« CM », « TP », « Sport »…) et caractère spécial :
+    # une séance spéciale n'a ni enseignant ni salle, l'écran doit le savoir
+    # pour masquer ces champs plutôt que les proposer en vain.
+    type_seance_libelle = serializers.CharField(
+        source='type_seance.type_seance', read_only=True, default='')
+    type_seance_special = serializers.BooleanField(
+        source='type_seance.is_special', read_only=True, default=False)
     jour_libelle     = serializers.CharField(source='jour.jour', read_only=True)
     creneau_libelle  = serializers.CharField(source='creneau.creneau', read_only=True)
     matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
@@ -657,7 +664,8 @@ class SeanceTypeSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'grille', 'jour', 'jour_libelle', 'creneau', 'creneau_libelle',
             'matiere', 'matiere_code', 'prof', 'prof_nom', 'salle', 'salle_nom',
-            'sous_groupe', 'sous_groupe_libelle', 'type_seance',
+            'sous_groupe', 'sous_groupe_libelle',
+            'type_seance', 'type_seance_libelle', 'type_seance_special',
         ]
 
     def validate(self, attrs):
@@ -701,6 +709,13 @@ class GrilleTypeListSerializer(GrilleTypeSerializer):
 
 class SeanceReelleSerializer(serializers.ModelSerializer):
     sous_groupe      = _champ_sous_groupe()
+    # Libellé du référentiel (« CM », « TP », « Sport »…) et caractère spécial :
+    # une séance spéciale n'a ni enseignant ni salle, l'écran doit le savoir
+    # pour masquer ces champs plutôt que les proposer en vain.
+    type_seance_libelle = serializers.CharField(
+        source='type_seance.type_seance', read_only=True, default='')
+    type_seance_special = serializers.BooleanField(
+        source='type_seance.is_special', read_only=True, default=False)
     classe_nom       = serializers.CharField(source='classe.nom', read_only=True)
     jour_libelle     = serializers.CharField(source='jour.jour', read_only=True)
     creneau_libelle  = serializers.CharField(source='creneau.creneau', read_only=True)
@@ -722,7 +737,8 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
             'matiere', 'matiere_code', 'matiere_intitule',
             'prof', 'prof_nom', 'prof_initial', 'prof_initial_nom',
             'salle', 'salle_nom', 'sous_groupe', 'sous_groupe_libelle',
-            'type_seance', 'date', 'origine', 'annulee', 'observations',
+            'type_seance', 'type_seance_libelle', 'type_seance_special',
+            'date', 'origine', 'annulee', 'observations',
             'nb_absents',
         ]
         read_only_fields = ['prof_initial']

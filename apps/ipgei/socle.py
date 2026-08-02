@@ -14,7 +14,7 @@ Ces objets sont des *référentiels partagés*, pas des doublons d'entités IPGE
 une classe n'a qu'une seule existence (voir `models.Classe`, qui hérite de
 `departement.Departement`).
 """
-from apps.parametres.models import Niveau, Seance, Semestre
+from apps.parametres.models import Niveau, Semestre
 from apps.scolarite.models import Filiere
 
 from .models import NIVEAU_MP, NIVEAU_MPSI
@@ -27,21 +27,9 @@ SEMESTRES = {
     'S4': (NIVEAU_MP,   'P'),
 }
 
-# Types de séance IPGEI → types du socle, qui portent les taux de paiement
-# (`parametres.Paiement`). Un type non traduit ferait tomber la séance à taux
-# zéro dans le calcul de vacation.
-TYPE_SEANCE_SOCLE = {'cours': 'CM', 'td': 'TD', 'tp': 'TP', 'ds': 'DS'}
-
 # Index Django du jour (0 = lundi), pour dater chaque jour d'une semaine.
 INDEX_JOUR = {'lundi': 0, 'mardi': 1, 'mercredi': 2, 'jeudi': 3,
               'vendredi': 4, 'samedi': 5, 'dimanche': 6}
-
-
-def seance_socle(type_ipgei: str) -> Seance:
-    """`parametres.Seance` correspondant à un type de séance IPGEI."""
-    libelle = TYPE_SEANCE_SOCLE.get(type_ipgei, 'CM')
-    seance, _ = Seance.objects.get_or_create(type_seance=libelle)
-    return seance
 
 
 def filiere_socle(institution) -> Filiere:
