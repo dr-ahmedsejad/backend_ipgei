@@ -360,6 +360,86 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         donnees_reponse['matieres_inscrites'] = matieres
         return Response(donnees_reponse, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'], url_path='depuis-preinscription')
+    def depuis_preinscription(self, request):
+        """
+        Transforme une pré-inscription acceptée en inscription IPGEI.
+
+        La conversion du socle produit une inscription administrative LMD :
+        sans classe de prépa, sans frais IPGEI et sans maquette. Le dossier
+        paraîtrait traité alors que l'étudiant n'existerait dans aucune grille
+        de notes.
+
+        Celle-ci emprunte le chemin de l'inscription unitaire — contrôle du
+        redoublement, tarif figé, matières rattachées — et reprend l'identité
+        du dossier plutôt que de la faire ressaisir : le candidat l'a déjà
+        renseignée, la retaper n'ajoute que des fautes.
+        """
+        from apps.absence.models import Etudiant
+        from apps.inscriptions.models import Preinscription
+
+        dossier = Preinscription.objects.filter(
+            pk=request.data.get('preinscription')).first()
+        if dossier is None:
+            raise ValidationError({'preinscription': 'Dossier introuvable.'})
+        if dossier.statut != 'acceptee':
+            raise ValidationError(
+                {'preinscription': 'Seul un dossier accepté peut être converti '
+                                   f'(statut actuel : {dossier.get_statut_display()}).'}
+            )
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise et valide.'})
+
+        # Le matricule vient du bac : c'est l'identifiant que le candidat porte
+        # déjà, et celui sous lequel le référentiel officiel le connaît.
+        matricule = (request.data.get('matricule')
+                     or dossier.cni or str(dossier.numero_dossier)[:20])
+
+        with transaction.atomic():
+            etudiant = Etudiant.objects.filter(matricule=matricule).first()
+            if etudiant is None:
+                nom_complet = f'{dossier.nom_fr} {dossier.prenom_fr}'.strip()
+                etudiant = Etudiant.objects.create(
+                    matricule=matricule, nom=nom_complet, nom_fr=nom_complet,
+                    nom_ar=dossier.nom_ar or '', prenom_ar=dossier.prenom_ar or '',
+                    prenom_fr=dossier.prenom_fr or '',
+                    genre=dossier.genre or 'M',
+                    date_naissance=dossier.date_naissance,
+                    lieu_naissance_fr=dossier.lieu_naissance or '',
+                    cni=dossier.cni or None, telephone=dossier.telephone or '',
+                    email=dossier.email or '',
+                    serie_bac=dossier.serie_bac or '',
+                    moyenne_bac=dossier.bac_moyenne,
+                    statut='actif',
+                )
+
+            if InscriptionIPGEI.objects.filter(
+                etudiant=etudiant, annee_universitaire=classe.annee_universitaire,
+            ).exists():
+                raise ValidationError(
+                    f'{etudiant} est déjà inscrit pour {classe.annee_universitaire}.')
+
+            statut, nb = services.controler_reinscription(etudiant, classe)
+            inscription = InscriptionIPGEI.objects.create(
+                etudiant=etudiant, classe=classe,
+                annee_universitaire=classe.annee_universitaire,
+                statut=statut, nb_redoublements=nb,
+                montant_frais=services.frais_pour(classe),
+            )
+            matieres = services.inscrire_aux_matieres(inscription)
+
+            # Le dossier cesse d'apparaître comme à traiter, si le socle prévoit
+            # ce statut. On n'invente pas une valeur hors référentiel.
+            valides = {code for code, _ in Preinscription._meta.get_field('statut').choices}
+            if 'convertie' in valides:
+                dossier.statut = 'convertie'
+                dossier.save(update_fields=['statut'])
+
+        donnees = InscriptionIPGEISerializer(inscription).data
+        donnees['matieres_inscrites'] = matieres
+        return Response(donnees, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['post'], url_path='importer-mesrs',
             parser_classes=[MultiPartParser, FormParser])
     def importer_mesrs(self, request):
