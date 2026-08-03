@@ -16,6 +16,7 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import (GenericViewSet, ModelViewSet,
                                      ReadOnlyModelViewSet)
@@ -358,6 +359,128 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         donnees_reponse = InscriptionIPGEISerializer(inscription).data
         donnees_reponse['matieres_inscrites'] = matieres
         return Response(donnees_reponse, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='importer-mesrs',
+            parser_classes=[MultiPartParser, FormParser])
+    def importer_mesrs(self, request):
+        """
+        Inscription en lot depuis le fichier officiel.
+
+        L'import du socle ne convient pas : il crée des inscriptions
+        administratives LMD, sans classe de prépa, sans rattachement aux
+        matières et sans frais. Les dossiers produits seraient inexploitables —
+        et le resteraient sans que rien ne le signale.
+
+        Celui-ci passe par le même chemin que l'inscription unitaire : contrôle
+        du redoublement, tarif figé, maquette rattachée. Une ligne qui échoue
+        n'interrompt pas les autres, mais son motif est rendu : un import
+        silencieusement partiel est pire qu'un import refusé.
+
+        Colonnes attendues : NNI et NOMFR au minimum ; NUMBAC, SERIE, MOYENNE,
+        DATENAIS, LIEUNAIS et SEXE sont reprises si présentes.
+        """
+        import datetime as _dt
+
+        from apps.absence.models import Etudiant
+
+        fichier = request.FILES.get('fichier')
+        if fichier is None:
+            raise ValidationError({'fichier': 'Fichier requis.'})
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise et valide.'})
+
+        try:
+            import openpyxl
+            classeur = openpyxl.load_workbook(fichier, read_only=True, data_only=True)
+            feuille  = classeur.active
+        except Exception as exc:
+            raise ValidationError({'fichier': f'Fichier Excel invalide : {exc}'})
+
+        if feuille.max_row and feuille.max_row > 5000:
+            raise ValidationError({'fichier': 'Trop de lignes (maximum 5000).'})
+
+        entetes = {}
+        premiere = next(feuille.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        for indice, cellule in enumerate(premiere or []):
+            if cellule is not None:
+                entetes[str(cellule).strip().upper()] = indice
+
+        manquantes = [c for c in ('NNI', 'NOMFR') if c not in entetes]
+        if manquantes:
+            raise ValidationError(
+                {'fichier': f"Colonnes manquantes : {', '.join(manquantes)}"})
+
+        def colonne(ligne, nom):
+            i = entetes.get(nom)
+            if i is None or i >= len(ligne) or ligne[i] is None:
+                return ''
+            return str(ligne[i]).strip()
+
+        def date_de(valeur):
+            if not valeur:
+                return None
+            for forme in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+                try:
+                    return _dt.datetime.strptime(valeur, forme).date()
+                except ValueError:
+                    continue
+            return None
+
+        crees, ignores, erreurs = 0, 0, []
+        montant = services.frais_pour(classe)
+
+        for numero, ligne in enumerate(
+            feuille.iter_rows(min_row=2, values_only=True), start=2,
+        ):
+            nni = colonne(ligne, 'NNI')
+            nom = colonne(ligne, 'NOMFR')
+            if not (nni or nom):
+                continue
+            matricule = colonne(ligne, 'NUMBAC') or nni
+            if not matricule:
+                erreurs.append({'ligne': numero, 'motif': 'Ni NNI ni numéro de bac.'})
+                continue
+
+            try:
+                with transaction.atomic():
+                    etudiant = Etudiant.objects.filter(matricule=matricule).first()
+                    if etudiant is None:
+                        etudiant = Etudiant.objects.create(
+                            matricule=matricule, nom=nom, nom_fr=nom, statut='actif',
+                            cni=nni or None,
+                            date_naissance=date_de(colonne(ligne, 'DATENAIS')),
+                            lieu_naissance_fr=colonne(ligne, 'LIEUNAIS'),
+                            genre='F' if colonne(ligne, 'SEXE').upper().startswith('F') else 'M',
+                            nbac=colonne(ligne, 'NUMBAC') or None,
+                            serie_bac=colonne(ligne, 'SERIE'),
+                        )
+
+                    if InscriptionIPGEI.objects.filter(
+                        etudiant=etudiant,
+                        annee_universitaire=classe.annee_universitaire,
+                    ).exists():
+                        ignores += 1
+                        continue
+
+                    statut, nb = services.controler_reinscription(etudiant, classe)
+                    inscription = InscriptionIPGEI.objects.create(
+                        etudiant=etudiant, classe=classe,
+                        annee_universitaire=classe.annee_universitaire,
+                        statut=statut, nb_redoublements=nb, montant_frais=montant,
+                    )
+                    services.inscrire_aux_matieres(inscription)
+                    crees += 1
+            except Exception as exc:
+                motif = getattr(exc, 'messages', None) or [str(exc)]
+                erreurs.append({'ligne': numero, 'etudiant': nom, 'motif': motif[0][:200]})
+
+        return Response({
+            'inscriptions_creees': crees,
+            'deja_inscrits':       ignores,
+            'erreurs':             erreurs,
+            'montant_applique':    str(montant),
+        })
 
     @action(detail=False, methods=['get'], url_path='maquette', pagination_class=NoPagination)
     def maquette(self, request):
