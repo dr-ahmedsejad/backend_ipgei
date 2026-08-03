@@ -214,6 +214,31 @@ class ClasseViewSet(InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
         .annotate(effectif_annote=Count('inscriptions', filter=Q(inscriptions__actif=True), distinct=True))
     )
 
+    @action(detail=False, methods=['get'], url_path='contexte-frais',
+            pagination_class=NoPagination)
+    def contexte_frais(self, request):
+        """
+        Ce qu'il faut savoir pour tarifer une inscription IPGEI.
+
+        La grille du socle est indexée par type de diplôme, notion qui n'existe
+        pas en prépa : les classes en portent une valeur unique, héritée de leur
+        filière. L'écran ne doit donc pas la faire choisir — sinon un tarif
+        enregistré sous un autre type resterait introuvable, et les inscriptions
+        continueraient à se créer à zéro sans que rien ne l'explique.
+
+        C'est le serveur qui la donne, plutôt qu'un choix figé dans le front :
+        elle suit la filière et changerait avec elle.
+        """
+        classe = Classe.objects.select_related('filiere').filter(
+            filiere__isnull=False).first()
+        return Response({
+            'type_diplome': getattr(getattr(classe, 'filiere', None), 'type_diplome', ''),
+            'niveaux': [
+                {'niveau': 1, 'libelle': '1re année — MPSI'},
+                {'niveau': 2, 'libelle': '2e année — MP'},
+            ],
+        })
+
     @action(detail=False, methods=['get'], url_path='select', pagination_class=NoPagination)
     def select(self, request):
         """Liste légère pour les listes déroulantes."""
@@ -472,6 +497,31 @@ class MatiereViewSet(InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
     ordering_fields    = ['code_semestre', 'ordre', 'code', 'coefficient']
     ordering           = ['code_semestre', 'ordre', 'code']
     pagination_class   = StandardPagination
+
+    @action(detail=False, methods=['get'], url_path='contexte-frais',
+            pagination_class=NoPagination)
+    def contexte_frais(self, request):
+        """
+        Ce qu'il faut savoir pour tarifer une inscription IPGEI.
+
+        La grille du socle est indexée par type de diplôme, notion qui n'existe
+        pas en prépa : les classes en portent une valeur unique, héritée de leur
+        filière. L'écran ne doit donc pas la faire choisir — sinon un tarif
+        enregistré sous un autre type resterait introuvable, et les inscriptions
+        continueraient à se créer à zéro sans que rien ne l'explique.
+
+        C'est le serveur qui la donne, plutôt qu'un choix figé dans le front :
+        elle suit la filière et changerait avec elle.
+        """
+        classe = Classe.objects.select_related('filiere').filter(
+            filiere__isnull=False).first()
+        return Response({
+            'type_diplome': getattr(getattr(classe, 'filiere', None), 'type_diplome', ''),
+            'niveaux': [
+                {'niveau': 1, 'libelle': '1re année — MPSI'},
+                {'niveau': 2, 'libelle': '2e année — MP'},
+            ],
+        })
 
     @action(detail=False, methods=['get'], url_path='select', pagination_class=NoPagination)
     def select(self, request):
