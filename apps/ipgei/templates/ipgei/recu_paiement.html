@@ -1,0 +1,39 @@
+{% extends "ipgei/_base_ipgei.html" %}
+
+{% comment %}
+Reçu des frais d'inscription. Le montant vient de la grille tarifaire du socle
+et a été figé au moment de l'inscription : ce document atteste de ce qui a été
+facturé, pas du tarif en vigueur aujourd'hui.
+{% endcomment %}
+
+{% block contenu %}
+  <div class="corps-texte">
+    Je soussigné(e), {{ institution.directeur_titre_fr|default:"Directeur" }} de
+    <strong>{{ institution.nom_display }}</strong>, certifie avoir reçu de
+    l'étudiant(e) <strong>{{ etudiant.nom_display }}</strong>, matricule
+    <strong>{{ etudiant.matricule }}</strong>, inscrit(e) en classe de
+    <strong>{{ classe.nom }}</strong> ({{ libelle_niveau }}), le règlement des
+    frais d'inscription au titre de l'année universitaire
+    <strong>{{ annee_universitaire }}</strong>.
+  </div>
+
+  <div class="encadre" style="text-align:center">
+    <span class="cle">Montant réglé</span><br>
+    <span style="font-size:20pt;font-weight:bold;color:#006633">
+      {{ montant|floatformat:2 }} MRU
+    </span>
+    <div style="margin-top:10px;font-size:10pt;color:#333">
+      {% if date_paiement %}Versé le <strong>{{ date_paiement|date:"d/m/Y" }}</strong>{% endif %}
+      {% if reference %}&nbsp;·&nbsp; Référence : <strong>{{ reference }}</strong>{% endif %}
+    </div>
+  </div>
+
+  <div class="corps-texte" style="margin-top:6px">
+    Le présent reçu est délivré à l'intéressé(e) pour servir et valoir ce que de droit.
+  </div>
+
+  <div style="font-size:9pt;color:#555;margin-top:12px">
+    L'authenticité de ce document peut être vérifiée en ligne à tout moment via le
+    QR code ci-dessous.
+  </div>
+{% endblock %}

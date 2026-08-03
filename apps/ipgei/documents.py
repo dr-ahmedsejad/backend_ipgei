@@ -30,8 +30,11 @@ TYPE_RELEVE_SEMESTRE = 'ipgei_releve_semestre'
 TYPE_RELEVE_ANNUEL   = 'ipgei_releve_annuel'
 TYPE_DECISION        = 'ipgei_decision_deliberation'
 TYPE_CNIM            = 'ipgei_attestation_cnim'
+TYPE_ATTESTATION     = 'ipgei_attestation_inscription'
+TYPE_RECU            = 'ipgei_recu_paiement'
 
-TYPES_IPGEI = [TYPE_RELEVE_SEMESTRE, TYPE_RELEVE_ANNUEL, TYPE_DECISION, TYPE_CNIM]
+TYPES_IPGEI = [TYPE_RELEVE_SEMESTRE, TYPE_RELEVE_ANNUEL, TYPE_DECISION, TYPE_CNIM,
+               TYPE_ATTESTATION, TYPE_RECU]
 
 # Préfixes de numérotation. Distincts de ceux du socle LMD pour qu'un numéro
 # identifie sans ambiguïté le document IPGEI dont il provient.
@@ -40,6 +43,8 @@ PREFIXES = {
     TYPE_RELEVE_ANNUEL:   'IRA',
     TYPE_DECISION:        'IDD',
     TYPE_CNIM:            'ICN',
+    TYPE_ATTESTATION:     'IAI',
+    TYPE_RECU:            'IRP',
 }
 
 TEMPLATES = {
@@ -47,6 +52,8 @@ TEMPLATES = {
     TYPE_RELEVE_ANNUEL:   'ipgei/releve_annuel.html',
     TYPE_DECISION:        'ipgei/decision_deliberation.html',
     TYPE_CNIM:            'ipgei/attestation_cnim.html',
+    TYPE_ATTESTATION:     'ipgei/attestation_inscription.html',
+    TYPE_RECU:            'ipgei/recu_paiement.html',
 }
 
 OPTIONS_PDF = {
@@ -294,4 +301,87 @@ def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, bas
         )
     doc = creer_document(inscription, TYPE_CNIM, utilisateur=utilisateur)
     pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url))
+    return doc, pdf
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Attestation d'inscription et reçu de paiement
+# ═════════════════════════════════════════════════════════════════════════════
+def _contexte_attestation(doc, inscription, base_url) -> dict:
+    """
+    L'attestation dit ce que l'étudiant suit, pas ce qu'il a obtenu.
+
+    À l'IPGEI l'inscription pédagogique est entière et automatique : la
+    maquette du niveau EST la liste de ce qu'il suit. On la joint donc, ce qui
+    évite d'avoir à produire un second document pour la justifier.
+    """
+    contexte = _contexte_commun(doc, inscription, base_url)
+    matieres = []
+    for semestre in services.semestres_du_niveau(
+        inscription.classe.niveau_code, inscription.annee_universitaire,
+    ):
+        for note in (inscription.notes
+                     .filter(semestre=semestre)
+                     .select_related('matiere')
+                     .order_by('matiere__code')):
+            matieres.append({
+                'semestre':    semestre.code,
+                'code':        note.matiere.code,
+                'intitule':    note.matiere.intitule,
+                'coefficient': note.matiere.coefficient,
+            })
+    contexte.update({
+        'titre':    "ATTESTATION D'INSCRIPTION",
+        'matieres': matieres,
+        'libelle_niveau': ('1re année — MPSI' if inscription.classe.niveau_code == 'MPSI'
+                           else '2e année — MP'),
+    })
+    return contexte
+
+
+def _contexte_recu(doc, inscription, base_url) -> dict:
+    contexte = _contexte_commun(doc, inscription, base_url)
+    contexte.update({
+        'titre':          'REÇU DE PAIEMENT',
+        'montant':        inscription.montant_frais,
+        'date_paiement':  inscription.date_paiement,
+        'reference':      inscription.recu_paiement,
+        'libelle_niveau': ('1re année — MPSI' if inscription.classe.niveau_code == 'MPSI'
+                           else '2e année — MP'),
+    })
+    return contexte
+
+
+def generer_attestation_inscription(inscription, *, utilisateur=None, base_url=''):
+    """
+    Attestation de scolarité de l'année en cours.
+
+    Refusée sur une inscription inactive : attester d'une scolarité abandonnée
+    ou annulée ferait de ce document un faux, et il circule hors de
+    l'établissement.
+    """
+    if not inscription.actif:
+        raise ValidationError(
+            "Cette inscription n'est pas active : aucune attestation ne peut en être tirée."
+        )
+    doc = creer_document(inscription, TYPE_ATTESTATION, utilisateur=utilisateur)
+    pdf = generer_pdf(doc, _contexte_attestation(doc, inscription, base_url))
+    return doc, pdf
+
+
+def generer_recu_paiement(inscription, *, utilisateur=None, base_url=''):
+    """
+    Reçu des frais d'inscription.
+
+    Exige le paiement enregistré : un reçu émis avant encaissement vaut
+    quittance, et rien ne permettrait ensuite d'établir que la somme est
+    toujours due.
+    """
+    if not inscription.est_payee:
+        raise ValidationError(
+            "Les frais d'inscription ne sont pas enregistrés comme payés : "
+            'aucun reçu ne peut être délivré.'
+        )
+    doc = creer_document(inscription, TYPE_RECU, utilisateur=utilisateur)
+    pdf = generer_pdf(doc, _contexte_recu(doc, inscription, base_url))
     return doc, pdf

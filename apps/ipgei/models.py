@@ -589,6 +589,17 @@ class InscriptionIPGEI(models.Model):
     date_inscription    = models.DateField(auto_now_add=True)
     actif               = models.BooleanField(default=True)
 
+    # ── Frais ────────────────────────────────────────────────────────────────
+    # Mêmes champs que l'inscription administrative du socle, et même grille
+    # tarifaire (`inscriptions.GrilleFrais`) : le montant n'est pas ressaisi à
+    # la main, il se lit dans le tarif en vigueur. Le figer sur l'inscription
+    # plutôt que de le recalculer à l'affichage est délibéré — un tarif révisé
+    # en cours d'année ne doit pas changer ce qui a été facturé.
+    montant_frais       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    est_payee           = models.BooleanField(default=False)
+    date_paiement       = models.DateField(null=True, blank=True)
+    recu_paiement       = models.CharField(max_length=100, blank=True, default='')
+
     class Meta:
         db_table    = 'ipgei_inscription'
         ordering    = ['classe', 'numero_ordre', 'etudiant__nom']

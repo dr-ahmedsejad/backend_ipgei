@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, Max, Prefetch, Q
+from django.utils import timezone as _tz
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
 from rest_framework.decorators import action
@@ -321,6 +322,7 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
                 annee_universitaire=classe.annee_universitaire,
                 statut=statut,
                 nb_redoublements=nb_redoublements,
+                montant_frais=services.frais_pour(classe),
             )
 
             # Inscription pédagogique, dans la même transaction : un étudiant
@@ -331,6 +333,32 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         donnees_reponse = InscriptionIPGEISerializer(inscription).data
         donnees_reponse['matieres_inscrites'] = matieres
         return Response(donnees_reponse, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='payer')
+    def payer(self, request, pk=None):
+        """
+        Enregistre le paiement des frais.
+
+        Le montant reste celui figé à l'inscription : ressaisir une somme
+        ouvrirait la porte à un écart silencieux avec la grille tarifaire.
+        Seules la date et la référence du versement sont apportées ici.
+        """
+        inscription = self.get_object()
+        if inscription.est_payee:
+            raise ValidationError('Ces frais sont déjà enregistrés comme payés.')
+
+        reference = (request.data.get('recu_paiement') or '').strip()
+        if not reference:
+            raise ValidationError(
+                {'recu_paiement': 'La référence du versement est requise.'}
+            )
+        date_paiement = request.data.get('date_paiement') or _tz.now().date()
+
+        inscription.est_payee     = True
+        inscription.recu_paiement = reference
+        inscription.date_paiement = date_paiement
+        inscription.save(update_fields=['est_payee', 'recu_paiement', 'date_paiement'])
+        return Response(InscriptionIPGEISerializer(inscription).data)
 
     @action(detail=True, methods=['post'], url_path='initialiser-notes')
     def initialiser_notes(self, request, pk=None):
@@ -1568,6 +1596,24 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         inscription = self._inscription(request)
         doc, pdf = self._executer(
             docs_ipgei.generer_releve_annuel, inscription,
+            utilisateur=_utilisateur(request), base_url=self._base_url(),
+        )
+        return self._reponse_pdf(doc, pdf)
+
+    @action(detail=False, methods=['post'], url_path='attestation-inscription')
+    def attestation_inscription(self, request):
+        from . import documents as docs_ipgei
+        doc, pdf = self._executer(
+            docs_ipgei.generer_attestation_inscription, self._inscription(request),
+            utilisateur=_utilisateur(request), base_url=self._base_url(),
+        )
+        return self._reponse_pdf(doc, pdf)
+
+    @action(detail=False, methods=['post'], url_path='recu-paiement')
+    def recu_paiement(self, request):
+        from . import documents as docs_ipgei
+        doc, pdf = self._executer(
+            docs_ipgei.generer_recu_paiement, self._inscription(request),
             utilisateur=_utilisateur(request), base_url=self._base_url(),
         )
         return self._reponse_pdf(doc, pdf)

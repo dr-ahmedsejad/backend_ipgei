@@ -830,3 +830,34 @@ def rattacher_inscrits(semestre: SemestreIPGEI) -> int:
         if inscription.classe.niveau_code == semestre.niveau:
             total += initialiser_notes(inscription, semestre)
     return total
+
+
+def frais_pour(classe) -> Decimal:
+    """
+    Montant dû pour une inscription dans cette classe, d'après la grille du
+    socle (`inscriptions.GrilleFrais`).
+
+    On ne recopie pas la grille côté IPGEI : elle est déjà tenue par la
+    scolarité, par (institution, année, type de diplôme, niveau). Ne manquait
+    que la traduction du niveau IPGEI — MPSI vaut 1re année, MP la 2e — et de
+    l'année, que le socle porte en table quand IPGEI la porte en texte.
+
+    Retourne 0 si aucun tarif n'est défini : mieux vaut une inscription à zéro,
+    visible et corrigeable, qu'une inscription refusée en pleine rentrée.
+    """
+    from apps.inscriptions.models import GrilleFrais
+    from apps.parametres.models import Year
+
+    annee = Year.objects.filter(annee=classe.annee_universitaire).first()
+    if annee is None:
+        return Decimal('0')
+
+    type_diplome = getattr(getattr(classe, 'filiere', None), 'type_diplome', None)
+    montant = GrilleFrais.objects.filter(
+        institution_id=classe.institution_id,
+        annee_univ_id=annee.pk,
+        niveau=1 if classe.niveau_code == NIVEAU_MPSI else 2,
+        actif=True,
+        **({'type_diplome': type_diplome} if type_diplome else {}),
+    ).values_list('montant', flat=True).first()
+    return montant if montant is not None else Decimal('0')

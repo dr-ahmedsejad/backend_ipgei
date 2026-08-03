@@ -440,6 +440,7 @@ class InscriptionIPGEISerializer(serializers.ModelSerializer):
             'sous_groupe', 'sous_groupe_libelle', 'annee_universitaire', 'numero_ordre',
             'niveau', 'statut', 'statut_display', 'nb_redoublements',
             'date_inscription', 'actif',
+            'montant_frais', 'est_payee', 'date_paiement', 'recu_paiement',
         ]
 
     def validate(self, attrs):

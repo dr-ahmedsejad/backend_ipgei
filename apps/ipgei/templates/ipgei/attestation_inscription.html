@@ -1,0 +1,59 @@
+{% extends "ipgei/_base_ipgei.html" %}
+
+{% comment %}
+Attestation d'inscription — pendant IPGEI de l'attestation de scolarité du
+socle, au même gabarit que les autres documents officiels IPGEI.
+
+Une particularité vaut d'être signalée : la maquette suivie y figure. À
+l'IPGEI, l'inscription pédagogique est entière et automatique — on ne choisit
+pas ses matières, on suit toutes celles de son niveau. La liste n'est donc pas
+un détail administratif, c'est la définition même de ce à quoi l'étudiant est
+inscrit. La joindre évite d'avoir à produire un second document pour la
+justifier.
+{% endcomment %}
+
+{% block contenu %}
+  <div class="corps-texte">
+    Je soussigné(e), {{ institution.directeur_titre_fr|default:"Directeur" }} de
+    <strong>{{ institution.nom_display }}</strong>, atteste que l'étudiant(e)
+    <strong>{{ etudiant.nom_display }}</strong>, matricule
+    <strong>{{ etudiant.matricule }}</strong>{% if etudiant.date_naissance %},
+    né(e) le {{ etudiant.date_naissance|date:"d/m/Y" }}{% if etudiant.lieu_naissance_fr %}
+    à {{ etudiant.lieu_naissance_fr }}{% endif %}{% endif %}, est
+    <strong>régulièrement inscrit(e)</strong> en classe de
+    <strong>{{ classe.nom }}</strong> ({{ libelle_niveau }}) au titre de l'année
+    universitaire <strong>{{ annee_universitaire }}</strong>.
+  </div>
+
+  {% if matieres %}
+  <div class="encadre">
+    <span class="cle">Enseignements suivis</span>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:9.5pt">
+      <tr>
+        <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc">Semestre</th>
+        <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc">Code</th>
+        <th style="text-align:left;padding:3px 4px;border-bottom:1px solid #ccc">Intitulé</th>
+        <th style="text-align:right;padding:3px 4px;border-bottom:1px solid #ccc">Coef.</th>
+      </tr>
+      {% for m in matieres %}
+      <tr>
+        <td style="padding:2px 4px">{{ m.semestre }}</td>
+        <td style="padding:2px 4px"><strong>{{ m.code }}</strong></td>
+        <td style="padding:2px 4px">{{ m.intitule }}</td>
+        <td style="padding:2px 4px;text-align:right">{{ m.coefficient|floatformat:"-2" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="corps-texte" style="margin-top:6px">
+    La présente attestation est délivrée à l'intéressé(e) pour servir et valoir ce
+    que de droit.
+  </div>
+
+  <div style="font-size:9pt;color:#555;margin-top:12px">
+    L'authenticité de ce document peut être vérifiée en ligne à tout moment via le
+    QR code ci-dessous.
+  </div>
+{% endblock %}
