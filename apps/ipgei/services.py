@@ -751,6 +751,25 @@ def inscrire_aux_matieres(inscription: InscriptionIPGEI) -> int:
     return total
 
 
+def _derogation_active(etudiant, classe) -> bool:
+    """
+    Une dérogation d'inscription en cours pour cette année.
+
+    Elle ne lève JAMAIS l'interdiction de redoubler la 1re année : cette règle
+    n'admet pas d'exception, et l'appeler ici la rendrait négociable.
+    """
+    from apps.inscriptions.models import Derogation
+    from apps.parametres.models import Year
+
+    annee = Year.objects.filter(annee=classe.annee_universitaire).first()
+    if annee is None:
+        return False
+    return Derogation.objects.filter(
+        etudiant=etudiant, annee_univ=annee,
+        type_derogation='derogation_inscription', statut='actif',
+    ).exists()
+
+
 def controler_reinscription(etudiant, classe) -> tuple:
     """
     Dit si l'étudiant peut être inscrit dans cette classe, et à quel titre.
@@ -786,6 +805,13 @@ def controler_reinscription(etudiant, classe) -> tuple:
             f'{precedente.annee_universitaire}.'
         )
 
+    # Une dérogation d'inscription accordée par l'administration tient lieu de
+    # décision : c'est la voie prévue quand le jury n'a pas statué, ou quand le
+    # droit est épuisé mais qu'une circonstance le justifie. Elle est datée,
+    # motivée et signée — à la différence d'un contournement en base.
+    if _derogation_active(etudiant, classe):
+        return InscriptionIPGEI.STATUT_REDOUBLANT, precedente.nb_redoublements
+
     if precedente.statut != InscriptionIPGEI.STATUT_REDOUBLANT:
         raise ValidationError(
             f'Le redoublement en 2e année se décide en jury. '
@@ -797,7 +823,8 @@ def controler_reinscription(etudiant, classe) -> tuple:
     if precedente.nb_redoublements > droit_max:
         raise ValidationError(
             f'Droit de redoublement épuisé : {precedente.nb_redoublements} '
-            f'redoublement(s) pour un maximum de {droit_max}.'
+            f'redoublement(s) pour un maximum de {droit_max}. '
+            "Une dérogation d'inscription est nécessaire."
         )
 
     # Le compteur suit l'étudiant : c'est lui qui borne le droit, et le jury
