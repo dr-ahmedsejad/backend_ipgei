@@ -359,6 +359,79 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         donnees_reponse['matieres_inscrites'] = matieres
         return Response(donnees_reponse, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get'], url_path='maquette', pagination_class=NoPagination)
+    def maquette(self, request):
+        """
+        État de l'inscription pédagogique d'une classe.
+
+        Elle est automatique : il n'y a rien à y saisir. C'est précisément ce
+        qui rend cette vue nécessaire — un automatisme dont on ne vérifie
+        jamais le résultat finit par manquer quelqu'un sans que personne le
+        sache, et cela ne se voit qu'en délibération.
+
+        Pour chaque étudiant : ce que la maquette du niveau prévoit, ce qui lui
+        est effectivement rattaché, et ce qui manque.
+        """
+        classe_id = request.query_params.get('classe')
+        if not classe_id:
+            raise ValidationError({'classe': 'Classe requise.'})
+        classe = Classe.objects.filter(pk=classe_id).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe introuvable.'})
+
+        semestres = list(services.semestres_du_niveau(
+            classe.niveau_code, classe.annee_universitaire))
+        attendues = {}
+        for semestre in semestres:
+            for m in Matiere.objects.filter(
+                institution=semestre.institution, code_semestre=semestre.code, actif=True,
+            ):
+                attendues[(semestre.pk, m.pk)] = f'{semestre.code} · {m.code}'
+
+        lignes = []
+        for inscription in (InscriptionIPGEI.objects
+                            .filter(classe=classe, actif=True)
+                            .select_related('etudiant')
+                            .order_by('numero_ordre', 'etudiant__nom')):
+            rattachees = set(
+                inscription.notes.values_list('semestre_id', 'matiere_id'))
+            manquantes = [libelle for cle, libelle in attendues.items()
+                          if cle not in rattachees]
+            lignes.append({
+                'inscription':    inscription.pk,
+                'etudiant':       str(inscription.etudiant),
+                'attendues':      len(attendues),
+                'rattachees':     len(attendues) - len(manquantes),
+                'manquantes':     sorted(manquantes),
+            })
+
+        return Response({
+            'classe':    classe.nom,
+            'niveau':    classe.niveau_code,
+            'semestres': [s.code for s in semestres],
+            'attendues': len(attendues),
+            'lignes':    lignes,
+        })
+
+    @action(detail=False, methods=['post'], url_path='rattacher-matieres')
+    def rattacher_matieres(self, request):
+        """
+        Rattache ce qui manque, pour toute une classe.
+
+        L'inscription pédagogique se fait seule à l'inscription et à l'ouverture
+        d'un semestre ; ce bouton n'existe que pour les cas où elle a échoué —
+        une matière créée pendant une panne, un import fait à la main.
+        Idempotent : sans manque, il ne crée rien.
+        """
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise et valide.'})
+
+        creees = 0
+        for inscription in InscriptionIPGEI.objects.filter(classe=classe, actif=True):
+            creees += services.inscrire_aux_matieres(inscription)
+        return Response({'notes_creees': creees})
+
     @action(detail=True, methods=['post'], url_path='payer')
     def payer(self, request, pk=None):
         """
