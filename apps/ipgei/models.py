@@ -311,18 +311,6 @@ class SemestreIPGEI(models.Model):
         )
 
     @property
-    def niveau(self) -> str:
-        """
-        Premier niveau de l'année d'étude — conservé pour l'affichage hérité.
-
-        Ne jamais s'en servir pour filtrer : voir `niveaux` et `rang`.
-        """
-        codes = self.niveaux
-        if codes:
-            return codes[0]
-        return NIVEAU_MPSI if self.code in SEMESTRES_PAR_NIVEAU[NIVEAU_MPSI] else NIVEAU_MP
-
-    @property
     def type_semestre(self) -> str:
         """S1/S3 impairs, S2/S4 pairs — pilote le choix de la grille type."""
         return 'I' if self.code in ('S1', 'S3') else 'P'
@@ -436,7 +424,7 @@ class SemaineIPGEI(models.Model):
         # doit pas manquer à la comparaison.
         classes = Classe.objects.filter(
             annee_universitaire=self.semestre.annee_universitaire,
-            niveau__niveau__in=self.semestre.niveaux or [self.semestre.niveau],
+            niveau__niveau__in=self.semestre.niveaux,
         )
         ids = list(classes.values_list('pk', flat=True))
         ids += list(SousGroupeTP.objects.filter(classe__in=ids).values_list('pk', flat=True))

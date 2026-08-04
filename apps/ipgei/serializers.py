@@ -193,7 +193,6 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
     rang          = serializers.IntegerField(read_only=True)
     libelle_annee = serializers.CharField(read_only=True)
     niveaux       = serializers.ListField(read_only=True, child=serializers.CharField())
-    niveau        = serializers.CharField(read_only=True)
     type_semestre = serializers.CharField(read_only=True)
     nb_semaines_generees = serializers.SerializerMethodField()
 
@@ -201,7 +200,7 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
         model  = SemestreIPGEI
         fields = [
             'id', 'institution', 'code', 'annee_universitaire', 'date_debut', 'date_fin',
-            'nb_semaines', 'est_cloture', 'rang', 'libelle_annee', 'niveaux', 'niveau',
+            'nb_semaines', 'est_cloture', 'rang', 'libelle_annee', 'niveaux',
             'type_semestre', 'nb_semaines_generees',
         ]
 
