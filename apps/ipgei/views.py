@@ -13,6 +13,7 @@ from django.db.models import Count, Max, Prefetch, Q
 from django.utils import timezone as _tz
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
@@ -2215,6 +2216,19 @@ class AbsenceSeanceViewSet(ModelViewSet):
 # ═════════════════════════════════════════════════════════════════════════════
 # Permutations
 # ═════════════════════════════════════════════════════════════════════════════
+#: Rôles qui portent la décision sur les emplois du temps. L'« action directe »
+#: leur était déjà réservée dans les faits ; on la nomme ici plutôt que de la
+#: laisser dépendre d'une case à cocher que n'importe qui pouvait cocher.
+ROLES_DECISION_EDT = ('admin', 'DG', 'DE', 'DA')
+
+
+def _peut_trancher_seul(utilisateur) -> bool:
+    """Cet utilisateur peut-il valider une permutation sans l'accord d'un tiers ?"""
+    if utilisateur is None:
+        return False
+    return bool(getattr(utilisateur, 'is_superuser', False)) or         getattr(utilisateur, 'role', '') in ROLES_DECISION_EDT
+
+
 class _WorkflowPermutationMixin(_ErreurMetierMixin):
     """
     Circuit commun aux deux permutations : demande → accord → validation
@@ -2312,6 +2326,45 @@ class PermutationProfViewSet(_WorkflowPermutationMixin, ModelViewSet):
     filterset_fields    = ['statut', 'seance_a__classe', 'seance_a__prof', 'seance_b__prof']
     ordering            = ['-date_demande']
     pagination_class    = StandardPagination
+
+    @action(detail=False, methods=['post'], url_path='permuter-maintenant')
+    def permuter_maintenant(self, request):
+        """
+        Demande, valide et applique l'échange en une seule transaction.
+
+        Le circuit A → accord de B → validation du directeur reste la règle. Ce
+        raccourci ne le contourne que pour qui pouvait déjà trancher seul —
+        c'est exactement ce que faisait « action directe », mais sans obliger à
+        quitter la grille pour appliquer, en trois appels et deux écrans.
+
+        Le droit est exigé **explicitement** : une action personnalisée n'est
+        pas dans `ACTION_MAP` et retomberait sinon sur « voir », ce qui
+        laisserait appliquer une permutation à qui n'a que la lecture.
+        """
+        utilisateur = _utilisateur(request)
+        if not _peut_trancher_seul(utilisateur):
+            raise PermissionDenied(
+                "Vous pouvez demander la permutation, mais sa validation revient "
+                "à la direction."
+            )
+
+        entree = self.get_serializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            permutation = entree.save(
+                demande_par=utilisateur, action_directe=True,
+                statut=StatutWorkflow.VALIDEE, valide_par=utilisateur,
+                date_validation=_tz.now(),
+            )
+            impactees = self._executer(
+                services.appliquer_permutation_prof, permutation, utilisateur,
+            )
+
+        permutation.refresh_from_db()
+        donnees = self.get_serializer(permutation).data
+        donnees['seances_impactees'] = impactees if isinstance(impactees, int) else 0
+        return Response(donnees, status=status.HTTP_201_CREATED)
 
 
 class PermutationEtudiantViewSet(_WorkflowPermutationMixin, ModelViewSet):
