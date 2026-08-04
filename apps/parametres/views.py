@@ -171,18 +171,19 @@ class SeanceViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
         return super().get_permissions()
 
 
-class CreneauViewSet(AuditMixin, SelectAllMixin, mixins.UpdateModelMixin,
-                     viewsets.ReadOnlyModelViewSet):
+class CreneauViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
     """
-    Creneaux horaires — LECTURE SEULE sur IPGEI.
+    Créneaux horaires — grille administrable.
 
-    La LISTE des creneaux est celle de SIGA : IPGEI en tient un miroir alimente
-    par `manage.py sync_creneaux_siga` (lecture seule sur `siga_pg`). On ne peut
-    donc ni en creer, ni en supprimer ici — sans quoi les deux produits
-    divergeraient sans que personne ne s'en apercoive.
+    Ils ont d'abord été en lecture seule : la liste venait de SIGA, dont IPGEI
+    tenait un miroir, et créer un créneau ici aurait fait diverger les deux
+    produits. Cette contrainte est levée. La commande de synchronisation n'existe
+    plus, IPGEI a sa propre base, et le fork ne pousse rien vers SIGA — la
+    divergence est devenue la règle, non le risque. Une grille horaire figée
+    obligeait par ailleurs à garder tous les créneaux hérités, actifs ou non.
 
-    Seule exception : la **duree**, saisie creneau par creneau cote IPGEI. Le
-    PATCH est donc ouvert, mais le serializer verrouille tous les autres champs.
+    La suppression reste protégée par les clés étrangères : un créneau porté par
+    une séance ne s'efface pas, il se désactive.
     """
     queryset           = Creneau.objects.all()
     serializer_class   = CreneauSerializer
@@ -193,9 +194,10 @@ class CreneauViewSet(AuditMixin, SelectAllMixin, mixins.UpdateModelMixin,
     pagination_class   = StandardPagination
 
     def get_permissions(self):
-        # Lecture pour tout utilisateur connecte ; saisie de la duree reservee
-        # a l'admin, la valeur alimentant les calculs de charge.
-        if self.action in ('update', 'partial_update'):
+        # Lecture pour tout utilisateur connecté ; toute écriture réservée à
+        # l'admin — la durée alimente les calculs de charge, et la grille
+        # horaire commande l'emploi du temps de tout l'établissement.
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
             return [IsAdmin()]
         return super().get_permissions()
 

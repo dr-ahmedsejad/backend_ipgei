@@ -43,7 +43,11 @@ class PreinscriptionCreateSerializer(serializers.ModelSerializer):
     Accepte les noms de champs du frontend et retourne `token` (= numero_dossier).
     """
     token             = serializers.UUIDField(source='numero_dossier', read_only=True)
-    filiere_souhaitee = serializers.IntegerField(write_only=True, required=True)
+    # Facultatif : en prépa, le candidat postule en 1re année et n'a pas de
+    # filière à choisir — le formulaire public n'envoie plus ce champ et la
+    # filière technique du cursus est résolue ci-dessous. Le champ reste accepté
+    # pour un portail multi-filières.
+    filiere_souhaitee = serializers.IntegerField(write_only=True, required=False)
 
     class Meta:
         model  = Preinscription
@@ -66,11 +70,19 @@ class PreinscriptionCreateSerializer(serializers.ModelSerializer):
         from apps.scolarite.models import Filiere
         from apps.parametres.models import Institution
 
-        filiere_id = validated_data.pop('filiere_souhaitee')
-        try:
-            filiere = Filiere.objects.get(pk=filiere_id)
-        except Filiere.DoesNotExist:
-            raise serializers.ValidationError({'filiere_souhaitee': 'Filière introuvable.'})
+        filiere_id = validated_data.pop('filiere_souhaitee', None)
+        if filiere_id:
+            try:
+                filiere = Filiere.objects.get(pk=filiere_id)
+            except Filiere.DoesNotExist:
+                raise serializers.ValidationError({'filiere_souhaitee': 'Filière introuvable.'})
+        else:
+            # Import local : le socle ne dépend pas du module produit au chargement.
+            # `filiere_socle` est le seul accesseur de la filière technique du
+            # cursus préparatoire — la retrouver par son code ici en dupliquerait
+            # la définition, et deux définitions finissent par diverger.
+            from apps.ipgei.socle import filiere_socle
+            filiere = filiere_socle(Institution.objects.filter(est_principale=True).first())
 
         annee = Year.objects.order_by('-annee').first()
         validated_data.setdefault('annee_univ', annee)

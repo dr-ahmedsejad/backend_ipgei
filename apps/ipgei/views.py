@@ -20,22 +20,28 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import (GenericViewSet, ModelViewSet,
                                      ReadOnlyModelViewSet)
-from rest_framework.mixins import ListModelMixin, RetrieveModelMixin, UpdateModelMixin
+from rest_framework.mixins import (CreateModelMixin, DestroyModelMixin,
+                                   ListModelMixin, RetrieveModelMixin,
+                                   UpdateModelMixin)
 
 from apps.prof.models import Prof
 from apps.salle.models import Salle
 from core.mixins import InstitutionScopedMixin, SelectAllMixin
 from core.pagination import NoPagination, StandardPagination
+from rest_framework.permissions import BasePermission
+
 from core.permissions import RBACPermission
 
-from . import edt_pdf, services
+from . import edt_pdf, pv, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
-    AbsenceSeance, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
+    AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
     HistoriqueClasse,
-    InscriptionIPGEI, LigneDeliberation, Matiere, Note, ParametresIPGEI,
+    InscriptionIPGEI, LigneDeliberation, Matiere, MembreJuryIPGEI, NiveauIPGEI,
+    Note,
+    ParametresIPGEI,
     PermutationEtudiant, PermutationProf, SeanceReelle, SeanceType, SemaineIPGEI,
-    SemestreIPGEI, SousGroupeTP, StatutWorkflow,
+    SemestreIPGEI, SessionEvaluationIPGEI, SousGroupeTP, StatutWorkflow,
 )
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
@@ -44,11 +50,15 @@ from .serializers import (
     HistoriqueClasseSerializer, InscriptionCompleteSerializer,
     InscriptionIPGEISerializer,
     LigneDeliberationListSerializer, LigneDeliberationSerializer,
-    MatiereSelectSerializer, MatiereSerializer, NoteSerializer,
+    MatiereSelectSerializer, MatiereSerializer, MembreJuryIPGEISerializer,
+    NiveauIPGEISerializer,
+    NoteSerializer,
     ParametresIPGEISerializer, PermutationEtudiantSerializer,
     PermutationProfSerializer, SaisieAbsencesSerializer,
+    SaisieAnonymeSerializer,
     SaisieCollectiveSerializer, SeanceReelleSerializer, SeanceTypeSerializer,
-    SemaineIPGEISerializer, SemestreIPGEISerializer, SousGroupeTPSerializer,
+    SemaineIPGEISerializer, SemestreIPGEISerializer,
+    SessionEvaluationIPGEISerializer, SousGroupeTPSerializer,
     VersionArchiveSerializer,
 )
 
@@ -127,6 +137,27 @@ class SemestreIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin,
     ordering_fields    = ['annee_universitaire', 'code', 'date_debut']
     ordering           = ['-annee_universitaire', 'code']
     pagination_class   = StandardPagination
+
+    @action(detail=False, methods=['post'], url_path='creer-annee')
+    def creer_annee(self, request):
+        """
+        Ouvre une année d'un coup : ses quatre semestres, datés par convention.
+
+        Les créer un par un laissait des années à moitié ouvertes, et un inscrit
+        n'y recevait que la moitié de ses matières. Les semestres déjà présents
+        sont laissés tels quels — dates comprises.
+        """
+        annee = request.data.get('annee_universitaire')
+        if not annee:
+            raise ValidationError({'annee_universitaire': 'Année requise.'})
+
+        crees = self._executer(services.creer_semestres_annee,
+                               annee, _institution_principale())
+        return Response({
+            'annee_universitaire': annee,
+            'semestres_crees':     len(crees),
+            'codes':               [s.code for s in crees],
+        }, status=status.HTTP_201_CREATED if crees else status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='generer-semaines')
     def generer_semaines(self, request, pk=None):
@@ -429,12 +460,12 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
             )
             matieres = services.inscrire_aux_matieres(inscription)
 
-            # Le dossier cesse d'apparaître comme à traiter, si le socle prévoit
-            # ce statut. On n'invente pas une valeur hors référentiel.
-            valides = {code for code, _ in Preinscription._meta.get_field('statut').choices}
-            if 'convertie' in valides:
-                dossier.statut = 'convertie'
-                dossier.save(update_fields=['statut'])
+            # Le dossier cesse d'apparaître comme à traiter. Le statut terminal
+            # du socle s'appelle « inscrite » ; chercher « convertie », qui n'est
+            # pas dans le référentiel, laissait le dossier « accepté » et son
+            # bouton « Inscrire » indéfiniment.
+            dossier.statut = 'inscrite'
+            dossier.save(update_fields=['statut'])
 
         donnees = InscriptionIPGEISerializer(inscription).data
         donnees['matieres_inscrites'] = matieres
@@ -583,7 +614,7 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
             raise ValidationError({'classe': 'Classe introuvable.'})
 
         semestres = list(services.semestres_du_niveau(
-            classe.niveau_code, classe.annee_universitaire))
+            classe.niveau_code, classe.annee_universitaire, classe.institution))
         attendues = {}
         for semestre in semestres:
             for m in Matiere.objects.filter(
@@ -768,7 +799,7 @@ class MatiereViewSet(InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
     required_module    = 'ipgei_matieres'
     queryset           = Matiere.objects.select_related('institution')
     filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields   = ['code_semestre', 'has_tp', 'actif']
+    filterset_fields   = ['code_semestre', 'has_tp', 'actif', 'niveau_ref']
     search_fields      = ['code', 'intitule']
     ordering_fields    = ['code_semestre', 'ordre', 'code', 'coefficient']
     ordering           = ['code_semestre', 'ordre', 'code']
@@ -819,6 +850,268 @@ class MatiereViewSet(InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
 # ═════════════════════════════════════════════════════════════════════════════
 # Notes
 # ═════════════════════════════════════════════════════════════════════════════
+class NiveauIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewSet):
+    """
+    Référentiel des niveaux du cursus — MPSI, MP, et ceux qu'on ajoute.
+
+    Rattaché au module `ipgei_parametres`, réservé à l'admin comme le reste du
+    paramétrage : ce que ces lignes décrivent — droit au redoublement, décisions
+    du jury, rang commandant le tarif — engage tout le cursus.
+    """
+    serializer_class   = NiveauIPGEISerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_parametres'
+    queryset           = NiveauIPGEI.objects.select_related('institution')
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = ['rang', 'actif']
+    ordering           = ['rang', 'ordre', 'code']
+    pagination_class   = NoPagination
+
+    def perform_destroy(self, instance):
+        """
+        Un niveau qui a servi ne se supprime pas : il se désactive.
+
+        Effacer la ligne rendrait illisibles les inscriptions et délibérations
+        qui la citent — elles portent le code du niveau, pas sa clé.
+        """
+        if instance.matieres.exists():
+            raise ValidationError(
+                f'{instance.code} porte {instance.matieres.count()} matière(s). '
+                'Désactivez-le plutôt que de le supprimer.'
+            )
+        from apps.departement.models import Departement
+        if Departement.objects.filter(
+            classe_ipgei__isnull=False, niveau__niveau=instance.code,
+        ).exists():
+            raise ValidationError(
+                f'Des classes existent en {instance.code}. Désactivez le niveau.'
+            )
+        instance.delete()
+
+    def perform_create(self, serializer):
+        """Le référentiel du socle doit connaître le niveau, sinon aucune classe
+        ne pourra s'y rattacher."""
+        from .socle import niveau_socle
+        niveau = serializer.save()
+        niveau_socle(niveau.code)
+
+
+class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
+                                    RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
+    """
+    Fenêtres de saisie des notes : une session normale et une session de
+    rattrapage par semestre.
+
+    Ni création ni suppression : les sessions existent avec le semestre. Le
+    PATCH ne porte que sur les dates indicatives — les états passent par
+    `ouvrir`, `cloturer` et `rouvrir`, qui datent l'acte et le journalisent.
+    """
+    serializer_class   = SessionEvaluationIPGEISerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_notes'
+    queryset           = (SessionEvaluationIPGEI.objects
+                          .select_related('semestre', 'cloturee_par'))
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = ['semestre', 'type_session', 'est_ouverte', 'est_close',
+                          'semestre__annee_universitaire']
+    ordering           = ['semestre__annee_universitaire', 'semestre__code', 'type_session']
+    pagination_class   = NoPagination
+
+    def list(self, request, *args, **kwargs):
+        """
+        Sessions de l'année demandée, créées au besoin.
+
+        Une session absente de la liste serait indistinguable d'une session
+        fermée : on matérialise donc les deux campagnes de chaque semestre
+        avant de répondre.
+        """
+        annee = request.query_params.get('annee_universitaire') or \
+            request.query_params.get('semestre__annee_universitaire')
+        semestres = SemestreIPGEI.objects.all()
+        if annee:
+            semestres = semestres.filter(annee_universitaire=annee)
+        if request.query_params.get('semestre'):
+            semestres = semestres.filter(pk=request.query_params['semestre'])
+        for semestre in semestres:
+            services.sessions_du_semestre(semestre)
+        return super().list(request, *args, **kwargs)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        annee = self.request.query_params.get('annee_universitaire')
+        if annee:
+            qs = qs.filter(semestre__annee_universitaire=annee)
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='ouvrir')
+    def ouvrir(self, request, pk=None):
+        session = self._executer(services.ouvrir_session, self.get_object(),
+                                 _utilisateur(request))
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=['post'], url_path='cloturer')
+    def cloturer(self, request, pk=None):
+        session = self._executer(services.cloturer_session, self.get_object(),
+                                 _utilisateur(request))
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=['post'], url_path='rouvrir')
+    def rouvrir(self, request, pk=None):
+        """
+        Réouverture d'une campagne close — réservée à un administrateur.
+
+        Rouvrir, c'est rendre modifiables des notes déjà arrêtées : l'acte
+        dépasse la saisie courante, il relève de la responsabilité de
+        l'établissement.
+        """
+        utilisateur = _utilisateur(request)
+        est_admin = bool(utilisateur and (
+            utilisateur.is_superuser or getattr(utilisateur, 'role', '') == 'admin'
+        ))
+        if not est_admin:
+            return Response(
+                {'detail': 'Seul un administrateur peut réouvrir une session clôturée.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        session = self._executer(services.rouvrir_session, self.get_object(), utilisateur)
+        return Response(self.get_serializer(session).data)
+
+    # ── Anonymat des copies ──────────────────────────────────────────────────
+    @action(detail=True, methods=['get', 'post'], url_path='anonymats')
+    def anonymats(self, request, pk=None):
+        """
+        GET  → table de correspondance numéro ↔ étudiant (levée d'anonymat).
+        POST → tirage au sort des numéros de la campagne.
+
+        Une seule action pour les deux verbes : deux `@action` partageant un
+        même `url_path` se masqueraient dans le routeur, la seconde renvoyant
+        405 sur une URL pourtant déclarée.
+        """
+        if request.method == 'GET':
+            return self._table_anonymats(pk)
+
+        utilisateur = _utilisateur(request)
+        force = str(request.data.get('force', '')).lower() in ('1', 'true', 'on')
+        if force and not (utilisateur and (
+            utilisateur.is_superuser or getattr(utilisateur, 'role', '') == 'admin'
+        )):
+            return Response(
+                {'detail': 'Seul un administrateur peut forcer une régénération '
+                           'alors que des notes existent.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        total = self._executer(
+            services.generer_anonymats, self.get_object(),
+            regenerer=str(request.data.get('regenerer', '')).lower() in ('1', 'true', 'on'),
+            force=force, utilisateur=utilisateur,
+        )
+        return Response({'anonymats_generes': total})
+
+    def _table_anonymats(self, pk):
+        """
+        Table de correspondance numéro ↔ étudiant : la levée d'anonymat.
+
+        Elle reste derrière le module `ipgei_notes` et n'est jamais renvoyée par
+        la saisie sous anonymat, qui n'a pas à révéler qui elle note.
+        """
+        lignes = (AnonymatIPGEI.objects
+                  .filter(session=self.get_object())
+                  .select_related('inscription__etudiant', 'inscription__classe')
+                  .order_by('numero'))
+        return Response([
+            {
+                'numero':             ligne.numero,
+                'inscription':        ligne.inscription_id,
+                'etudiant_nom':       ligne.inscription.etudiant.nom_display,
+                'etudiant_matricule': ligne.inscription.etudiant.matricule,
+                'classe':             ligne.inscription.classe.nom,
+            }
+            for ligne in lignes
+        ])
+
+    @action(detail=True, methods=['post'], url_path='plafond')
+    def plafond(self, request, pk=None):
+        """
+        Fixe le plafond de rattrapage de cette session, puis recalcule.
+
+        Le plafond est figé à la création de la session ; cette action permet de
+        le poser sur une campagne déjà ouverte — par exemple quand la règle est
+        arrêtée après coup. Refusée sur une session close : les notes qui en
+        découlent sont arrêtées.
+        """
+        session = self.get_object()
+        if session.type_session != SessionEvaluationIPGEI.TYPE_RATTRAPAGE:
+            raise ValidationError('Le plafond ne concerne que la session de rattrapage.')
+        if session.est_close:
+            raise ValidationError('Session clôturée — réouvrez-la avant de changer le plafond.')
+
+        brut = request.data.get('valeur')
+        if brut in (None, ''):
+            valeur = None
+        else:
+            try:
+                valeur = Decimal(str(brut))
+            except (ArithmeticError, TypeError, ValueError):
+                raise ValidationError({'valeur': 'Plafond invalide.'})
+            if not Decimal('0') <= valeur <= Decimal('20'):
+                raise ValidationError({'valeur': 'Le plafond doit être compris entre 0 et 20.'})
+
+        session.plafond_rattrapage = valeur
+        session.save(update_fields=['plafond_rattrapage'])
+
+        recalculees = self._executer(
+            services.recalculer_notes,
+            Note.objects.filter(semestre=session.semestre),
+            plafond_rattrapage=valeur,
+        )
+        donnees = self.get_serializer(session).data
+        donnees['notes_recalculees'] = recalculees
+        return Response(donnees)
+
+
+class EnseignantDeLaMatiereOuRBAC(BasePermission):
+    """
+    Saisie des notes : le droit sur le module, ou enseigner la matière.
+
+    `ipgei_notes` est attribué à la scolarité et à la direction des études, pas
+    au corps enseignant — qui est pourtant celui qui corrige. Plutôt que
+    d'ouvrir le module à tous les enseignants, ce qui donnerait à chacun les
+    notes de tous, l'accès se règle matière par matière sur la foi de l'emploi
+    du temps.
+    """
+
+    def has_permission(self, request, view):
+        if RBACPermission().has_permission(request, view):
+            return True
+
+        utilisateur = request.user
+        if not (utilisateur and utilisateur.is_authenticated):
+            return False
+        prof = services.prof_de(utilisateur)
+        if prof is None:
+            return False
+
+        # Consulter son propre périmètre ne révèle rien d'autre que lui-même.
+        if view.action == 'mes_feuilles':
+            return True
+
+        source   = request.query_params if request.method == 'GET' else request.data
+        semestre = SemestreIPGEI.objects.filter(pk=source.get('semestre')).first()
+        if semestre is None:
+            return False
+
+        if view.action == 'saisie_anonyme':
+            # Sous anonymat la classe n'est pas transmise : c'est le principe.
+            return services.enseigne_matiere(
+                prof, matiere_id=source.get('matiere'), semestre=semestre)
+
+        return services.enseigne(
+            prof, classe_id=source.get('classe'), matiere_id=source.get('matiere'),
+            semestre=semestre,
+        )
+
+
 class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
     """
     Notes par (étudiant × matière × semestre), avec DS et examens en nombre libre.
@@ -837,10 +1130,32 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
     ordering           = ['inscription', 'matiere__ordre']
     pagination_class   = StandardPagination
 
+    def get_permissions(self):
+        # La feuille de notes d'une matière appartient d'abord à qui l'enseigne.
+        if self.action in ('grille', 'saisie_collective', 'saisie_anonyme', 'mes_feuilles'):
+            return [EnseignantDeLaMatiereOuRBAC()]
+        return super().get_permissions()
+
+    @action(detail=False, methods=['get'], url_path='mes-feuilles')
+    def mes_feuilles(self, request):
+        """
+        Feuilles de notes de l'enseignant connecté : ses couples classe × matière.
+
+        Le périmètre vient de l'emploi du temps, seule source tenue à jour de
+        qui enseigne quoi. Un compte sans fiche enseignant n'a pas de feuille —
+        la scolarité passe par la grille complète.
+        """
+        prof = services.prof_de(request.user)
+        if prof is None:
+            return Response([])
+        return Response(services.feuilles_enseignant(
+            prof, annee_universitaire=request.query_params.get('annee_universitaire', ''),
+        ))
+
     @action(detail=True, methods=['post'], url_path='recalculer')
     def recalculer(self, request, pk=None):
         note = self.get_object()
-        plafond = _plafond_courant()
+        plafond = services.plafond_effectif(note.semestre)
         self._executer(services.calculer_note, note, plafond_rattrapage=plafond)
         note.refresh_from_db()
         return Response(self.get_serializer(note).data)
@@ -899,12 +1214,21 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
             for e in n.evaluations.all():
                 numeros[e.type_evaluation] = max(numeros[e.type_evaluation], e.numero)
 
+        # Les deux campagnes s'ouvrent séparément : la grille dit laquelle
+        # accepte des notes, pour que l'écran grise les bonnes colonnes plutôt
+        # que de laisser saisir puis rejeter à l'enregistrement.
+        sessions = services.sessions_du_semestre(semestre)
         return Response({
             'matiere':   MatiereSerializer(matiere).data,
             'semestre':  SemestreIPGEISerializer(semestre).data,
             'nb_ds':     max(1, numeros['ds']),
             'nb_examens': max(1, numeros['exam']),
             'verrouillee': semestre.est_cloture,
+            'sessions': SessionEvaluationIPGEISerializer(
+                sorted(sessions.values(), key=lambda s: s.type_session), many=True,
+            ).data,
+            'saisie_normale':    sessions[SessionEvaluationIPGEI.TYPE_NORMALE].est_saisissable,
+            'saisie_rattrapage': sessions[SessionEvaluationIPGEI.TYPE_RATTRAPAGE].est_saisissable,
             'notes':     NoteSerializer(notes, many=True).data,
         })
 
@@ -923,15 +1247,28 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         semestre = SemestreIPGEI.objects.filter(pk=donnees['semestre']).first()
         if matiere is None or semestre is None:
             raise ValidationError('Matière ou semestre introuvable.')
-        if semestre.est_cloture:
+
+        # Une grille peut porter les deux campagnes à la fois. Chacune est
+        # contrôlée pour ce qu'elle contient réellement : envoyer des DS pendant
+        # la seule campagne de rattrapage doit échouer, et l'inverse aussi.
+        lignes = donnees['lignes']
+        touche_normale = any(
+            'note_tp' in ligne or ligne.get('evaluations') for ligne in lignes
+        )
+        touche_rattrapage = any('note_rattrapage' in ligne for ligne in lignes)
+        if touche_normale:
+            self._executer(services.controler_saisie, semestre, rattrapage=False)
+        if touche_rattrapage:
+            self._executer(services.controler_saisie, semestre, rattrapage=True)
+        if not (touche_normale or touche_rattrapage) and semestre.est_cloture:
             raise ValidationError('Semestre clôturé — saisie impossible.')
 
         utilisateur = _utilisateur(request)
-        plafond     = _plafond_courant()
+        plafond     = services.plafond_effectif(semestre)
         traitees    = 0
 
         with transaction.atomic():
-            for ligne in donnees['lignes']:
+            for ligne in lignes:
                 note, _ = Note.objects.get_or_create(
                     inscription_id=ligne['inscription'], matiere=matiere, semestre=semestre,
                 )
@@ -962,24 +1299,74 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
 
         return Response({'lignes_traitees': traitees})
 
+    @action(detail=False, methods=['post'], url_path='saisie-anonyme')
+    def saisie_anonyme(self, request):
+        """
+        Saisit une note sous un numéro d'anonymat, sans révéler l'étudiant.
+
+        Corps : `{semestre, matiere, numero_anonymat, type_evaluation, numero,
+        valeur}`. La réponse ne renvoie ni nom ni matricule — l'afficher
+        annulerait l'anonymat au moment même où il sert.
+        """
+        entree = SaisieAnonymeSerializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+        donnees = entree.validated_data
+
+        matiere  = Matiere.objects.filter(pk=donnees['matiere']).first()
+        semestre = SemestreIPGEI.objects.filter(pk=donnees['semestre']).first()
+        if matiere is None or semestre is None:
+            raise ValidationError('Matière ou semestre introuvable.')
+        if matiere.code_semestre != semestre.code:
+            raise ValidationError(
+                f'La matière {matiere.code} relève du semestre {matiere.code_semestre}.'
+            )
+
+        # Les DS et examens relèvent de la campagne normale : l'anonymat ne
+        # dispense pas de la fenêtre de saisie.
+        session = self._executer(services.controler_saisie, semestre, rattrapage=False)
+        inscription = self._executer(services.resoudre_anonymat,
+                                     session, donnees['numero_anonymat'])
+
+        with transaction.atomic():
+            note, _ = Note.objects.get_or_create(
+                inscription=inscription, matiere=matiere, semestre=semestre,
+            )
+            if note.verrouillee:
+                raise ValidationError('Note verrouillée par une délibération validée.')
+
+            Evaluation.objects.update_or_create(
+                note=note, type_evaluation=donnees['type_evaluation'],
+                numero=donnees['numero'],
+                defaults={'valeur': donnees['valeur'], 'saisie_par': _utilisateur(request)},
+            )
+            self._executer(services.calculer_note, note,
+                           plafond_rattrapage=services.plafond_effectif(semestre))
+
+        return Response({
+            'numero_anonymat': donnees['numero_anonymat'],
+            'matiere':         matiere.code,
+            'type_evaluation': donnees['type_evaluation'],
+            'numero':          donnees['numero'],
+            'valeur':          donnees['valeur'],
+        })
+
     @action(detail=False, methods=['post'], url_path='recalculer-lot')
     def recalculer_lot(self, request):
         """Recalcule toutes les notes d'un semestre (et d'une classe si fournie)."""
         semestre_id = request.data.get('semestre')
         if not semestre_id:
             raise ValidationError({'semestre': 'Semestre requis.'})
-        qs = Note.objects.filter(semestre_id=semestre_id)
+        semestre = SemestreIPGEI.objects.filter(pk=semestre_id).first()
+        if semestre is None:
+            raise ValidationError({'semestre': 'Semestre introuvable.'})
+        qs = Note.objects.filter(semestre=semestre)
         if request.data.get('classe'):
             qs = qs.filter(inscription__classe_id=request.data['classe'])
-        total = self._executer(services.recalculer_notes, qs, plafond_rattrapage=_plafond_courant())
+        # Le plafond figé sur la session, pas le paramétrage du jour : rejouer
+        # un calcul doit redonner le même résultat.
+        total = self._executer(services.recalculer_notes, qs,
+                               plafond_rattrapage=services.plafond_effectif(semestre))
         return Response({'notes_recalculees': total})
-
-
-def _plafond_courant():
-    institution = _institution_principale()
-    if institution is None:
-        return None
-    return ParametresIPGEI.pour(institution).plafond_rattrapage
 
 
 class EvaluationViewSet(ModelViewSet):
@@ -994,17 +1381,23 @@ class EvaluationViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         evaluation = serializer.save(saisie_par=_utilisateur(self.request))
-        services.calculer_note(evaluation.note, plafond_rattrapage=_plafond_courant())
+        self._recalculer(evaluation.note)
 
     def perform_update(self, serializer):
         evaluation = serializer.save()
-        services.calculer_note(evaluation.note, plafond_rattrapage=_plafond_courant())
+        self._recalculer(evaluation.note)
 
     def perform_destroy(self, instance):
         note = instance.note
         instance.delete()
         if not note.verrouillee:
-            services.calculer_note(note, plafond_rattrapage=_plafond_courant())
+            self._recalculer(note)
+
+    @staticmethod
+    def _recalculer(note):
+        services.calculer_note(
+            note, plafond_rattrapage=services.plafond_effectif(note.semestre),
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1025,11 +1418,14 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         institution = serializer.validated_data.get('institution') or _institution_principale()
         params = ParametresIPGEI.pour(institution) if institution else None
         # Le seuil et le plafond sont recopiés des paramètres SI le client ne
-        # les impose pas : la délibération devient alors autoportante.
+        # les impose pas : la délibération devient alors autoportante. Le seuil
+        # suit la PORTÉE — valider un semestre et prononcer un passage d'année
+        # ne se jugent pas sur la même exigence.
         extra = {'institution': institution}
         if params is not None:
             if 'seuil_validation' not in serializer.validated_data:
-                extra['seuil_validation'] = params.seuil_validation
+                portee = serializer.validated_data.get('portee', Deliberation.PORTEE_ANNUELLE)
+                extra['seuil_validation'] = params.seuil_pour(portee)
             if 'plafond_rattrapage' not in serializer.validated_data:
                 extra['plafond_rattrapage'] = params.plafond_rattrapage
         serializer.save(**extra)
@@ -1086,6 +1482,133 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
             'plus_faible':  min(moyennes) if moyennes else None,
             'repartition':  repartition,
         })
+
+    @action(detail=True, methods=['post'], url_path='devalider')
+    def devalider(self, request, pk=None):
+        """
+        Retire la validation d'un jury — réservé à un administrateur.
+
+        Dévalider, c'est remettre en cause des décisions déjà notifiées et
+        rouvrir des notes arrêtées. L'acte dépasse la conduite d'une séance : il
+        engage l'établissement, au même titre que la réouverture d'une campagne
+        de saisie.
+        """
+        utilisateur = _utilisateur(request)
+        est_admin = bool(utilisateur and (
+            utilisateur.is_superuser or getattr(utilisateur, 'role', '') == 'admin'
+        ))
+        if not est_admin:
+            return Response(
+                {'detail': 'Seul un administrateur peut dévalider une délibération.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        deliberation = self._executer(services.devalider_deliberation,
+                                      self.get_object(), utilisateur)
+        return Response(self.get_serializer(deliberation).data)
+
+    # ── Procès-verbal ────────────────────────────────────────────────────────
+    def get_permissions(self):
+        # Lire et signer le PV n'est pas gérer les jurys : un enseignant qui y
+        # siège doit pouvoir les deux sans détenir le module.
+        if self.action in ('signer', 'pv_pdf', 'pv_excel'):
+            return [MembreDuJuryOuRBAC()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=['post'], url_path='signer')
+    def signer(self, request, pk=None):
+        """Signature du PV par le membre de jury connecté."""
+        membre = self._executer(services.signer_pv, self.get_object(), _utilisateur(request))
+        return Response(MembreJuryIPGEISerializer(membre).data)
+
+    @action(detail=True, methods=['get'], url_path='pv-pdf')
+    def pv_pdf(self, request, pk=None):
+        from django.http import HttpResponse
+
+        deliberation = self.get_object()
+        contenu = pv.generer_pdf(deliberation, base_url=request.build_absolute_uri('/'))
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = f'attachment; filename="{_nom_pv(deliberation)}.pdf"'
+        return reponse
+
+    @action(detail=True, methods=['get'], url_path='pv-excel')
+    def pv_excel(self, request, pk=None):
+        from django.http import HttpResponse
+
+        deliberation = self.get_object()
+        contenu = pv.generer_excel(deliberation)
+        reponse = HttpResponse(
+            contenu,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        reponse['Content-Disposition'] = f'attachment; filename="{_nom_pv(deliberation)}.xlsx"'
+        return reponse
+
+
+class MembreDuJuryOuRBAC(BasePermission):
+    """
+    Accès au procès-verbal : le droit sur le module, ou le fait d'y siéger.
+
+    Un enseignant désigné au jury ne détient pas `ipgei_deliberation` — il ne
+    gère pas les jurys, il siège dans un seul. Sans cette ouverture il ne
+    pourrait ni lire le PV ni y apposer sa signature, ce qui viderait la
+    collégialité de son sens. L'appartenance est vérifiée sur la délibération
+    demandée, et `services.signer_pv` refuse de toute façon toute signature
+    apposée pour autrui.
+    """
+
+    def has_permission(self, request, view):
+        if RBACPermission().has_permission(request, view):
+            return True
+        utilisateur = request.user
+        if not (utilisateur and utilisateur.is_authenticated):
+            return False
+        try:
+            deliberation_id = int(view.kwargs.get('pk'))
+        except (TypeError, ValueError):
+            return False
+        return MembreJuryIPGEI.objects.filter(
+            deliberation_id=deliberation_id, utilisateur=utilisateur,
+        ).exists()
+
+
+def _nom_pv(deliberation) -> str:
+    """Nom de fichier du PV : lisible, sans accent ni espace."""
+    cible = (deliberation.semestre.code if deliberation.semestre_id
+             else deliberation.annee_universitaire)
+    return _nom_fichier(f'PV_{deliberation.niveau}_{cible}_{deliberation.annee_universitaire}')
+
+
+class MembreJuryIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixin,
+                             CreateModelMixin, DestroyModelMixin, GenericViewSet):
+    """
+    Composition du jury d'une délibération.
+
+    Pas de mise à jour : changer le rôle ou la personne d'un membre déjà inscrit
+    reviendrait à réécrire qui a siégé. On retire et on réinscrit — et un membre
+    qui a signé ne se retire pas.
+    """
+    serializer_class   = MembreJuryIPGEISerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_deliberation'
+    queryset           = MembreJuryIPGEI.objects.select_related('utilisateur', 'deliberation')
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = ['deliberation', 'role']
+    ordering           = ['deliberation', 'id']
+    pagination_class   = NoPagination
+
+    def create(self, request, *args, **kwargs):
+        entree = self.get_serializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+        membre = self._executer(
+            services.ajouter_membre_jury,
+            entree.validated_data['deliberation'],
+            entree.validated_data['utilisateur'],
+            entree.validated_data['role'],
+        )
+        return Response(self.get_serializer(membre).data, status=status.HTTP_201_CREATED)
+
+    def perform_destroy(self, instance):
+        self._executer(services.retirer_membre_jury, instance)
 
 
 class LigneDeliberationViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
@@ -2027,18 +2550,29 @@ class TableauBordIPGEIViewSet(GenericViewSet):
             classes = classes.filter(annee_universitaire=annee)
             inscriptions = inscriptions.filter(annee_universitaire=annee)
 
+        # Répartition par niveau, lue au référentiel plutôt qu'écrite en dur :
+        # MPSI et MP étaient les deux seuls possibles, ils ne le sont plus.
+        # `niveau` est une clé étrangère depuis que `Classe` hérite de
+        # `Departement` — la filtrer par un code exige de traverser la relation,
+        # faute de quoi la requête compare un texte à un identifiant.
+        par_niveau = []
+        for fiche in NiveauIPGEI.objects.filter(actif=True).order_by('rang', 'ordre', 'code'):
+            par_niveau.append({
+                'code':      fiche.code,
+                'libelle':   fiche.libelle or f'{fiche.code} — {fiche.libelle_rang}',
+                'classes':   classes.filter(niveau__niveau=fiche.code).count(),
+                'effectifs': inscriptions.filter(classe__niveau__niveau=fiche.code).count(),
+            })
+
         return Response({
             'annee_universitaire': annee or '',
             'classes': {
                 'total': classes.count(),
-                'mpsi':  classes.filter(niveau='MPSI').count(),
-                'mp':    classes.filter(niveau='MP').count(),
             },
             'effectifs': {
                 'total': inscriptions.count(),
-                'mpsi':  inscriptions.filter(classe__niveau__niveau='MPSI').count(),
-                'mp':    inscriptions.filter(classe__niveau__niveau='MP').count(),
             },
+            'par_niveau': par_niveau,
             'matieres':      Matiere.objects.filter(actif=True).count(),
             'semestres':     SemestreIPGEI.objects.filter(**({'annee_universitaire': annee} if annee else {})).count(),
             'deliberations': Deliberation.objects.filter(**({'annee_universitaire': annee} if annee else {})).count(),
@@ -2054,9 +2588,31 @@ class TableauBordIPGEIViewSet(GenericViewSet):
 
     @action(detail=False, methods=['get'], url_path='annees', pagination_class=NoPagination)
     def annees(self, request):
-        """Années universitaires ayant au moins une classe — sélecteur global."""
+        """
+        Années universitaires ayant au moins une classe — sélecteur global.
+
+        `?saisissables=1` ne renvoie que celles où des notes peuvent encore être
+        saisies, c'est-à-dire dont un semestre au moins n'est pas clôturé. Les
+        écrans de saisie s'en servent pour ne pas proposer une année sur laquelle
+        toute écriture serait refusée — proposer un choix qui ne mène qu'à un
+        message d'erreur n'est pas un choix.
+        """
         annees = list(
             Classe.objects.values_list('annee_universitaire', flat=True)
             .distinct().order_by('-annee_universitaire')
         )
+        if str(request.query_params.get('saisissables', '')).lower() in ('1', 'true', 'on'):
+            from apps.parametres.models import Year
+
+            # Deux verrous, indépendants : l'année close au registre du socle
+            # (décision d'établissement) et le semestre clôturé au calendrier
+            # IPGEI. N'en regarder qu'un laissait proposer une année fermée.
+            closes = set(
+                Year.objects.filter(est_cloturee=True).values_list('annee', flat=True)
+            )
+            ouvertes = set(
+                SemestreIPGEI.objects.filter(est_cloture=False)
+                .values_list('annee_universitaire', flat=True)
+            )
+            annees = [a for a in annees if a in ouvertes and a not in closes]
         return Response(annees)

@@ -13,11 +13,13 @@ from django.db.models import Prefetch
 from django.utils import timezone
 
 from .models import (
-    NIVEAU_MP, NIVEAU_MPSI, SEMESTRES_PAR_NIVEAU,
-    AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, Evaluation,
+    NIVEAU_MP, NIVEAU_MPSI, SEMESTRES_PAR_NIVEAU, SEMESTRES_PAR_RANG,
+    AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, DetailLigneDeliberation,
+    Evaluation,
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
+    MembreJuryIPGEI,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
-    SemaineIPGEI, SemestreIPGEI, StatutWorkflow,
+    SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI, StatutWorkflow,
 )
 
 CENT = Decimal('100')
@@ -37,6 +39,188 @@ def _moyenne_arithmetique(valeurs):
     if not valeurs:
         return None
     return _arrondi(sum(valeurs) / Decimal(len(valeurs)))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Fenêtres de saisie (sessions normale / rattrapage)
+# ═════════════════════════════════════════════════════════════════════════════
+def session_saisie(semestre: SemestreIPGEI, type_session: str) -> SessionEvaluationIPGEI:
+    """
+    Session d'un semestre, créée au premier accès si elle manque.
+
+    Créer à la demande plutôt que d'exiger un peuplement préalable évite qu'un
+    semestre importé ou créé hors de l'API se retrouve sans fenêtre de saisie —
+    ce qui bloquerait toute notation sans que rien ne l'explique. Les états par
+    défaut reconduisent le comportement d'avant les sessions : la saisie normale
+    est ouverte tant que le semestre l'est, le rattrapage attend une décision
+    explicite de la scolarité.
+    """
+    normale = type_session == SessionEvaluationIPGEI.TYPE_NORMALE
+    session, cree = SessionEvaluationIPGEI.objects.get_or_create(
+        semestre=semestre, type_session=type_session,
+        defaults={
+            'est_ouverte': normale and not semestre.est_cloture,
+            'est_close':   semestre.est_cloture,
+            'ouverte_le':  timezone.now() if normale and not semestre.est_cloture else None,
+            # Le plafond n'a de sens que sur le rattrapage ; il est figé ici,
+            # une fois pour toutes, depuis le paramétrage du jour.
+            'plafond_rattrapage': (
+                None if normale else ParametresIPGEI.pour(semestre.institution).plafond_rattrapage
+            ),
+        },
+    )
+    return session
+
+
+def sessions_du_semestre(semestre: SemestreIPGEI) -> dict:
+    """Les deux sessions d'un semestre, indexées par leur type."""
+    return {
+        type_session: session_saisie(semestre, type_session)
+        for type_session, _ in SessionEvaluationIPGEI.TYPE_CHOICES
+    }
+
+
+def annee_cloturee(annee_universitaire: str) -> bool:
+    """
+    L'année universitaire est-elle close au registre du socle ?
+
+    La clôture d'une année est une décision administrative, prise dans
+    « Paramètres → Années » ; elle ne se déduit pas de l'état des semestres, et
+    l'ignorer laissait saisir des notes sur une année officiellement fermée.
+    """
+    from apps.parametres.models import Year
+
+    return Year.objects.filter(
+        annee=annee_universitaire, est_cloturee=True,
+    ).exists()
+
+
+def controler_saisie(semestre: SemestreIPGEI, *, rattrapage: bool = False) -> SessionEvaluationIPGEI:
+    """
+    Vérifie qu'une note peut être saisie ; lève `ValidationError` sinon.
+
+    Deux verrous indépendants, et il faut les deux : l'année close au registre
+    du socle, et le semestre clôturé au calendrier IPGEI. Le premier est une
+    décision d'établissement, le second l'état du calendrier.
+
+    Renvoie la session concernée, pour que l'appelant en tire le plafond sans
+    la rechercher une seconde fois.
+    """
+    if annee_cloturee(semestre.annee_universitaire):
+        raise ValidationError(
+            f'Année universitaire {semestre.annee_universitaire} clôturée — '
+            'saisie impossible.'
+        )
+    if semestre.est_cloture:
+        raise ValidationError('Semestre clôturé — saisie impossible.')
+
+    type_session = (SessionEvaluationIPGEI.TYPE_RATTRAPAGE if rattrapage
+                    else SessionEvaluationIPGEI.TYPE_NORMALE)
+    session = session_saisie(semestre, type_session)
+    if session.est_close:
+        raise ValidationError(
+            f'{session.get_type_session_display()} clôturée sur {semestre.code} — '
+            'saisie impossible.'
+        )
+    if not session.est_ouverte:
+        raise ValidationError(
+            f'{session.get_type_session_display()} pas encore ouverte sur '
+            f'{semestre.code} — ouvrez-la avant de saisir.'
+        )
+    return session
+
+
+def plafond_effectif(semestre: SemestreIPGEI):
+    """
+    Plafond de rattrapage à appliquer aux notes de ce semestre.
+
+    Celui figé sur la session de rattrapage prime sur le paramétrage courant :
+    une campagne close doit se recalculer à l'identique, même si l'institution
+    a changé sa règle depuis.
+    """
+    return session_saisie(semestre, SessionEvaluationIPGEI.TYPE_RATTRAPAGE).plafond_rattrapage
+
+
+@transaction.atomic
+def ouvrir_session(session: SessionEvaluationIPGEI, utilisateur=None) -> SessionEvaluationIPGEI:
+    """
+    Ouvre une campagne de saisie.
+
+    Le rattrapage suppose des moyennes arrêtées : l'ouvrir alors que la session
+    normale accepte encore des DS produirait des rattrapages calculés sur une
+    moyenne qui bouge encore.
+    """
+    if session.semestre.est_cloture:
+        raise ValidationError('Semestre clôturé — réouvrez le semestre d\'abord.')
+    if session.est_close:
+        raise ValidationError('Session clôturée — sa réouverture est réservée à un administrateur.')
+    if session.type_session == SessionEvaluationIPGEI.TYPE_RATTRAPAGE:
+        normale = session_saisie(session.semestre, SessionEvaluationIPGEI.TYPE_NORMALE)
+        if not normale.est_close:
+            raise ValidationError(
+                'La session normale doit être clôturée avant d\'ouvrir le rattrapage : '
+                'sans moyennes arrêtées, un rattrapage ne veut rien dire.'
+            )
+    session.est_ouverte = True
+    session.ouverte_le  = timezone.now()
+    session.save(update_fields=['est_ouverte', 'ouverte_le'])
+    _tracer_session(session, 'Ouverture', utilisateur)
+    return session
+
+
+@transaction.atomic
+def cloturer_session(session: SessionEvaluationIPGEI, utilisateur=None) -> SessionEvaluationIPGEI:
+    """Ferme la campagne : plus aucune saisie tant qu'un admin ne réouvre pas."""
+    if session.est_close:
+        raise ValidationError('Session déjà clôturée.')
+    session.est_close    = True
+    session.est_ouverte  = False
+    session.cloturee_le  = timezone.now()
+    session.cloturee_par = utilisateur
+    session.save(update_fields=['est_close', 'est_ouverte', 'cloturee_le', 'cloturee_par'])
+    _tracer_session(session, 'Clôture', utilisateur)
+    return session
+
+
+@transaction.atomic
+def rouvrir_session(session: SessionEvaluationIPGEI, utilisateur=None) -> SessionEvaluationIPGEI:
+    """
+    Réouvre une campagne close. Le contrôle du profil appartient à la vue —
+    ici on garantit seulement que l'acte reste tracé.
+    """
+    if not session.est_close:
+        raise ValidationError('Session déjà ouverte.')
+    session.est_close    = False
+    session.est_ouverte  = True
+    session.ouverte_le   = timezone.now()
+    session.cloturee_le  = None
+    session.cloturee_par = None
+    session.save(update_fields=[
+        'est_close', 'est_ouverte', 'ouverte_le', 'cloturee_le', 'cloturee_par',
+    ])
+    _tracer_session(session, 'Réouverture', utilisateur)
+    return session
+
+
+def _tracer_session(session: SessionEvaluationIPGEI, acte: str, utilisateur) -> None:
+    """
+    Journalise l'ouverture ou la fermeture d'une campagne de notes.
+
+    `SessionEvaluationIPGEI` n'est pas dans TRACKED_MODELS : sans cet appel
+    explicite, savoir qui a rouvert une session close serait impossible.
+    """
+    try:
+        from core.audit_helpers import write_audit
+        write_audit(
+            action='UPDATE', model_name='SessionEvaluationIPGEI', object_id=str(session.pk),
+            changes={'etat': session.etat, 'par': getattr(utilisateur, 'username', None)},
+            label=f'{acte} — {session}', keep_forever=True,
+        )
+    except Exception:                                       # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            'Audit %s session %s échoué', acte.lower(), session.pk, exc_info=True,
+        )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -140,9 +324,20 @@ def initialiser_notes(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) ->
     """
     Crée les lignes de note manquantes d'un étudiant pour toutes les matières
     actives du semestre. Idempotent : relancer n'écrase aucune saisie.
+
+    La maquette retenue est celle du NIVEAU, pas seulement celle du semestre :
+    deux niveaux d'un même rang — MP et MPI — partagent S3 et S4 en suivant des
+    programmes différents. Les matières antérieures au référentiel n'ont pas de
+    niveau ; elles appartiennent au cursus d'origine, donc on les conserve.
     """
+    from django.db.models import Q
+
+    fiche = niveau_ref(inscription.classe.niveau_code, semestre.institution)
     matieres = Matiere.objects.filter(
         institution=semestre.institution, code_semestre=semestre.code, actif=True,
+    ).filter(
+        Q(niveau_ref=fiche) | Q(niveau_ref__isnull=True) if fiche is not None
+        else Q(niveau_ref__isnull=True)
     )
     existantes = set(
         Note.objects.filter(inscription=inscription, semestre=semestre)
@@ -191,7 +386,8 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str):
     Les semestres pèsent au prorata des coefficients de leurs matières, ce qui
     revient à une moyenne pondérée unique sur l'ensemble des matières.
     """
-    codes = SEMESTRES_PAR_NIVEAU[inscription.niveau]
+    codes = codes_semestres_du_niveau(inscription.niveau,
+                                      inscription.classe.institution)
     notes = list(
         Note.objects.filter(
             inscription=inscription,
@@ -205,26 +401,112 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str):
 # ═════════════════════════════════════════════════════════════════════════════
 # Délibération
 # ═════════════════════════════════════════════════════════════════════════════
+def niveau_ref(code: str, institution=None):
+    """
+    Fiche du référentiel correspondant à un code de niveau, ou None.
+
+    Le code reste la clé d'usage : classes, semestres et délibérations le
+    portent en texte. Cette recherche est le pont vers les règles associées.
+    """
+    from .models import NiveauIPGEI
+
+    requete = NiveauIPGEI.objects.filter(code=code)
+    if institution is not None:
+        requete = requete.filter(institution=institution)
+    return requete.first()
+
+
+def rang_du_niveau(code: str, institution=None) -> int:
+    """
+    Rang d'année d'un niveau : 1 pour une première année, 2 pour une deuxième.
+
+    Repli sur le cursus d'origine quand le référentiel ne connaît pas le code —
+    une base d'avant la reprise, ou un code saisi à la main.
+    """
+    fiche = niveau_ref(code, institution)
+    if fiche is not None:
+        return fiche.rang
+    return 1 if code == NIVEAU_MPSI else 2
+
+
+def rang_du_semestre(code_semestre: str) -> int:
+    """Rang d'année auquel appartient un semestre : S1/S2 en 1re, S3/S4 en 2e."""
+    for rang, codes in SEMESTRES_PAR_RANG.items():
+        if code_semestre in codes:
+            return rang
+    return 1
+
+
+def codes_semestres_du_niveau(code: str, institution=None) -> list:
+    """Codes de semestres suivis à ce niveau — ceux de son rang."""
+    return list(SEMESTRES_PAR_RANG.get(rang_du_niveau(code, institution), []))
+
+
+def semestres_incomplets(inscription: InscriptionIPGEI, annee_universitaire: str) -> list:
+    """
+    Codes des semestres de l'année où il manque au moins une note.
+
+    Une décision de passage porte sur l'ANNÉE entière. Tant qu'un semestre n'est
+    pas noté, la moyenne ne repose que sur l'autre : `_agreger` ignore les notes
+    vides, si bien qu'un étudiant n'ayant fait que S1 obtenait une moyenne et,
+    avec elle, un « admis en 2e année » avant même d'avoir commencé S2.
+    """
+    codes = codes_semestres_du_niveau(inscription.niveau,
+                                      inscription.classe.institution)
+    notes = Note.objects.filter(
+        inscription=inscription,
+        semestre__annee_universitaire=annee_universitaire,
+        semestre__code__in=codes,
+    ).select_related('semestre')
+
+    manquants, vus = [], set()
+    for code in codes:
+        lot = [n for n in notes if n.semestre.code == code]
+        vus.add(code)
+        # Aucune ligne du tout, ou une ligne sans note retenue : dans les deux
+        # cas le semestre n'a pas été jugé.
+        if not lot or any(n.note_retenue is None for n in lot):
+            manquants.append(code)
+    return manquants
+
+
 def decision_automatique(niveau: str, moyenne, seuil, nb_redoublements: int,
-                         droit_redoublement_max: int) -> str:
+                         droit_redoublement_max: int, institution=None) -> str:
     """
     Décision proposée par le calcul (plan §4.4).
 
-    MPSI (1re année) : admis si moyenne ≥ seuil, sinon réorienté — le
-    redoublement n'existe pas en 1re année.
-    MP (2e année)    : autorisé CNIM si moyenne ≥ seuil ; sinon redoublant, et
-    exclu une fois le droit de redoublement épuisé.
+    Première année : admis si la moyenne atteint le seuil, sinon réorienté — le
+    redoublement n'y existe pas.
+    Deuxième année : autorisé CNIM si le seuil est atteint ; sinon redoublant,
+    et exclu une fois le droit de redoublement épuisé.
+
+    Le rang et le droit au redoublement viennent du référentiel : un niveau
+    ajouté — MPI par exemple — suit la règle de son rang sans que ce code ait à
+    le connaître. Une décision retirée des `decisions_possibles` du niveau n'est
+    jamais proposée, quitte à ne rien proposer du tout : mieux vaut laisser le
+    jury trancher que suggérer ce qu'il s'est interdit.
     """
     if moyenne is None:
         return ''
-    atteint = Decimal(moyenne) >= Decimal(seuil)
-    if niveau == NIVEAU_MPSI:
-        return LigneDeliberation.DECISION_ADMIS if atteint else LigneDeliberation.DECISION_REORIENTE
+
+    fiche    = niveau_ref(niveau, institution)
+    rang     = fiche.rang if fiche is not None else rang_du_niveau(niveau, institution)
+    permises = set(fiche.decisions_possibles or []) if fiche is not None else set()
+    atteint  = Decimal(moyenne) >= Decimal(seuil)
+
+    def retenue(decision: str) -> str:
+        return decision if (not permises or decision in permises) else ''
+
+    if rang == 1:
+        return retenue(LigneDeliberation.DECISION_ADMIS if atteint
+                       else LigneDeliberation.DECISION_REORIENTE)
     if atteint:
-        return LigneDeliberation.DECISION_CNIM
-    if nb_redoublements >= droit_redoublement_max:
-        return LigneDeliberation.DECISION_EXCLU
-    return LigneDeliberation.DECISION_REDOUBLANT
+        return retenue(LigneDeliberation.DECISION_CNIM)
+
+    redoublement_ouvert = (fiche.redoublement_autorise if fiche is not None else rang > 1)
+    if not redoublement_ouvert or nb_redoublements >= droit_redoublement_max:
+        return retenue(LigneDeliberation.DECISION_EXCLU)
+    return retenue(LigneDeliberation.DECISION_REDOUBLANT)
 
 
 @transaction.atomic
@@ -270,11 +552,29 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     )
     rangs = {r[0].id: i + 1 for i, r in enumerate(classables)}
 
+    # Une décision de passage engage l'ANNÉE. Deux situations interdisent de la
+    # proposer : un jury de semestre, qui n'est qu'un bilan intermédiaire, et
+    # une année dont un semestre n'est pas encore noté. Dans les deux cas le
+    # jury reste libre de trancher à la main — c'est la *proposition* qu'on
+    # retient, pas la décision.
+    semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
+
     for inscription, moyenne, poids, notes in resultats:
-        auto = decision_automatique(
-            inscription.niveau, moyenne, deliberation.seuil_validation,
-            inscription.nb_redoublements, droit_max,
-        )
+        if semestrielle:
+            auto = ''
+        elif semestres_incomplets(inscription, deliberation.annee_universitaire):
+            auto = ''
+        else:
+            auto = decision_automatique(
+                inscription.niveau, moyenne, deliberation.seuil_validation,
+                inscription.nb_redoublements, droit_max,
+            )
+        # Proposition d'avant recalcul : elle dit si la décision affichée vient
+        # du jury ou de la machine.
+        existante = LigneDeliberation.objects.filter(
+            deliberation=deliberation, inscription=inscription,
+        ).values('decision', 'decision_auto', 'motif_ajustement').first()
+
         ligne, cree = LigneDeliberation.objects.update_or_create(
             deliberation=deliberation, inscription=inscription,
             defaults={
@@ -285,8 +585,17 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
             },
         )
         # La décision du jury prime : on ne (re)pose l'auto que si rien n'a été
-        # arbitré, ou si la ligne vient d'être créée.
-        if cree or not ligne.decision:
+        # arbitré. Une décision qui n'était que la proposition précédente n'a
+        # rien d'arbitré — sans quoi une proposition retirée parce qu'elle était
+        # prématurée resterait affichée pour toujours.
+        jamais_arbitree = (
+            cree
+            or not ligne.decision
+            or (existante is not None
+                and not existante['motif_ajustement']
+                and existante['decision'] == existante['decision_auto'])
+        )
+        if jamais_arbitree and ligne.decision != auto:
             ligne.decision = auto
             ligne.save(update_fields=['decision'])
 
@@ -304,6 +613,26 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     deliberation.date_calcul = timezone.now()
     deliberation.save(update_fields=['statut', 'date_calcul'])
     return len(resultats)
+
+
+def notes_couvertes(deliberation: Deliberation):
+    """
+    Notes que le périmètre d'une délibération englobe.
+
+    Une délibération de semestre ne couvre que le sien ; une annuelle couvre les
+    deux semestres du niveau. Ce découpage sert à verrouiller à la validation,
+    et à savoir quoi déverrouiller — ou pas — à la dévalidation.
+    """
+    notes = Note.objects.filter(
+        inscription__in=deliberation.lignes.values_list('inscription_id', flat=True),
+    )
+    if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
+        return notes.filter(semestre=deliberation.semestre)
+    return notes.filter(
+        semestre__annee_universitaire=deliberation.annee_universitaire,
+        semestre__code__in=codes_semestres_du_niveau(deliberation.niveau,
+                                                     deliberation.institution),
+    )
 
 
 @transaction.atomic
@@ -342,6 +671,13 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
 
     for ligne in lignes:
         inscription = ligne.inscription
+        # Photo de l'état d'avant, prise ici et nulle part ailleurs : c'est le
+        # seul instant où il est encore connu, et ce que la dévalidation devra
+        # restaurer.
+        ligne.statut_avant           = inscription.statut
+        ligne.nb_redoublements_avant = inscription.nb_redoublements
+        ligne.save(update_fields=['statut_avant', 'nb_redoublements_avant'])
+
         inscription.statut = statut_par_decision.get(ligne.decision, inscription.statut)
         champs = ['statut']
         if ligne.decision == LigneDeliberation.DECISION_REDOUBLANT:
@@ -349,21 +685,383 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
             champs.append('nb_redoublements')
         inscription.save(update_fields=champs)
 
-    notes = Note.objects.filter(inscription__in=[l.inscription_id for l in lignes])
-    if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
-        notes = notes.filter(semestre=deliberation.semestre)
-    else:
-        notes = notes.filter(
-            semestre__annee_universitaire=deliberation.annee_universitaire,
-            semestre__code__in=SEMESTRES_PAR_NIVEAU[deliberation.niveau],
-        )
-    notes.update(verrouillee=True)
+    notes_couvertes(deliberation).update(verrouillee=True)
 
     deliberation.statut          = Deliberation.STATUT_VALIDEE
     deliberation.validee_par     = utilisateur if getattr(utilisateur, 'is_authenticated', False) else None
     deliberation.date_validation = timezone.now()
     deliberation.save(update_fields=['statut', 'validee_par', 'date_validation'])
     return deliberation
+
+
+def decisions_emises(deliberation: Deliberation) -> int:
+    """
+    Nombre de décisions de jury déjà éditées pour cette délibération.
+
+    Sert d'avertissement avant dévalidation : ces documents portent un numéro de
+    série et sont vérifiables en ligne — ils sont dans la nature. Le compte est
+    approché (le registre ne pointe pas la délibération, seulement l'étudiant et
+    l'année), et c'est assumé : mieux vaut un ordre de grandeur exact au dossier
+    près qu'aucun signal.
+    """
+    from apps.documents.models import DocumentOfficiel
+
+    from .documents import TYPE_DECISION
+
+    return DocumentOfficiel.objects.filter(
+        type_document=TYPE_DECISION,
+        annee_universitaire=deliberation.annee_universitaire,
+        etudiant__in=deliberation.lignes.values_list('inscription__etudiant_id', flat=True),
+    ).count()
+
+
+@transaction.atomic
+def devalider_deliberation(deliberation: Deliberation, utilisateur=None) -> Deliberation:
+    """
+    Défait une validation : restaure les inscriptions, déverrouille les notes.
+
+    Trois effets à annuler, et un piège dans chacun.
+
+    1. Le statut de l'inscription revient à ce que la ligne a mémorisé. Une
+       délibération validée avant l'existence de cette mémoire ne peut pas être
+       défaite : deviner l'état d'avant, ce serait effacer un redoublement
+       antérieur ou en inventer un.
+    2. Le compteur de redoublement reprend sa valeur d'avant, jamais une simple
+       décrémentation — deux dévalidations successives le feraient dériver.
+    3. Les notes ne se déverrouillent que si aucune AUTRE délibération validée ne
+       les couvre : dévalider le jury annuel ne doit pas rouvrir des notes que le
+       jury du semestre a déjà arrêtées.
+
+    La délibération repasse en « calculée » : ses lignes et ses moyennes restent,
+    seule la portée juridique est retirée.
+    """
+    if deliberation.statut != Deliberation.STATUT_VALIDEE:
+        raise ValidationError('Cette délibération n\'est pas validée.')
+
+    lignes = list(deliberation.lignes.select_related('inscription').all())
+    inscriptions_visees = {l.inscription_id for l in lignes}
+
+    # Chaque validation photographie l'état du moment. Deux jurys qui se suivent
+    # sur les mêmes inscriptions empilent donc deux photos ; les défaire dans le
+    # désordre restaurerait un état antérieur au jury encore validé, et le
+    # compteur de redoublement s'en trouverait faussé. On défait dans l'ordre
+    # inverse de ce qui a été fait, ou pas du tout.
+    posterieures = [
+        autre for autre in Deliberation.objects
+        .filter(statut=Deliberation.STATUT_VALIDEE,
+                date_validation__gt=deliberation.date_validation)
+        .exclude(pk=deliberation.pk)
+        if inscriptions_visees & set(
+            autre.lignes.values_list('inscription_id', flat=True))
+    ]
+    if posterieures:
+        noms = ', '.join(str(autre) for autre in posterieures)
+        raise ValidationError(
+            f'Ces délibérations ont été validées après celle-ci et portent sur '
+            f'les mêmes étudiants : {noms}. Dévalidez-les d\'abord — les défaire '
+            'dans le désordre fausserait les compteurs de redoublement.'
+        )
+
+    sans_memoire = [l for l in lignes if not l.statut_avant]
+    if sans_memoire:
+        raise ValidationError(
+            f"{len(sans_memoire)} ligne(s) ne portent pas l'état antérieur de "
+            "l'inscription : cette délibération a été validée avant que cet état "
+            'soit mémorisé, sa dévalidation automatique ferait plus de dégâts '
+            "qu'elle n'en répare."
+        )
+
+    for ligne in lignes:
+        inscription = ligne.inscription
+        inscription.statut = ligne.statut_avant
+        if ligne.nb_redoublements_avant is not None:
+            inscription.nb_redoublements = ligne.nb_redoublements_avant
+        inscription.save(update_fields=['statut', 'nb_redoublements'])
+
+    autres = (Deliberation.objects
+              .filter(statut=Deliberation.STATUT_VALIDEE)
+              .exclude(pk=deliberation.pk))
+    encore_verrouillees = set()
+    for autre in autres:
+        encore_verrouillees.update(
+            notes_couvertes(autre).values_list('id', flat=True)
+        )
+    (notes_couvertes(deliberation)
+     .exclude(id__in=encore_verrouillees)
+     .update(verrouillee=False))
+
+    deliberation.statut          = Deliberation.STATUT_CALCULEE
+    deliberation.validee_par     = None
+    deliberation.date_validation = None
+    deliberation.save(update_fields=['statut', 'validee_par', 'date_validation'])
+
+    try:
+        from core.audit_helpers import write_audit
+        write_audit(
+            action='UPDATE', model_name='Deliberation', object_id=str(deliberation.pk),
+            changes={'statut': {'old': Deliberation.STATUT_VALIDEE,
+                                'new': Deliberation.STATUT_CALCULEE},
+                     'lignes_restaurees': len(lignes),
+                     'par': getattr(utilisateur, 'username', None)},
+            label=f'Dévalidation — {deliberation}', keep_forever=True,
+        )
+    except Exception:                                       # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            'Audit dévalidation délibération %s échoué', deliberation.pk, exc_info=True,
+        )
+    return deliberation
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Périmètre d'un enseignant : ce qu'il enseigne, donc ce qu'il note
+# ═════════════════════════════════════════════════════════════════════════════
+def prof_de(utilisateur):
+    """Fiche enseignant rattachée à un compte, ou None."""
+    return getattr(utilisateur, 'prof_profile', None)
+
+
+def feuilles_enseignant(prof, *, annee_universitaire: str = '', semestre: SemestreIPGEI = None):
+    """
+    Couples (classe, matière) qu'un enseignant a effectivement en charge.
+
+    Le périmètre se lit dans l'emploi du temps et non dans une table
+    d'affectation : IPGEI n'en a pas, et la planification est de toute façon
+    l'endroit où l'information est tenue à jour. Les séances annulées comptent
+    — elles disent qui a la matière, pas qui a fait cours ce jour-là.
+
+    Renvoie une liste de dictionnaires triés, prête pour l'écran « mes feuilles ».
+    """
+    seances = (
+        SeanceReelle.objects
+        .filter(prof=prof)
+        .select_related('classe', 'matiere', 'semaine__semestre')
+    )
+    if semestre is not None:
+        seances = seances.filter(semaine__semestre=semestre)
+    elif annee_universitaire:
+        seances = seances.filter(semaine__semestre__annee_universitaire=annee_universitaire)
+
+    feuilles = {}
+    for seance in seances:
+        semestre_seance = seance.semaine.semestre
+        cle = (seance.classe_id, seance.matiere_id, semestre_seance.id)
+        if cle in feuilles:
+            feuilles[cle]['seances'] += 1
+            continue
+        feuilles[cle] = {
+            'classe':           seance.classe_id,
+            'classe_nom':       seance.classe.nom,
+            'matiere':          seance.matiere_id,
+            'matiere_code':     seance.matiere.code,
+            'matiere_intitule': seance.matiere.intitule,
+            'semestre':         semestre_seance.id,
+            'semestre_code':    semestre_seance.code,
+            'annee_universitaire': semestre_seance.annee_universitaire,
+            'seances':          1,
+        }
+    return sorted(
+        feuilles.values(),
+        key=lambda f: (f['annee_universitaire'], f['semestre_code'],
+                       f['classe_nom'], f['matiere_code']),
+    )
+
+
+def enseigne(prof, *, classe_id, matiere_id, semestre: SemestreIPGEI) -> bool:
+    """Vrai si cet enseignant a la matière dans cette classe, ce semestre."""
+    if prof is None:
+        return False
+    return SeanceReelle.objects.filter(
+        prof=prof, classe_id=classe_id, matiere_id=matiere_id,
+        semaine__semestre=semestre,
+    ).exists()
+
+
+def enseigne_matiere(prof, *, matiere_id, semestre: SemestreIPGEI) -> bool:
+    """
+    Vrai si l'enseignant a cette matière ce semestre, quelle que soit la classe.
+
+    C'est le contrôle qui convient à la correction anonyme : le numéro de copie
+    ne dit pas de quelle classe elle vient, et c'est précisément le but.
+    """
+    if prof is None:
+        return False
+    return SeanceReelle.objects.filter(
+        prof=prof, matiere_id=matiere_id, semaine__semestre=semestre,
+    ).exists()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Anonymat des copies
+# ═════════════════════════════════════════════════════════════════════════════
+def inscrits_du_semestre(semestre: SemestreIPGEI):
+    """
+    Inscriptions actives couvertes par un semestre — celles de son année d'étude.
+
+    Le rattachement se fait sur le RANG. Comparer au niveau déduit du code
+    laissait dehors les inscrits d'un second niveau du même rang — un MPI de
+    première année n'aurait reçu aucun numéro d'anonymat, et rien ne l'aurait
+    signalé avant l'ouverture des copies.
+    """
+    rang = rang_du_semestre(semestre.code)
+    return [
+        inscription for inscription in (
+            InscriptionIPGEI.objects
+            .filter(actif=True,
+                    annee_universitaire=semestre.annee_universitaire,
+                    classe__annee_universitaire=semestre.annee_universitaire)
+            .select_related('classe', 'etudiant')
+        )
+        if rang_du_niveau(inscription.classe.niveau_code, semestre.institution) == rang
+    ]
+
+
+@transaction.atomic
+def generer_anonymats(session: SessionEvaluationIPGEI, *, regenerer: bool = False,
+                      force: bool = False, utilisateur=None) -> int:
+    """
+    Attribue à chaque inscrit un numéro tiré au sort dans 1..N.
+
+    Les numéros sont mélangés : distribués dans l'ordre alphabétique, ils
+    laisseraient deviner l'identité d'une copie à partir de son rang.
+
+    Régénérer après le début de la saisie réassocie numéros et étudiants, donc
+    attribue les notes déjà saisies à d'autres personnes. On le refuse dès
+    qu'une note existe sur le semestre, sauf décision explicite (`force`), que
+    la vue réserve à un administrateur.
+    """
+    import random
+
+    # L'année et le semestre priment sur la campagne : ce qui est clos ne se
+    # corrige plus, et tirer des numéros y laisserait croire le contraire.
+    if annee_cloturee(session.semestre.annee_universitaire):
+        raise ValidationError(
+            f'Année {session.semestre.annee_universitaire} clôturée — '
+            'aucun tirage possible.')
+    if session.semestre.est_cloture:
+        raise ValidationError(
+            f'Semestre {session.semestre.code} clôturé — aucun tirage possible.')
+    if session.est_close:
+        raise ValidationError('Campagne clôturée — les anonymats ne se régénèrent plus.')
+
+    existants = AnonymatIPGEI.objects.filter(session=session)
+    if existants.exists():
+        if not regenerer:
+            raise ValidationError(
+                'Des numéros existent déjà pour cette campagne. Demandez une '
+                'régénération pour les remplacer.'
+            )
+        deja_note = Note.objects.filter(
+            semestre=session.semestre, evaluations__isnull=False,
+        ).exists()
+        if deja_note and not force:
+            raise ValidationError(
+                'Des notes sont déjà saisies sur ce semestre : régénérer les '
+                'numéros les attribuerait à d\'autres étudiants. Un '
+                'administrateur peut passer outre en connaissance de cause.'
+            )
+        existants.delete()
+
+    inscriptions = inscrits_du_semestre(session.semestre)
+    if not inscriptions:
+        return 0
+
+    numeros = list(range(1, len(inscriptions) + 1))
+    random.shuffle(numeros)
+    AnonymatIPGEI.objects.bulk_create([
+        AnonymatIPGEI(session=session, inscription=inscription, numero=numero,
+                      genere_par=utilisateur if getattr(utilisateur, 'is_authenticated', False) else None)
+        for inscription, numero in zip(inscriptions, numeros)
+    ])
+    return len(inscriptions)
+
+
+def resoudre_anonymat(session: SessionEvaluationIPGEI, numero) -> InscriptionIPGEI:
+    """Retrouve l'étudiant derrière un numéro, pour reporter une note saisie."""
+    try:
+        numero = int(numero)
+    except (TypeError, ValueError):
+        raise ValidationError({'numero_anonymat': "Numéro d'anonymat invalide."})
+
+    anonymat = (AnonymatIPGEI.objects
+                .select_related('inscription__etudiant')
+                .filter(session=session, numero=numero).first())
+    if anonymat is None:
+        raise ValidationError(
+            {'numero_anonymat': f'Aucun étudiant sous le numéro {numero} '
+                                f'pour {session.semestre.code}.'}
+        )
+    return anonymat.inscription
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Jury : composition et signatures du PV
+# ═════════════════════════════════════════════════════════════════════════════
+def ajouter_membre_jury(deliberation: Deliberation, utilisateur, role: str) -> MembreJuryIPGEI:
+    """
+    Inscrit une personne au jury d'une délibération.
+
+    Un seul président : c'est lui qui arrête la séance, deux rendraient le PV
+    incohérent. Les autres rôles sont ouverts, un jury comptant plusieurs
+    enseignants.
+    """
+    if role not in dict(MembreJuryIPGEI.ROLE_CHOICES):
+        raise ValidationError({'role': 'Rôle inconnu.'})
+    if MembreJuryIPGEI.objects.filter(
+        deliberation=deliberation, utilisateur=utilisateur,
+    ).exists():
+        raise ValidationError('Cette personne siège déjà dans ce jury.')
+    if role == MembreJuryIPGEI.ROLE_PRESIDENT and MembreJuryIPGEI.objects.filter(
+        deliberation=deliberation, role=MembreJuryIPGEI.ROLE_PRESIDENT,
+    ).exists():
+        raise ValidationError({'role': 'Le jury a déjà un président.'})
+
+    return MembreJuryIPGEI.objects.create(
+        deliberation=deliberation, utilisateur=utilisateur, role=role,
+    )
+
+
+def retirer_membre_jury(membre: MembreJuryIPGEI) -> None:
+    """Retire un membre — sauf s'il a signé : une signature ne s'efface pas."""
+    if membre.a_signe:
+        raise ValidationError(
+            'Ce membre a signé le procès-verbal ; son retrait effacerait sa signature.'
+        )
+    membre.delete()
+
+
+def signer_pv(deliberation: Deliberation, utilisateur) -> MembreJuryIPGEI:
+    """
+    Enregistre la signature du membre correspondant à l'utilisateur courant.
+
+    On ne signe ni pour autrui, ni avant que les décisions soient arrêtées :
+    signer un projet reviendrait à approuver ce qui peut encore changer.
+    """
+    if deliberation.statut != Deliberation.STATUT_VALIDEE:
+        raise ValidationError(
+            'Le procès-verbal ne se signe qu\'une fois la délibération validée.'
+        )
+    membre = MembreJuryIPGEI.objects.filter(
+        deliberation=deliberation, utilisateur=utilisateur,
+    ).first()
+    if membre is None:
+        raise ValidationError('Vous ne siégez pas dans ce jury.')
+    if membre.a_signe:
+        raise ValidationError('Vous avez déjà signé ce procès-verbal.')
+
+    membre.signature_le = timezone.now()
+    membre.save(update_fields=['signature_le'])
+    return membre
+
+
+def membres_jury_ordonnes(deliberation: Deliberation):
+    """Membres du jury dans l'ordre protocolaire, pour l'impression du PV."""
+    membres = deliberation.membres_jury.select_related('utilisateur').all()
+    return sorted(
+        membres,
+        key=lambda m: (MembreJuryIPGEI.ORDRE_ROLES.get(m.role, 9),
+                       (m.utilisateur.name or m.utilisateur.username or '').lower()),
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -722,12 +1420,68 @@ def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> di
 # ═════════════════════════════════════════════════════════════════════════════
 # Inscription
 # ═════════════════════════════════════════════════════════════════════════════
-def semestres_du_niveau(niveau: str, annee_universitaire: str):
-    """Les deux semestres d'une année d'étude : S1/S2 en MPSI, S3/S4 en MP."""
-    return SemestreIPGEI.objects.filter(
-        code__in=SEMESTRES_PAR_NIVEAU[niveau],
+@transaction.atomic
+def creer_semestres_annee(annee_universitaire: str, institution) -> list:
+    """
+    Pose d'un coup les semestres manquants d'une année universitaire.
+
+    Le calendrier IPGEI est daté, année par année : c'est ce qui permet de
+    distinguer le S1 d'un redoublant de celui de l'année précédente. Mais rien
+    n'obligeait à saisir les quatre semestres un par un, et c'est ainsi qu'une
+    année se retrouvait à moitié ouverte — ses inscrits n'ayant alors que la
+    moitié de leurs matières, sans que rien ne le signale à l'inscription.
+
+    Les dates suivent la convention lisible dans les années déjà saisies :
+    semestres impairs à la mi-septembre de la première année du libellé, pairs
+    au 1er février de la seconde. Ce sont des repères de départ, modifiables
+    ensuite, pas une décision figée.
+
+    Idempotent : un semestre déjà créé n'est ni recréé ni redaté.
+    """
+    from datetime import date
+
+    from .models import CODE_SEMESTRE_CHOICES
+
+    try:
+        debut, fin = (int(part) for part in str(annee_universitaire).split('-'))
+    except (AttributeError, ValueError):
+        raise ValidationError(
+            {'annee_universitaire': "Année attendue sous la forme « 2026-2027 »."}
+        )
+
+    parametres = ParametresIPGEI.pour(institution)
+    crees = []
+    for code, _ in CODE_SEMESTRE_CHOICES:
+        if SemestreIPGEI.objects.filter(
+            institution=institution, code=code, annee_universitaire=annee_universitaire,
+        ).exists():
+            continue
+        impair = code in ('S1', 'S3')
+        crees.append(SemestreIPGEI.objects.create(
+            institution=institution, code=code,
+            annee_universitaire=annee_universitaire,
+            date_debut=date(debut, 9, 15) if impair else date(fin, 2, 1),
+            nb_semaines=parametres.nb_semaines_defaut,
+        ))
+    return crees
+
+
+def semestres_du_niveau(niveau: str, annee_universitaire: str, institution=None):
+    """
+    Semestres d'une année d'étude : S1/S2 en première année, S3/S4 en deuxième.
+
+    `institution` cloisonne le résultat. Sans elle, deux établissements ayant la
+    même année et les mêmes codes verraient leurs calendriers se mélanger, et un
+    inscrit recevrait des lignes de note pointant vers le semestre d'un autre —
+    sans que rien ne le signale.
+    """
+    semestres = SemestreIPGEI.objects.filter(
+        code__in=codes_semestres_du_niveau(niveau, institution),
         annee_universitaire=annee_universitaire,
-    ).order_by('code')
+    )
+    if institution is not None:
+        semestres = semestres.filter(institution=institution)
+    return semestres.order_by('code')
 
 
 @transaction.atomic
@@ -746,6 +1500,7 @@ def inscrire_aux_matieres(inscription: InscriptionIPGEI) -> int:
     total = 0
     for semestre in semestres_du_niveau(
         inscription.classe.niveau_code, inscription.annee_universitaire,
+        inscription.classe.institution,
     ):
         total += initialiser_notes(inscription, semestre)
     return total
@@ -798,9 +1553,16 @@ def controler_reinscription(etudiant, classe) -> tuple:
         return InscriptionIPGEI.STATUT_ACTIF, 0
 
     precedente = memes[0]
-    if classe.niveau_code == NIVEAU_MPSI:
+    # Le droit au redoublement se lit sur le niveau. Le référentiel le refuse
+    # d'office en première année ; un niveau ajouté suit sa propre case, sans
+    # que cette règle ait à connaître son code.
+    fiche = niveau_ref(classe.niveau_code, classe.institution)
+    redoublement_ouvert = (fiche.redoublement_autorise if fiche is not None
+                           else classe.niveau_code != NIVEAU_MPSI)
+    if not redoublement_ouvert:
         raise ValidationError(
-            f"Le redoublement n'est pas autorisé en 1re année. "
+            f"Le redoublement n'est pas autorisé en "
+            f'{fiche.libelle_rang if fiche is not None else "1re année"}. '
             f'{etudiant} a déjà suivi {precedente.classe.niveau_code} en '
             f'{precedente.annee_universitaire}.'
         )
@@ -854,7 +1616,12 @@ def rattacher_inscrits(semestre: SemestreIPGEI) -> int:
     )
     total = 0
     for inscription in inscriptions:
-        if inscription.classe.niveau_code == semestre.niveau:
+        # Comparaison sur le RANG et non sur le code : `semestre.niveau` déduit
+        # « MP » de S3, si bien qu'un inscrit d'un autre niveau de 2e année —
+        # MPI — n'aurait jamais reçu ses lignes de note, et rien ne l'aurait
+        # signalé avant la délibération.
+        if (rang_du_niveau(inscription.classe.niveau_code, semestre.institution)
+                == rang_du_semestre(semestre.code)):
             total += initialiser_notes(inscription, semestre)
     return total
 
@@ -883,7 +1650,7 @@ def frais_pour(classe) -> Decimal:
     montant = GrilleFrais.objects.filter(
         institution_id=classe.institution_id,
         annee_univ_id=annee.pk,
-        niveau=1 if classe.niveau_code == NIVEAU_MPSI else 2,
+        niveau=rang_du_niveau(classe.niveau_code, classe.institution),
         actif=True,
         **({'type_diplome': type_diplome} if type_diplome else {}),
     ).values_list('montant', flat=True).first()

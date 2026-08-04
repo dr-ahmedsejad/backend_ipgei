@@ -17,10 +17,68 @@ class NiveauSerializer(serializers.ModelSerializer):
 class SemestreSerializer(serializers.ModelSerializer):
     niveau_nom            = serializers.CharField(source='niveau_semestre.niveau', read_only=True)
     decalage_pedagogique  = serializers.SerializerMethodField(read_only=True)
+    # Facultatif à la saisie : un semestre appartient à une ANNÉE d'étude, pas à
+    # un niveau. Demander « MPSI ou MP » dans un formulaire de semestre n'a plus
+    # de sens depuis que plusieurs niveaux partagent une même année. Ce
+    # rattachement — dont le socle se sert pour rejoindre les départements — se
+    # déduit du code, comme le fait déjà `ipgei.socle.semestre_socle`.
+    niveau_semestre       = serializers.PrimaryKeyRelatedField(
+        queryset=Niveau.objects.all(), required=False,
+    )
+    # L'année d'étude : ce que le formulaire demande réellement. Un semestre
+    # appartient à une année — 1re, 2e — et non à un niveau : S3 est suivi par
+    # MP comme par MPI. Le rattachement technique en découle, calculé plus bas.
+    annee       = serializers.SerializerMethodField(read_only=True)
+    annee_input = serializers.IntegerField(
+        required=False, min_value=1, max_value=10, write_only=True, source='annee',
+    )
 
     class Meta:
         model  = Semestre
         fields = '__all__'
+        # Le validateur d'unicité que DRF dérive de `uniq_semestre_code_niveau_type`
+        # rendrait `niveau_semestre` obligatoire — c'est justement ce qu'on veut
+        # éviter. L'unicité est donc vérifiée dans `validate`, une fois le niveau
+        # déduit.
+        validators = []
+
+    def get_annee(self, obj) -> int:
+        """Année d'étude du semestre, telle que l'écran l'affiche."""
+        from apps.ipgei.socle import rang_de_rattachement
+        return rang_de_rattachement(obj.code_semestre, obj.niveau_semestre)
+
+    def validate(self, attrs):
+        annee  = attrs.pop('annee', None)
+        niveau = attrs.get('niveau_semestre')
+
+        if niveau is None and self.instance is None:
+            from apps.ipgei.socle import niveau_de_rattachement
+
+            code = (attrs.get('code_semestre') or '').strip().upper()
+            # L'année saisie prime ; à défaut on la déduit du code, ce qui
+            # couvre S1..S4 sans rien demander.
+            niveau = niveau_de_rattachement(code, annee)
+            if niveau is None:
+                raise serializers.ValidationError({'annee': (
+                    f'Impossible de situer « {code or "ce code"} » dans le cursus : '
+                    "indiquez l'année d'étude."
+                )})
+            attrs['niveau_semestre'] = niveau
+
+        code = attrs.get('code_semestre', getattr(self.instance, 'code_semestre', None))
+        type_semestre = attrs.get('type_semestre',
+                                  getattr(self.instance, 'type_semestre', None))
+        niveau = niveau or getattr(self.instance, 'niveau_semestre', None)
+        doublons = Semestre.objects.filter(
+            code_semestre=code, niveau_semestre=niveau, type_semestre=type_semestre,
+        )
+        if self.instance is not None:
+            doublons = doublons.exclude(pk=self.instance.pk)
+        if doublons.exists():
+            raise serializers.ValidationError(
+                f'Un semestre {code} de ce type existe déjà pour ce rattachement.'
+            )
+        return attrs
 
     def get_decalage_pedagogique(self, obj):
         """Decalage en semaines applicable a ce semestre (selon le niveau lie).
@@ -40,17 +98,17 @@ class SeanceSerializer(serializers.ModelSerializer):
 
 class CreneauSerializer(serializers.ModelSerializer):
     """
-    Creneau horaire.
+    Créneau horaire : libellé, plage, durée, ordre d'affichage et mise en
+    service.
 
-    Sur IPGEI, la liste des creneaux est un miroir de SIGA (cf.
-    `manage.py sync_creneaux_siga`) : libelle, ordre et statut ne se modifient
-    donc pas ici. Seule la **duree** est saisie localement, creneau par creneau,
-    car c'est elle qui sert de base au calcul de charge.
+    Ces champs étaient verrouillés du temps où la grille n'était qu'un miroir de
+    SIGA. Ils ne le sont plus : IPGEI administre sa propre grille — en créer un,
+    l'ordonner, le retirer du service — et la durée reste ce qui alimente le
+    calcul de la charge d'enseignement.
     """
     class Meta:
         model  = Creneau
-        fields = '__all__'
-        read_only_fields = ['creneau', 'ordre', 'is_actif', 'type_creneau']
+        fields = '__all__' 
 
 
 class JourSerializer(serializers.ModelSerializer):

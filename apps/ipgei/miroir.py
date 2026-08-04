@@ -99,9 +99,24 @@ def synchroniser_matiere(matiere: Matiere) -> EM:
     Le code EM est suffixé par le semestre (« MATH-S1 »). Le socle impose en
     effet un code unique par filière, or la même matière existe aux quatre
     semestres du cursus : sans ce suffixe, MATH-S2 écraserait MATH-S1.
+
+    Le niveau s'y ajoute dès que deux d'entre eux partagent un rang — MP et MPI
+    suivent tous deux S3, et « MATH-S3 » désignerait alors deux matières
+    distinctes. Le suffixe n'apparaît que dans ce cas : l'ajouter partout
+    renommerait les EM du cursus d'origine, et avec eux les vacations déjà
+    saisies.
     """
+    code_em = f'{matiere.code}-{matiere.code_semestre}'
+    if matiere.niveau_ref_id is not None:
+        from .models import NiveauIPGEI
+        rang_partage = NiveauIPGEI.objects.filter(
+            institution=matiere.institution, rang=matiere.niveau_ref.rang,
+        ).count() > 1
+        if rang_partage:
+            code_em = f'{code_em}-{matiere.niveau_ref.code}'
+
     valeurs = {
-        'code_em':     f'{matiere.code}-{matiere.code_semestre}',
+        'code_em':     code_em,
         'intitule':    matiere.intitule,
         'CM':          matiere.volume_cm,
         'TD':          matiere.volume_td,

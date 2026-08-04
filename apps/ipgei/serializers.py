@@ -7,8 +7,9 @@ from .models import (
     AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, EmploiArchive,
     Evaluation,
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
+    MembreJuryIPGEI, NiveauIPGEI,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
-    SeanceType, SemaineIPGEI, SemestreIPGEI, SousGroupeTP,
+    SeanceType, SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI, SousGroupeTP,
     NIVEAU_CHOICES, PCT_DEFAUT_AVEC_TP, PCT_DEFAUT_SANS_TP,
 )
 
@@ -22,8 +23,13 @@ class ChampNiveauPrepa(serializers.Field):
     conserve le contrat d'API d'origine — le client continue d'envoyer et de
     recevoir un code — sans quoi tous les écrans IPGEI seraient à reprendre.
 
-    La ligne de référentiel est créée au besoin plutôt que la saisie rejetée :
-    MPSI et MP sont une constante du cursus, pas une donnée à administrer.
+    Les codes acceptés viennent du référentiel `NiveauIPGEI`, non d'une liste
+    figée : sans cela, un niveau ajouté par la scolarité — MPI — serait refusé
+    à la création de sa première classe. Repli sur le cursus d'origine tant que
+    le référentiel est vide.
+
+    La ligne du socle est créée au besoin plutôt que la saisie rejetée : elle
+    n'est qu'un miroir technique, pas une donnée à administrer deux fois.
     """
 
     def to_representation(self, valeur):
@@ -32,7 +38,9 @@ class ChampNiveauPrepa(serializers.Field):
     def to_internal_value(self, donnee):
         from .socle import niveau_socle
 
-        codes = [code for code, _ in NIVEAU_CHOICES]
+        codes = list(
+            NiveauIPGEI.objects.filter(actif=True).values_list('code', flat=True)
+        ) or [code for code, _ in NIVEAU_CHOICES]
         if donnee not in codes:
             raise serializers.ValidationError(
                 f"Niveau invalide. Valeurs attendues : {', '.join(codes)}."
@@ -121,8 +129,8 @@ class ParametresIPGEISerializer(serializers.ModelSerializer):
     class Meta:
         model  = ParametresIPGEI
         fields = [
-            'id', 'institution', 'seuil_validation', 'plafond_rattrapage',
-            'nb_semaines_defaut', 'droit_redoublement_max',
+            'id', 'institution', 'seuil_validation', 'seuil_validation_semestre',
+            'plafond_rattrapage', 'nb_semaines_defaut', 'droit_redoublement_max',
         ]
 
 
@@ -179,6 +187,12 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
 
 class SemestreIPGEISerializer(serializers.ModelSerializer):
     institution   = _champ_institution()
+    # Le semestre relève d'une année d'étude, pas d'un niveau : `libelle_annee`
+    # dit ce qu'il est, `niveaux` qui le suit. `niveau` reste exposé pour les
+    # écrans qui ne l'ont pas encore quitté.
+    rang          = serializers.IntegerField(read_only=True)
+    libelle_annee = serializers.CharField(read_only=True)
+    niveaux       = serializers.ListField(read_only=True, child=serializers.CharField())
     niveau        = serializers.CharField(read_only=True)
     type_semestre = serializers.CharField(read_only=True)
     nb_semaines_generees = serializers.SerializerMethodField()
@@ -187,7 +201,8 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
         model  = SemestreIPGEI
         fields = [
             'id', 'institution', 'code', 'annee_universitaire', 'date_debut', 'date_fin',
-            'nb_semaines', 'est_cloture', 'niveau', 'type_semestre', 'nb_semaines_generees',
+            'nb_semaines', 'est_cloture', 'rang', 'libelle_annee', 'niveaux', 'niveau',
+            'type_semestre', 'nb_semaines_generees',
         ]
 
     def get_nb_semaines_generees(self, obj) -> int:
@@ -205,6 +220,13 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
 class MatiereSerializer(serializers.ModelSerializer):
     institution   = _champ_institution()
     niveau = serializers.CharField(read_only=True)
+    # Le niveau se saisit dès lors qu'il s'administre : deux niveaux d'un même
+    # rang — MP et MPI — ont chacun leur maquette sur les mêmes semestres, et le
+    # code du semestre ne suffit plus à trancher.
+    niveau_ref      = serializers.PrimaryKeyRelatedField(
+        queryset=NiveauIPGEI.objects.all(), required=False, allow_null=True,
+    )
+    niveau_ref_code = serializers.CharField(source='niveau_ref.code', read_only=True, default='')
     # Total calcule : c'est la somme CM+TD+TP, jamais une valeur saisie.
     volume_horaire = serializers.IntegerField(read_only=True)
 
@@ -212,7 +234,8 @@ class MatiereSerializer(serializers.ModelSerializer):
         model  = Matiere
         fields = [
             'id', 'institution', 'code', 'intitule', 'intitule_ar', 'code_semestre',
-            'niveau', 'coefficient', 'volume_cm', 'volume_td', 'volume_tp',
+            'niveau', 'niveau_ref', 'niveau_ref_code',
+            'coefficient', 'volume_cm', 'volume_td', 'volume_tp',
             'volume_horaire', 'has_tp',
             'pct_ds', 'pct_tp', 'pct_exam', 'ordre', 'actif',
         ]
@@ -244,6 +267,29 @@ class MatiereSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 f'La pondération doit totaliser 100 % (actuellement {total} %).'
             )
+
+        # Le niveau et le semestre doivent s'accorder : une matière de MPI — 2e
+        # année — ne peut pas relever de S1. À défaut de niveau saisi, on prend
+        # celui que le semestre désigne, pour que rien ne change quand un seul
+        # niveau existe par rang.
+        code_semestre = valeur('code_semestre')
+        niveau = valeur('niveau_ref')
+        if niveau is None and self.instance is None and code_semestre:
+            candidats = [
+                n for n in NiveauIPGEI.objects.filter(actif=True)
+                if code_semestre in n.codes_semestres
+            ]
+            if len(candidats) == 1:
+                attrs['niveau_ref'] = candidats[0]
+            elif len(candidats) > 1:
+                raise serializers.ValidationError({'niveau_ref': (
+                    f'Plusieurs niveaux suivent {code_semestre} '
+                    f'({", ".join(n.code for n in candidats)}) : précisez lequel.'
+                )})
+        elif niveau is not None and code_semestre and code_semestre not in niveau.codes_semestres:
+            raise serializers.ValidationError({'code_semestre': (
+                f'{niveau.code} suit {" et ".join(niveau.codes_semestres)}, pas {code_semestre}.'
+            )})
         return attrs
 
 
@@ -357,12 +403,16 @@ class ClasseSelectSerializer(serializers.ModelSerializer):
 class NouvelEtudiantSerializer(serializers.Serializer):
     """Identité saisie lors d'une inscription d'un étudiant encore inconnu."""
     matricule      = serializers.CharField(max_length=50)
+    # `nom` porte le nom COMPLET, prénoms inclus — c'est la forme du référentiel
+    # officiel, celle du fichier MESRS, et celle que l'attestation imprime.
+    # `prenom_fr` reste accepté pour les appels qui séparent encore les deux.
     nom            = serializers.CharField(max_length=200)
     prenom_fr      = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     nom_ar         = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     genre          = serializers.ChoiceField(choices=[('M', 'Masculin'), ('F', 'Féminin')], default='M')
     date_naissance = serializers.DateField(required=False, allow_null=True)
     lieu_naissance_fr = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+    lieu_naissance_ar = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     cni            = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
     telephone      = serializers.CharField(max_length=20, required=False, allow_blank=True, default='')
     email          = serializers.EmailField(required=False, allow_blank=True, default='')
@@ -463,6 +513,22 @@ class InscriptionIPGEISerializer(serializers.ModelSerializer):
 
 
 # ── Notes ────────────────────────────────────────────────────────────────────
+def _controler_session(semestre, *, rattrapage: bool):
+    """
+    Relaie le contrôle de fenêtre de saisie en erreur DRF.
+
+    La règle vit dans `services` — l'admin Django et les commandes de gestion
+    passent par elle aussi. Ici on ne fait que traduire l'exception.
+    """
+    from django.core.exceptions import ValidationError as ErreurDjango
+
+    from . import services
+    try:
+        services.controler_saisie(semestre, rattrapage=rattrapage)
+    except ErreurDjango as erreur:
+        raise serializers.ValidationError(getattr(erreur, 'messages', None) or str(erreur))
+
+
 class EvaluationSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Evaluation
@@ -476,8 +542,9 @@ class EvaluationSerializer(serializers.ModelSerializer):
         note = attrs.get('note', getattr(self.instance, 'note', None))
         if note is not None and note.verrouillee:
             raise serializers.ValidationError('Note verrouillée par une délibération validée.')
-        if note is not None and note.semestre.est_cloture:
-            raise serializers.ValidationError('Semestre clôturé — saisie impossible.')
+        if note is not None:
+            # Un DS ou un examen relève toujours de la session normale.
+            _controler_session(note.semestre, rattrapage=False)
         return attrs
 
 
@@ -515,8 +582,17 @@ class NoteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Note verrouillée par une délibération validée.')
         semestre = attrs.get('semestre', getattr(instance, 'semestre', None))
         matiere  = attrs.get('matiere',  getattr(instance, 'matiere', None))
-        if semestre is not None and semestre.est_cloture:
-            raise serializers.ValidationError('Semestre clôturé — saisie impossible.')
+        if semestre is not None:
+            # Chaque campagne a sa fenêtre : le rattrapage se saisit après la
+            # clôture des notes normales, pas en même temps. Créer une ligne
+            # vide n'est pas une saisie et ne réclame aucune session ouverte —
+            # c'est ce que fait la grille au premier affichage.
+            if 'note_rattrapage' in attrs:
+                _controler_session(semestre, rattrapage=True)
+            if 'note_tp' in attrs:
+                _controler_session(semestre, rattrapage=False)
+            if not attrs.keys() & {'note_rattrapage', 'note_tp'} and semestre.est_cloture:
+                raise serializers.ValidationError('Semestre clôturé — saisie impossible.')
         if semestre is not None and matiere is not None and matiere.code_semestre != semestre.code:
             raise serializers.ValidationError(
                 {'matiere': f'La matière {matiere.code} appartient au semestre '
@@ -547,6 +623,102 @@ class SaisieNoteSerializer(serializers.Serializer):
         allow_null=True, required=False,
     )
     evaluations     = SaisieEvaluationSerializer(many=True, required=False)
+
+
+class NiveauIPGEISerializer(serializers.ModelSerializer):
+    """Niveau du cursus. Le rang commande les semestres et le tarif appliqué."""
+    institution      = _champ_institution()
+    libelle_rang     = serializers.CharField(read_only=True)
+    codes_semestres  = serializers.ListField(read_only=True)
+    nb_classes       = serializers.SerializerMethodField()
+    nb_matieres      = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = NiveauIPGEI
+        fields = [
+            'id', 'institution', 'code', 'libelle', 'rang', 'libelle_rang',
+            'codes_semestres', 'redoublement_autorise', 'decisions_possibles',
+            'actif', 'ordre', 'nb_classes', 'nb_matieres',
+        ]
+
+    def get_nb_classes(self, obj) -> int:
+        from apps.departement.models import Departement
+        return Departement.objects.filter(
+            classe_ipgei__isnull=False, niveau__niveau=obj.code,
+        ).count()
+
+    def get_nb_matieres(self, obj) -> int:
+        return obj.matieres.count()
+
+    def validate_code(self, valeur):
+        valeur = (valeur or '').strip().upper()
+        if not valeur:
+            raise serializers.ValidationError('Le code est requis.')
+        return valeur
+
+    def validate_decisions_possibles(self, valeur):
+        connues = {code for code, _ in LigneDeliberation.DECISION_CHOICES}
+        inconnues = [d for d in (valeur or []) if d not in connues]
+        if inconnues:
+            raise serializers.ValidationError(
+                f'Décision(s) inconnue(s) : {", ".join(inconnues)}.'
+            )
+        return valeur or []
+
+    def validate(self, attrs):
+        rang = attrs.get('rang', getattr(self.instance, 'rang', 1))
+        redouble = attrs.get('redoublement_autorise',
+                             getattr(self.instance, 'redoublement_autorise', False))
+        # La règle du cursus prime sur la saisie : pas de redoublement en
+        # première année, pas même par dérogation.
+        if rang == 1 and redouble:
+            raise serializers.ValidationError(
+                {'redoublement_autorise': 'Le redoublement est interdit en première année.'}
+            )
+        return attrs
+
+
+class SaisieAnonymeSerializer(serializers.Serializer):
+    """Une note saisie sous numéro d'anonymat, pour une épreuve d'une matière."""
+    semestre        = serializers.IntegerField()
+    matiere         = serializers.IntegerField()
+    numero_anonymat = serializers.IntegerField(min_value=1)
+    type_evaluation = serializers.ChoiceField(choices=Evaluation.TYPE_CHOICES)
+    numero          = serializers.IntegerField(min_value=1, max_value=20)
+    valeur          = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal('0'), max_value=Decimal('20'),
+    )
+
+
+class SessionEvaluationIPGEISerializer(serializers.ModelSerializer):
+    """
+    Fenêtre de saisie. Les états ne se modifient pas au PATCH mais par les
+    actions `ouvrir` / `cloturer` / `rouvrir` : elles seules posent la date, le
+    responsable et la trace d'audit.
+    """
+    semestre_code       = serializers.CharField(source='semestre.code', read_only=True)
+    semestre_annee      = serializers.CharField(source='semestre.annee_universitaire', read_only=True)
+    semestre_cloture    = serializers.BooleanField(source='semestre.est_cloture', read_only=True)
+    type_session_display = serializers.CharField(source='get_type_session_display', read_only=True)
+    etat                = serializers.CharField(read_only=True)
+    est_saisissable     = serializers.BooleanField(read_only=True)
+    cloturee_par_nom    = serializers.CharField(
+        source='cloturee_par.username', read_only=True, default='',
+    )
+
+    class Meta:
+        model  = SessionEvaluationIPGEI
+        fields = [
+            'id', 'semestre', 'semestre_code', 'semestre_annee', 'semestre_cloture',
+            'type_session', 'type_session_display', 'etat', 'est_saisissable',
+            'est_ouverte', 'est_close', 'date_debut_saisie', 'date_fin_saisie',
+            'plafond_rattrapage', 'ouverte_le', 'cloturee_le',
+            'cloturee_par', 'cloturee_par_nom',
+        ]
+        read_only_fields = [
+            'semestre', 'type_session', 'est_ouverte', 'est_close',
+            'plafond_rattrapage', 'ouverte_le', 'cloturee_le', 'cloturee_par',
+        ]
 
 
 class SaisieCollectiveSerializer(serializers.Serializer):
@@ -580,6 +752,7 @@ class LigneDeliberationSerializer(serializers.ModelSerializer):
     est_ajustee        = serializers.BooleanField(read_only=True)
     nb_redoublements   = serializers.IntegerField(source='inscription.nb_redoublements', read_only=True)
     details            = DetailLigneDeliberationSerializer(many=True, read_only=True)
+    motif_sans_proposition = serializers.SerializerMethodField()
 
     class Meta:
         model  = LigneDeliberation
@@ -587,12 +760,40 @@ class LigneDeliberationSerializer(serializers.ModelSerializer):
             'id', 'deliberation', 'inscription', 'etudiant_nom', 'etudiant_matricule',
             'classe_nom', 'moyenne_generale', 'total_coefficients', 'rang',
             'decision_auto', 'decision_auto_display', 'decision', 'decision_display',
-            'est_ajustee', 'motif_ajustement', 'observations', 'nb_redoublements', 'details',
+            'est_ajustee', 'motif_ajustement', 'observations', 'nb_redoublements',
+            'motif_sans_proposition', 'details',
         ]
         read_only_fields = [
             'deliberation', 'inscription', 'moyenne_generale', 'total_coefficients',
             'rang', 'decision_auto',
         ]
+
+    def get_motif_sans_proposition(self, obj) -> str:
+        """
+        Pourquoi aucune décision n'est proposée sur cette ligne.
+
+        Sans cette explication, une colonne vide se lit comme un oubli du
+        logiciel, et le jury tranche à l'aveugle ou attend une proposition qui
+        ne viendra pas.
+        """
+        from . import services
+
+        if obj.decision_auto:
+            return ''
+        deliberation = obj.deliberation
+        if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
+            return ('Jury de semestre : le passage se décide en délibération '
+                    'annuelle, une fois les deux semestres notés.')
+        manquants = services.semestres_incomplets(
+            obj.inscription, deliberation.annee_universitaire,
+        )
+        if manquants:
+            return (f'{" et ".join(manquants)} incomplet(s) — le passage ne peut '
+                    "se prononcer avant la fin de l'année.")
+        if obj.moyenne_generale is None:
+            return 'Aucune note retenue : la moyenne ne peut pas être calculée.'
+        return ('La décision calculée ne figure pas parmi celles ouvertes à ce '
+                'niveau — au jury de trancher.')
 
     def validate(self, attrs):
         instance = self.instance
@@ -623,6 +824,10 @@ class DeliberationSerializer(serializers.ModelSerializer):
     validee_par_nom  = serializers.CharField(source='validee_par.name', read_only=True, default='')
     nb_lignes        = serializers.SerializerMethodField()
     est_verrouillee  = serializers.BooleanField(read_only=True)
+    nb_membres_jury  = serializers.SerializerMethodField()
+    nb_signatures    = serializers.SerializerMethodField()
+    nb_decisions_emises = serializers.SerializerMethodField()
+    decisions_niveau    = serializers.SerializerMethodField()
 
     class Meta:
         model  = Deliberation
@@ -632,11 +837,59 @@ class DeliberationSerializer(serializers.ModelSerializer):
             'statut', 'statut_display', 'est_verrouillee', 'observations',
             'date_creation', 'date_calcul', 'date_validation',
             'validee_par', 'validee_par_nom', 'nb_lignes',
+            'nb_membres_jury', 'nb_signatures', 'nb_decisions_emises',
+            'decisions_niveau',
         ]
         read_only_fields = ['statut', 'date_calcul', 'date_validation', 'validee_par']
 
     def get_nb_lignes(self, obj) -> int:
         return obj.lignes.count()
+
+    def get_nb_membres_jury(self, obj) -> int:
+        return obj.membres_jury.count()
+
+    def get_nb_signatures(self, obj) -> int:
+        return obj.membres_jury.exclude(signature_le=None).count()
+
+    def get_nb_decisions_emises(self, obj) -> int:
+        """Décisions déjà éditées — ce qu'une dévalidation remettrait en cause."""
+        from . import services
+        return services.decisions_emises(obj)
+
+    def get_decisions_niveau(self, obj) -> list:
+        """
+        Décisions que le jury peut prononcer à ce niveau.
+
+        Calculées ici et non déduites côté écran : la liste dépend du
+        référentiel, qu'un client ne peut pas deviner à partir du seul code —
+        « MPI » ne dit pas s'il s'agit d'une première ou d'une deuxième année.
+        """
+        from . import services
+
+        libelles = dict(LigneDeliberation.DECISION_CHOICES)
+        fiche = services.niveau_ref(obj.niveau, obj.institution)
+        codes = list(fiche.decisions_possibles) if fiche and fiche.decisions_possibles else None
+        if codes is None:
+            rang = fiche.rang if fiche is not None else services.rang_du_niveau(obj.niveau)
+            codes = ([LigneDeliberation.DECISION_ADMIS, LigneDeliberation.DECISION_REORIENTE]
+                     if rang == 1 else
+                     [LigneDeliberation.DECISION_CNIM, LigneDeliberation.DECISION_REDOUBLANT,
+                      LigneDeliberation.DECISION_EXCLU])
+        return [{'value': code, 'label': libelles.get(code, code)} for code in codes]
+
+    def validate_niveau(self, valeur):
+        """
+        Le niveau doit exister au référentiel — la liste n'est plus figée dans
+        le modèle, c'est donc ici qu'elle se vérifie.
+        """
+        codes = list(
+            NiveauIPGEI.objects.filter(actif=True).values_list('code', flat=True)
+        ) or [code for code, _ in NIVEAU_CHOICES]
+        if valeur not in codes:
+            raise serializers.ValidationError(
+                f"Niveau inconnu. Valeurs attendues : {', '.join(codes)}."
+            )
+        return valeur
 
     def validate(self, attrs):
         portee   = attrs.get('portee',   getattr(self.instance, 'portee', None))
@@ -648,6 +901,27 @@ class DeliberationSerializer(serializers.ModelSerializer):
         if portee == Deliberation.PORTEE_ANNUELLE:
             attrs['semestre'] = None
         return attrs
+
+
+class MembreJuryIPGEISerializer(serializers.ModelSerializer):
+    """
+    Membre du jury. La signature n'est jamais écrite par cette voie : elle passe
+    par l'action `signer`, qui vérifie que c'est bien le membre qui signe.
+    """
+    role_display    = serializers.CharField(source='get_role_display', read_only=True)
+    utilisateur_nom = serializers.SerializerMethodField()
+    a_signe         = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model  = MembreJuryIPGEI
+        fields = [
+            'id', 'deliberation', 'utilisateur', 'utilisateur_nom',
+            'role', 'role_display', 'signature_le', 'a_signe',
+        ]
+        read_only_fields = ['signature_le']
+
+    def get_utilisateur_nom(self, obj) -> str:
+        return obj.utilisateur.name or obj.utilisateur.username
 
 
 # ── EDT ──────────────────────────────────────────────────────────────────────

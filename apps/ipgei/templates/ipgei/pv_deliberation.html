@@ -1,0 +1,198 @@
+{% comment %}
+Procès-verbal de délibération — document collectif, en paysage.
+
+Il n'étend pas `_base_ipgei.html` : ce squelette est bâti pour un document
+individuel (bloc identité, photo, QR de vérification rattaché à un étudiant).
+L'en-tête institutionnel y est repris à l'identique pour que les deux familles
+de documents se ressemblent.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 landscape; margin: 0; }
+
+  body { font-family: 'Cairo', 'Segoe UI', Arial, sans-serif; font-size: 9pt; color: #1a1a1a; }
+  .page { width: 297mm; padding: 10mm 12mm; position: relative; }
+
+  .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 6px; }
+  .entete td { vertical-align: middle; }
+  .entete-fr, .entete-ar { font-size: 8pt; color: #444; line-height: 1.4; width: 36%; }
+  .entete-ar { direction: rtl; text-align: center; }
+  .entete-fr { text-align: center; }
+  .entete-logo { text-align: center; width: 28%; }
+  .entete-logo img { height: 48px; object-fit: contain; }
+  .inst-nom { font-size: 10pt; font-weight: 700; color: #006633; display: block; margin-top: 2px; }
+
+  .titre-zone { text-align: center; margin: 10px 0 6px; }
+  .titre {
+    display: inline-block; background: #006633; color: #fff; font-size: 12pt;
+    font-weight: 700; padding: 5px 24px; border-radius: 5px; text-transform: uppercase;
+  }
+  .sous-titre { display: block; margin-top: 4px; font-size: 9pt; color: #555; }
+
+  /* Une édition non validée doit se reconnaître au premier coup d'œil. */
+  .projet {
+    display: inline-block; margin-top: 5px; padding: 3px 14px; border-radius: 4px;
+    background: #fff4e5; border: 1px solid #f0b429; color: #8a5a00;
+    font-size: 8.5pt; font-weight: 700; text-transform: uppercase;
+  }
+
+  .cartouche { width: 100%; margin: 8px 0 10px; border-collapse: collapse; }
+  .cartouche td { font-size: 9pt; padding: 3px 6px; }
+  .cartouche .lab { color: #666; }
+  .cartouche .val { font-weight: 700; }
+
+  table.pv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table.pv th {
+    background: #006633; color: #fff; font-size: 8pt; font-weight: 700;
+    padding: 5px 3px; border: 1px solid #005229; text-align: center;
+  }
+  table.pv td { font-size: 8.5pt; padding: 3.5px 4px; border: 1px solid #d5d5d5; text-align: center; }
+  table.pv td.gauche { text-align: left; }
+  table.pv tr:nth-child(even) td { background: #f7faf8; }
+  table.pv .moy { font-weight: 700; color: #006633; }
+  table.pv .ajustee { background: #fff8e6 !important; }
+
+  .synthese { margin: 6px 0 12px; font-size: 8.5pt; color: #333; }
+  .synthese span { display: inline-block; margin-right: 14px; }
+  .synthese b { color: #006633; }
+
+  .jury-titre {
+    font-size: 9.5pt; font-weight: 700; color: #006633; text-transform: uppercase;
+    border-bottom: 1px solid #006633; padding-bottom: 3px; margin-bottom: 6px;
+  }
+  table.jury { width: 100%; border-collapse: collapse; }
+  table.jury td {
+    width: 25%; vertical-align: top; padding: 6px 8px 4px; font-size: 8.5pt;
+    border: 1px solid #d5d5d5;
+  }
+  table.jury .role { color: #666; font-size: 8pt; }
+  table.jury .nom { font-weight: 700; }
+  table.jury .signature { margin-top: 12mm; font-size: 7.5pt; color: #555; }
+  table.jury .signee { color: #006633; font-weight: 700; }
+
+  .mentions { margin-top: 10px; font-size: 7.5pt; color: #777; text-align: center; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <table class="entete">
+    <tr>
+      <td class="entete-fr">
+        {% if institution.ministere_fr %}<div>{{ institution.ministere_fr }}</div>{% endif %}
+        <span class="inst-nom">{{ institution.nom_display }}</span>
+      </td>
+      <td class="entete-logo">
+        {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
+      </td>
+      <td class="entete-ar">
+        {% if institution.ministere_ar %}<div>{{ institution.ministere_ar }}</div>{% endif %}
+        {% if institution.nom_ar %}<span class="inst-nom">{{ institution.nom_ar }}</span>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <div class="titre-zone">
+    <span class="titre">{{ titre }}</span>
+    <span class="sous-titre">
+      {{ niveau_libelle }} — {{ portee_libelle }} — Année universitaire {{ deliberation.annee_universitaire }}
+    </span>
+    {% if est_projet %}
+      <div><span class="projet">Projet — délibération non validée</span></div>
+    {% endif %}
+  </div>
+
+  <table class="cartouche">
+    <tr>
+      <td class="lab">Effectif délibéré</td><td class="val">{{ effectif }}</td>
+      <td class="lab">Seuil de validation</td><td class="val">{{ deliberation.seuil_validation|floatformat:2 }} / 20</td>
+      <td class="lab">Plafond de rattrapage</td>
+      <td class="val">{% if deliberation.plafond_rattrapage %}{{ deliberation.plafond_rattrapage|floatformat:2 }}{% else %}aucun{% endif %}</td>
+      <td class="lab">Date de validation</td>
+      <td class="val">{% if deliberation.date_validation %}{{ deliberation.date_validation|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+    </tr>
+  </table>
+
+  <table class="pv">
+    <thead>
+      <tr>
+        <th style="width:10mm">Rang</th>
+        <th style="width:24mm">Matricule</th>
+        <th class="gauche">Nom et prénom</th>
+        <th style="width:20mm">Classe</th>
+        <th style="width:18mm">Moyenne</th>
+        <th style="width:16mm">Coef.</th>
+        <th style="width:34mm">Décision proposée</th>
+        <th style="width:34mm">Décision du jury</th>
+        <th class="gauche" style="width:48mm">Motif de l'écart</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in lignes %}
+      <tr>
+        <td>{{ ligne.rang|default_if_none:"—" }}</td>
+        <td>{{ ligne.inscription.etudiant.matricule }}</td>
+        <td class="gauche">{{ ligne.inscription.etudiant.nom_display }}</td>
+        <td>{{ ligne.inscription.classe.nom }}</td>
+        <td class="moy">{{ ligne.moyenne_generale|default_if_none:"—"|floatformat:2 }}</td>
+        <td>{{ ligne.total_coefficients|default_if_none:"—"|floatformat:2 }}</td>
+        <td>{{ ligne.get_decision_auto_display|default:"—" }}</td>
+        <td class="{% if ligne.est_ajustee %}ajustee{% endif %}">
+          {{ ligne.get_decision_display|default:"—" }}
+        </td>
+        <td class="gauche {% if ligne.est_ajustee %}ajustee{% endif %}">{{ ligne.motif_ajustement }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9">Aucun étudiant délibéré.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if repartition %}
+  <div class="synthese">
+    <b>Répartition des décisions :</b>
+    {% for item in repartition %}<span>{{ item.libelle }} : <b>{{ item.nombre }}</b></span>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if deliberation.observations %}
+  <div class="synthese"><b>Observations du jury :</b> {{ deliberation.observations }}</div>
+  {% endif %}
+
+  <div class="jury-titre">Composition du jury et signatures</div>
+  {% if membres %}
+  <table class="jury">
+    <tr>
+      {% for membre in membres %}
+      <td>
+        <div class="role">{{ membre.get_role_display }}</div>
+        <div class="nom">{{ membre.utilisateur.name|default:membre.utilisateur.username }}</div>
+        <div class="signature">
+          {% if membre.a_signe %}
+            <span class="signee">Signé le {{ membre.signature_le|date:"d/m/Y à H:i" }}</span>
+          {% else %}
+            Signature :
+          {% endif %}
+        </div>
+      </td>
+      {% if forloop.counter|divisibleby:4 and not forloop.last %}</tr><tr>{% endif %}
+      {% endfor %}
+    </tr>
+  </table>
+  {% else %}
+  <div class="synthese">Aucun membre de jury n'a encore été désigné pour cette délibération.</div>
+  {% endif %}
+
+  <div class="mentions">
+    Édité le {{ date_edition }} — {{ institution.nom_display }}.
+    {% if est_projet %}Document de travail : seule une délibération validée fait foi.{% else %}
+    Ce procès-verbal fait foi des décisions arrêtées par le jury.{% endif %}
+  </div>
+
+</div>
+</body>
+</html>

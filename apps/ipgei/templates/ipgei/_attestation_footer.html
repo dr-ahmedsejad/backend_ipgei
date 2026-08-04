@@ -1,0 +1,41 @@
+{% comment %}
+Pied de page natif de l'attestation, repris du socle
+(`documents/_attestation_footer.html`).
+
+Rendu séparément AVEC le contexte — l'adresse est dynamique — puis passé à
+wkhtmltopdf par `--footer-html`, seul moyen de le coller au bas de la page :
+le corps est mis à une échelle imprévisible et sa hauteur ignorée, si bien
+qu'aucun spacer CSS ni `position: fixed` ne tient.
+
+wkhtmltopdf s'appuie sur un vieux WebKit qui ignore `calc()` : la pleine
+largeur passe par un vrai `<table width:100%>` dans un bloc à marges latérales.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; }
+  .fbar {
+    margin: 0 8mm;
+    border-top: 1px solid #006633;
+    padding-top: 1.5mm;
+    font-size: 8.5pt;
+    color: #555555;
+  }
+  .fbar table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .fbar .l { text-align: left;   width: 33%; }
+  .fbar .c { text-align: center; width: 34%; font-weight: bold; color: #006633; }
+  .fbar .r { text-align: right;  width: 33%; direction: rtl; }
+</style>
+</head>
+<body>
+  <div class="fbar">
+    <table><tr>
+      <td class="l">E-Mail Universitaire :</td>
+      <td class="c">{{ email_univ }}</td>
+      <td class="r"> البريد الإلكتروني الجامعي :</td>
+    </tr></table>
+  </div>
+</body>
+</html>

@@ -62,9 +62,81 @@ def niveau_socle(libelle: str) -> Niveau:
     return niveau
 
 
+def libelle_annee(code: str) -> str:
+    """
+    « 1re année » ou « 2e année » — l'année d'étude d'un semestre.
+
+    Un semestre ne relève pas d'un niveau mais d'un RANG d'année : S3 est un
+    semestre de deuxième année, suivi par MP comme par tout autre niveau du même
+    rang — MPI. L'appeler « S3 — MP » devient faux dès qu'un second niveau
+    partage l'année, et c'est le cas depuis que les niveaux s'administrent.
+    """
+    return '1re année' if code in ('S1', 'S2') else '2e année'
+
+
+def rang_de_rattachement(code: str, niveau=None) -> int:
+    """
+    Année d'étude d'un semestre : 1 pour la première, 2 pour la deuxième.
+
+    Le code suffit pour le cursus (S1..S4). Au-delà, on lit le rang du niveau
+    auquel le semestre est rattaché — c'est là qu'un « S5 » de troisième année
+    conserve son sens.
+    """
+    import re
+
+    from .models import NiveauIPGEI, SEMESTRES_PAR_RANG
+
+    code = (code or '').strip().upper()
+    for rang, codes in SEMESTRES_PAR_RANG.items():
+        if code in codes:
+            return rang
+    if niveau is not None:
+        fiche = NiveauIPGEI.objects.filter(code=niveau.niveau).first()
+        if fiche is not None:
+            return fiche.rang
+        # Rattachement créé faute de niveau du bon rang : son libellé porte
+        # l'année (« 3e année »), seule trace de ce qui a été saisi.
+        trouve = re.match(r'^(\d+)', (niveau.niveau or '').strip())
+        if trouve:
+            return int(trouve.group(1))
+    return 1
+
+
+def niveau_de_rattachement(code: str, annee=None):
+    """
+    `parametres.Niveau` auquel rattacher un semestre, ou None si indéterminable.
+
+    Ce rattachement est une jointure interne au socle — il lui sert à rejoindre
+    les départements — et non une donnée que la scolarité doit choisir. On le
+    déduit donc de l'année d'étude, elle-même déduite du code quand il relève du
+    cursus. Un niveau du bon rang est réutilisé s'il en existe un ; sinon une
+    ligne « Ne année » est créée, faute de niveau à qui s'adosser.
+    """
+    from .models import NiveauIPGEI
+
+    code = (code or '').strip().upper()
+    if annee is None:
+        if code not in SEMESTRES:
+            return None
+        return niveau_socle(SEMESTRES[code][0])
+
+    fiche = (NiveauIPGEI.objects.filter(rang=annee, actif=True)
+             .order_by('ordre', 'code').first())
+    if fiche is not None:
+        return niveau_socle(fiche.code)
+    return niveau_socle('1re année' if annee == 1 else f'{annee}e année')
+
+
 def semestre_socle(code: str) -> Semestre:
     """
     `parametres.Semestre` correspondant à S1..S4.
+
+    L'intitulé porte l'année d'étude, pas le niveau : c'est ce qui est vrai du
+    semestre lui-même, et ce qui le reste quand un niveau s'ajoute.
+
+    `niveau_semestre` continue de pointer sur le niveau d'origine — le socle
+    s'en sert pour rejoindre les départements au calcul des décalages de
+    semaines. C'est une jointure technique, pas un affichage.
 
     `credits` reste à 0 : la prépa ne fonctionne pas en crédits ECTS mais en
     coefficients, portés par `ipgei.Matiere`. Y écrire une valeur inventée
@@ -75,6 +147,6 @@ def semestre_socle(code: str) -> Semestre:
         code_semestre=code,
         niveau_semestre=niveau_socle(libelle_niveau),
         type_semestre=type_semestre,
-        defaults={'semestre': f'{code} — {libelle_niveau}', 'credits': 0},
+        defaults={'semestre': f'{code} — {libelle_annee(code)}', 'credits': 0},
     )
     return semestre

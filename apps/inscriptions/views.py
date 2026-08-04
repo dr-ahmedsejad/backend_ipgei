@@ -152,10 +152,14 @@ class PreinscriptionViewSet(InstitutionScopedMixin, viewsets.ModelViewSet):
             return [AllowAny()]
         return [RBACPermission()]
 
-    def get_throttle_classes(self):
+    def get_throttles(self):
+        # `get_throttles` et non `get_throttle_classes` : DRF n'appelle que le
+        # premier. Sous l'ancien nom, la méthode n'était jamais exécutée et le
+        # dépôt public — AllowAny, multipart, trois fichiers — n'avait aucune
+        # limite de débit.
         if self.action in ('create', 'suivi'):
-            return [AnonRateThrottle]
-        return super().get_throttle_classes()
+            return [AnonRateThrottle()]
+        return super().get_throttles()
 
     def get_serializer_class(self):
         if self.action == 'create':

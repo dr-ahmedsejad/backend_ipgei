@@ -13,6 +13,7 @@ from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.documents.models import DocumentOfficiel, NumeroSerieConfig
@@ -54,6 +55,23 @@ TEMPLATES = {
     TYPE_CNIM:            'ipgei/attestation_cnim.html',
     TYPE_ATTESTATION:     'ipgei/attestation_inscription.html',
     TYPE_RECU:            'ipgei/recu_paiement.html',
+}
+
+# Options de l'attestation, reprises du socle avec son gabarit : marges nulles
+# (le gabarit pose les siennes dans `.page`), et 8 mm réservés en bas pour le
+# pied de page natif — mesuré pour poser la barre à ~5 mm du bord sans faire
+# déborder sur une seconde page.
+OPTIONS_PDF_SOCLE = {
+    'page-size':    'A4',
+    'encoding':     'UTF-8',
+    'enable-local-file-access': None,
+    'load-error-handling':       'ignore',
+    'load-media-error-handling': 'ignore',
+    'dpi':           150,
+    'margin-top':    '0',
+    'margin-bottom': '8mm',
+    'margin-left':   '0',
+    'margin-right':  '0',
 }
 
 OPTIONS_PDF = {
@@ -128,9 +146,17 @@ def _contexte_commun(doc: DocumentOfficiel, inscription: InscriptionIPGEI,
     }
 
 
+# Intitulés arabes des semestres, pour le titre et l'en-tête du tableau.
+SEMESTRE_AR = {
+    'S1': 'السداسي الأول', 'S2': 'السداسي الثاني',
+    'S3': 'السداسي الثالث', 'S4': 'السداسي الرابع',
+}
+
+
 def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
     donnees = services.releve_semestre(inscription, semestre)
     contexte = _contexte_commun(doc, inscription, base_url)
+    niveau   = inscription.classe.niveau_code
     contexte.update({
         'titre':    'RELEVÉ DE NOTES — SEMESTRE',
         'semestre': semestre,
@@ -140,6 +166,13 @@ def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
         'seuil':    donnees['seuil'],
         'valide':   donnees['valide'],
         'absences': donnees['absences'],
+        # Libellés attendus par le gabarit repris du socle.
+        'semestre_label':    f'SEMESTRE {semestre.code[1:]}',
+        'semestre_label_ar': SEMESTRE_AR.get(semestre.code, semestre.code),
+        # La signature est bilingue : la ville aussi, sans quoi le côté droit
+        # mêlerait un nom latin à une phrase arabe.
+        'ville':    getattr(doc.institution, 'ville_fr', '') or 'Nouakchott',
+        'ville_ar': getattr(doc.institution, 'ville_ar', '') or 'نواكشوط',
     })
     return contexte
 
@@ -238,9 +271,54 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict
 # ═════════════════════════════════════════════════════════════════════════════
 # Génération
 # ═════════════════════════════════════════════════════════════════════════════
+def _rendre(type_document: str, contexte: dict) -> bytes:
+    """
+    Rend le gabarit d'un document avec les options qui lui conviennent.
+
+    L'attestation reprend le gabarit du socle, qui pose lui-même ses marges dans
+    `.page` et attend donc des marges nulles côté wkhtmltopdf — les 12 mm des
+    autres documents IPGEI les doubleraient. Elle porte en outre un pied de page
+    natif : le corps de 240 mm est mis à une échelle imprévisible et sa hauteur
+    ignorée, si bien qu'aucun CSS ne colle une barre au bas de la page.
+    """
+    PIEDS = {
+        TYPE_ATTESTATION:     'ipgei/_attestation_footer.html',
+        TYPE_RELEVE_SEMESTRE: 'ipgei/_releve_footer.html',
+    }
+    if type_document not in PIEDS:
+        return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF)
+
+    import os
+    import tempfile
+
+    from django.template.loader import get_template
+
+    from core.arabe import normaliser_arabe
+
+    options = dict(OPTIONS_PDF_SOCLE)
+    fichier = tempfile.NamedTemporaryFile(
+        'w', suffix='.html', delete=False, encoding='utf-8')
+    try:
+        # `render_pdf_bytes` normalise l'arabe du corps, mais ce pied de page est
+        # rendu ici : sans le même passage, sa ligne arabe sortirait en variantes
+        # non standard.
+        fichier.write(normaliser_arabe(
+            get_template(PIEDS[type_document]).render(contexte)))
+        fichier.close()
+        # URL file:// et non un chemin Windows : les antislashs y échouent.
+        options['footer-html']    = 'file:///' + fichier.name.replace('\\', '/')
+        options['footer-spacing'] = '0'
+        return render_pdf_bytes(TEMPLATES[type_document], contexte, options)
+    finally:
+        try:
+            os.remove(fichier.name)
+        except OSError:
+            pass
+
+
 def generer_pdf(doc: DocumentOfficiel, contexte: dict) -> bytes:
     """Rend le PDF, l'attache au document et scelle son empreinte SHA-256."""
-    pdf = render_pdf_bytes(TEMPLATES[doc.type_document], contexte, OPTIONS_PDF)
+    pdf = _rendre(doc.type_document, contexte)
 
     doc.hash_sha256 = hashlib.sha256(pdf).hexdigest()
     if doc.premiere_generation is None:
@@ -315,26 +393,77 @@ def _contexte_attestation(doc, inscription, base_url) -> dict:
     maquette du niveau EST la liste de ce qu'il suit. On la joint donc, ce qui
     évite d'avoir à produire un second document pour la justifier.
     """
+    from .models import Matiere
+
     contexte = _contexte_commun(doc, inscription, base_url)
-    matieres = []
-    for semestre in services.semestres_du_niveau(
-        inscription.classe.niveau_code, inscription.annee_universitaire,
-    ):
-        for note in (inscription.notes
-                     .filter(semestre=semestre)
-                     .select_related('matiere')
-                     .order_by('matiere__code')):
-            matieres.append({
-                'semestre':    semestre.code,
-                'code':        note.matiere.code,
-                'intitule':    note.matiere.intitule,
-                'coefficient': note.matiere.coefficient,
-            })
+    institution = doc.institution
+    etudiant    = inscription.etudiant
+    niveau      = inscription.classe.niveau_code
+
+    # La source est la MAQUETTE du niveau, et non les lignes de notes déjà
+    # créées. Une ligne de note n'existe que si le semestre a été ouvert au
+    # calendrier : en début d'année le semestre pair ne l'est pas encore, et
+    # l'attestation ne montrait alors que la moitié de l'année. L'étudiant est
+    # pourtant inscrit aux deux — l'inscription pédagogique est entière et
+    # automatique, sans dette ni crédit.
+    #
+    # La forme du contexte suit celle du socle (`elements_par_semestre`) parce
+    # que le gabarit en est la reprise fidèle ; le niveau « module » n'existe
+    # pas en prépa, les matières pendent directement du semestre.
+    elements_par_semestre = []
+    fiche_niveau = services.niveau_ref(niveau, institution)
+    for code_semestre in services.codes_semestres_du_niveau(niveau, institution):
+        matieres = list(
+            Matiere.objects
+            .filter(code_semestre=code_semestre, actif=True,
+                    institution=institution)
+            # Deux niveaux d'un même rang partagent les semestres sans partager
+            # leur maquette : sans ce filtre, un MPI recevrait les matières de MP.
+            # Les matières d'avant le référentiel n'ont pas de niveau : elles
+            # restent visibles pour le cursus d'origine, qui est le leur.
+            .filter(Q(niveau_ref=fiche_niveau) | Q(niveau_ref__isnull=True)
+                    if fiche_niveau is not None else Q(niveau_ref__isnull=True))
+            .order_by('ordre', 'code')
+        )
+        if not matieres:
+            continue
+        elements_par_semestre.append({
+            'code':           code_semestre,
+            'semestre_label': f'Semestre {code_semestre[1:]} — {code_semestre}',
+            'elements': [{
+                'code':        matiere.code,
+                'intitule_fr': matiere.intitule,
+                'coefficient': matiere.coefficient,
+            } for matiere in matieres],
+            'total_coeff': sum(matiere.coefficient for matiere in matieres),
+        })
+
+    feminin = (etudiant.genre or 'M').upper() == 'F'
+    site = (getattr(institution, 'site_web', '') or '').strip()
+    for prefixe in ('https://', 'http://', 'www.'):
+        if site.startswith(prefixe):
+            site = site[len(prefixe):]
+    domaine = site.strip('/') or 'ipgei.mr'
+
     contexte.update({
-        'titre':    "ATTESTATION D'INSCRIPTION",
-        'matieres': matieres,
-        'libelle_niveau': ('1re année — MPSI' if inscription.classe.niveau_code == 'MPSI'
-                           else '2e année — MP'),
+        # Identité, accordée au genre comme sur l'attestation du socle.
+        'civilite':    'Mme' if feminin else 'M',
+        'genre_label': 'Féminin' if feminin else 'Masculin',
+        'ne_e':        'Née' if feminin else 'Né',
+        'inscrit_e':   'inscrite' if feminin else 'inscrit',
+        'date_naissance': (etudiant.date_naissance.strftime('%d/%m/%Y')
+                           if etudiant.date_naissance else '—'),
+
+        'today':       date.today().strftime('%d/%m/%Y'),
+        'ville':       getattr(institution, 'ville_fr', '') or 'Nouakchott',
+        'niveau_label': '1re année' if niveau == 'MPSI' else '2e année',
+        'filiere_nom':  f'Classes préparatoires — {niveau}',
+        'groupe':       inscription.classe.nom,
+        'annee_univ_label': inscription.annee_universitaire,
+        'email_univ':   f'{etudiant.matricule}@{domaine}',
+
+        'elements_par_semestre': elements_par_semestre,
+        'total_coef_annee': sum(s['total_coeff'] for s in elements_par_semestre),
     })
     return contexte
 

@@ -29,10 +29,20 @@ NIVEAU_CHOICES = [
     (NIVEAU_MP,   'MP — 2e année'),
 ]
 
-# Rattachement fixe semestre → niveau : S1/S2 en MPSI, S3/S4 en MP.
+# Semestres par RANG d'année, et non par niveau : deux niveaux d'une même année
+# — MP et MPI, par exemple — partagent le calendrier. Ce qui les distingue est
+# leur maquette, portée par `Matiere.niveau`, pas leur découpage du temps.
+SEMESTRES_PAR_RANG = {
+    1: ['S1', 'S2'],
+    2: ['S3', 'S4'],
+}
+
+# Rattachement historique semestre → niveau. Conservé pour le cursus d'origine
+# (MPSI/MP) et pour les données d'avant le référentiel de niveaux ; le code
+# courant passe par `SEMESTRES_PAR_RANG` et le rang du niveau.
 SEMESTRES_PAR_NIVEAU = {
-    NIVEAU_MPSI: ['S1', 'S2'],
-    NIVEAU_MP:   ['S3', 'S4'],
+    NIVEAU_MPSI: SEMESTRES_PAR_RANG[1],
+    NIVEAU_MP:   SEMESTRES_PAR_RANG[2],
 }
 CODE_SEMESTRE_CHOICES = [
     ('S1', 'S1 — MPSI, semestre 1'),
@@ -71,6 +81,87 @@ def _note_field(**kwargs):
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. Paramétrage global
 # ═════════════════════════════════════════════════════════════════════════════
+class NiveauIPGEI(models.Model):
+    """
+    Niveau du cursus : MPSI, MP, et tout niveau ajouté ensuite — MPI par exemple.
+
+    Les deux niveaux d'origine étaient des constantes du code. Quatre règles y
+    étaient adossées : les semestres suivis, le droit au redoublement, les
+    décisions que le jury peut prononcer, et le rang d'année qui commande le
+    tarif. Les porter en données est ce qui permet d'en ajouter un sans toucher
+    au code — et de les voir, plutôt que de les deviner en lisant `services.py`.
+
+    Le rang est saisi à la création : dire qu'un niveau est de 1re ou de 2e
+    année suffit à en déduire ses semestres et son tarif. Deux niveaux peuvent
+    partager un rang — c'est le cas de MP et MPI — sans partager leur maquette.
+    """
+    institution = models.ForeignKey(
+        'parametres.Institution', on_delete=models.CASCADE, related_name='niveaux_ipgei',
+    )
+    code    = models.CharField(
+        max_length=10, help_text='Code court affiché partout : MPSI, MP, MPI…',
+    )
+    libelle = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text="Intitulé complet. Vide, le code et le rang en tiennent lieu.",
+    )
+    rang    = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(1), MaxValueValidator(len(SEMESTRES_PAR_RANG))],
+        help_text='1 = première année, 2 = deuxième année. Commande les semestres et le tarif.',
+    )
+
+    redoublement_autorise = models.BooleanField(
+        default=False,
+        help_text="Le jury peut-il prononcer un redoublement à ce niveau ? "
+                  "Interdit en première année, sans exception.",
+    )
+    # Liste de codes de `LigneDeliberation.DECISION_CHOICES`. Vide = les
+    # décisions habituelles du rang, pour qu'un niveau créé à la hâte reste
+    # utilisable sans paramétrage supplémentaire.
+    decisions_possibles = models.JSONField(
+        default=list, blank=True,
+        help_text='Codes des décisions que le jury peut prononcer. Vide = celles du rang.',
+    )
+
+    actif = models.BooleanField(
+        default=True,
+        help_text='Un niveau désactivé disparaît des écrans sans rien effacer : '
+                  'inscriptions et délibérations passées restent lisibles.',
+    )
+    ordre = models.PositiveSmallIntegerField(default=0, help_text="Ordre d'affichage.")
+
+    class Meta:
+        db_table = 'ipgei_niveau'
+        ordering = ['rang', 'ordre', 'code']
+        verbose_name        = 'niveau IPGEI'
+        verbose_name_plural = 'niveaux IPGEI'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['institution', 'code'], name='uniq_ipgei_niveau_code',
+            ),
+        ]
+
+    def __str__(self):
+        return self.libelle or f'{self.code} — {self.libelle_rang}'
+
+    @property
+    def libelle_rang(self) -> str:
+        return '1re année' if self.rang == 1 else f'{self.rang}e année'
+
+    @property
+    def codes_semestres(self) -> list:
+        """Semestres suivis à ce niveau — ceux de son rang."""
+        return list(SEMESTRES_PAR_RANG.get(self.rang, []))
+
+    def clean(self):
+        # La règle du cursus prime sur la saisie : le redoublement en première
+        # année n'existe pas, pas même par dérogation.
+        if self.rang == 1 and self.redoublement_autorise:
+            raise ValidationError(
+                {'redoublement_autorise': 'Le redoublement est interdit en première année.'}
+            )
+
+
 class ParametresIPGEI(models.Model):
     """
     Réglages institutionnels du cursus (singleton par institution).
@@ -83,10 +174,19 @@ class ParametresIPGEI(models.Model):
         'parametres.Institution', on_delete=models.CASCADE,
         related_name='parametres_ipgei',
     )
+    # Un seuil par portée : valider un semestre et prononcer le passage d'année
+    # ne se jugent pas sur la même exigence. Une valeur unique obligeait à la
+    # corriger à la main sur chaque jury dont la portée n'était pas celle du
+    # paramétrage — donc à l'oublier un jour.
     seuil_validation      = models.DecimalField(
         max_digits=4, decimal_places=2, default=Decimal('10'),
         validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('20'))],
-        help_text="Moyenne minimale d'admission / d'autorisation CNIM (défaut 10).",
+        help_text="Seuil des délibérations annuelles : admission / autorisation CNIM.",
+    )
+    seuil_validation_semestre = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('20'))],
+        help_text='Seuil des délibérations semestrielles. Vide = même seuil que les annuelles.',
     )
     plafond_rattrapage    = _note_field(
         null=True, blank=True,
@@ -114,6 +214,18 @@ class ParametresIPGEI(models.Model):
         """Retourne (en créant au besoin) les paramètres d'une institution."""
         obj, _ = cls.objects.get_or_create(institution=institution)
         return obj
+
+    def seuil_pour(self, portee: str):
+        """
+        Seuil proposé à une délibération selon sa portée.
+
+        Le seuil semestriel est facultatif : laissé vide, il vaut celui des
+        annuelles. C'est ce qui permet d'ajouter le champ sans changer le
+        comportement des établissements qui n'en distinguent qu'un.
+        """
+        if portee == Deliberation.PORTEE_SEMESTRE and self.seuil_validation_semestre is not None:
+            return self.seuil_validation_semestre
+        return self.seuil_validation
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -166,8 +278,48 @@ class SemestreIPGEI(models.Model):
         return f'{self.code} {self.annee_universitaire}'
 
     @property
+    def rang(self) -> int:
+        """Année d'étude du semestre : S1/S2 en 1re, S3/S4 en 2e."""
+        for rang, codes in SEMESTRES_PAR_RANG.items():
+            if self.code in codes:
+                return rang
+        return 1
+
+    @property
+    def libelle_annee(self) -> str:
+        """« 1re année », « 2e année » — ce qu'un semestre désigne réellement."""
+        return '1re année' if self.rang == 1 else f'{self.rang}e année'
+
+    @property
+    def niveaux(self) -> list:
+        """
+        Codes des niveaux qui suivent ce semestre.
+
+        Un semestre appartient à une année d'étude, pas à un niveau : S1 est
+        celui de tous les niveaux de première année. Le déduire du seul code
+        renvoyait « MPSI » quoi qu'il arrive, si bien qu'ouvrir un MPI de
+        première année le laissait invisible — et, plus grave, hors des
+        requêtes qui filtraient là-dessus.
+        """
+        from .models import NiveauIPGEI
+
+        return list(
+            NiveauIPGEI.objects
+            .filter(institution=self.institution_id, rang=self.rang, actif=True)
+            .order_by('ordre', 'code')
+            .values_list('code', flat=True)
+        )
+
+    @property
     def niveau(self) -> str:
-        """Niveau déduit du code : S1/S2 → MPSI, S3/S4 → MP."""
+        """
+        Premier niveau de l'année d'étude — conservé pour l'affichage hérité.
+
+        Ne jamais s'en servir pour filtrer : voir `niveaux` et `rang`.
+        """
+        codes = self.niveaux
+        if codes:
+            return codes[0]
         return NIVEAU_MPSI if self.code in SEMESTRES_PAR_NIVEAU[NIVEAU_MPSI] else NIVEAU_MP
 
     @property
@@ -279,9 +431,12 @@ class SemaineIPGEI(models.Model):
             return [classe.pk] + list(
                 SousGroupeTP.objects.filter(classe=classe).values_list('pk', flat=True))
 
+        # Tous les niveaux de l'année d'étude, et pas le seul niveau déduit du
+        # code : un MPI de première année suit S1 comme MPSI, et son suivi ne
+        # doit pas manquer à la comparaison.
         classes = Classe.objects.filter(
             annee_universitaire=self.semestre.annee_universitaire,
-            niveau__niveau=self.semestre.niveau,
+            niveau__niveau__in=self.semestre.niveaux or [self.semestre.niveau],
         )
         ids = list(classes.values_list('pk', flat=True))
         ids += list(SousGroupeTP.objects.filter(classe__in=ids).values_list('pk', flat=True))
@@ -681,6 +836,15 @@ class Matiere(models.Model):
         max_length=2, choices=CODE_SEMESTRE_CHOICES,
         help_text='Semestre du cursus auquel la matière appartient.',
     )
+    # Le semestre ne suffit plus à désigner le niveau : deux niveaux d'un même
+    # rang — MP et MPI — partagent S3 et S4 tout en ayant des maquettes
+    # distinctes. Nul le temps de la reprise des données ; la propriété
+    # `niveau` retombe alors sur la déduction d'origine.
+    niveau_ref      = models.ForeignKey(
+        'ipgei.NiveauIPGEI', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='matieres',
+        help_text='Niveau dont cette matière fait partie de la maquette.',
+    )
     coefficient     = models.DecimalField(
         max_digits=4, decimal_places=2, default=Decimal('1'),
         validators=[MinValueValidator(Decimal('0.25'))],
@@ -715,8 +879,11 @@ class Matiere(models.Model):
         db_table    = 'ipgei_matiere'
         ordering    = ['code_semestre', 'ordre', 'code']
         constraints = [
+            # Le niveau entre dans la clé : « MATH S3 » existe légitimement deux
+            # fois, une pour MP et une pour MPI.
             models.UniqueConstraint(
-                fields=['institution', 'code', 'code_semestre'], name='uniq_ipgei_matiere',
+                fields=['institution', 'code', 'code_semestre', 'niveau_ref'],
+                name='uniq_ipgei_matiere_niveau',
             ),
         ]
         indexes = [models.Index(fields=['code_semestre', 'actif'])]
@@ -726,6 +893,9 @@ class Matiere(models.Model):
 
     @property
     def niveau(self) -> str:
+        """Code du niveau, du référentiel s'il est renseigné, déduit sinon."""
+        if self.niveau_ref_id:
+            return self.niveau_ref.code
         return NIVEAU_MPSI if self.code_semestre in SEMESTRES_PAR_NIVEAU[NIVEAU_MPSI] else NIVEAU_MP
 
     @property
@@ -821,6 +991,129 @@ class Note(models.Model):
         return self.evaluations.filter(type_evaluation=Evaluation.TYPE_EXAM).order_by('numero')
 
 
+class SessionEvaluationIPGEI(models.Model):
+    """
+    Fenêtre de saisie des notes d'un semestre. Deux par semestre : la session
+    **normale** (DS, TP, examens) et la session de **rattrapage**.
+
+    Le semestre porte déjà `est_cloture`, mais c'est un verrou d'un seul tenant :
+    il ferme la saisie du rattrapage en même temps que celle des DS. Or le
+    rattrapage se saisit précisément après l'arrêt des notes normales — il
+    fallait donc rouvrir tout le semestre, et les DS redevenaient modifiables
+    pendant ce temps. Les deux campagnes s'ouvrent et se ferment désormais
+    séparément ; `Semestre.est_cloture` reste le verrou global au-dessus.
+
+    Le plafond de rattrapage est **figé à la création** depuis les paramètres de
+    l'institution, comme le fait déjà la délibération. Sans ce gel, un
+    `recalculer-lot` postérieur à un changement de paramétrage réécrivait les
+    notes retenues d'une campagne close.
+    """
+    TYPE_NORMALE    = 'normale'
+    TYPE_RATTRAPAGE = 'rattrapage'
+    TYPE_CHOICES    = [
+        (TYPE_NORMALE,    'Session normale'),
+        (TYPE_RATTRAPAGE, 'Session de rattrapage'),
+    ]
+
+    semestre     = models.ForeignKey(
+        SemestreIPGEI, on_delete=models.CASCADE, related_name='sessions',
+    )
+    type_session = models.CharField(max_length=12, choices=TYPE_CHOICES)
+
+    # Trois états réels : pas encore ouverte / ouverte / close. Close est
+    # définitif tant qu'un administrateur ne réouvre pas explicitement.
+    est_ouverte  = models.BooleanField(default=False)
+    est_close    = models.BooleanField(default=False)
+
+    date_debut_saisie = models.DateField(
+        null=True, blank=True, help_text='Indicative — affichée aux enseignants.',
+    )
+    date_fin_saisie   = models.DateField(
+        null=True, blank=True, help_text='Indicative — la clôture seule fait foi.',
+    )
+
+    # Snapshot, posé à la création depuis `ParametresIPGEI`. Vide = sans plafond.
+    # Ne concerne que la session de rattrapage ; reste nul sur la normale.
+    plafond_rattrapage = _note_field(null=True, blank=True)
+
+    ouverte_le    = models.DateTimeField(null=True, blank=True)
+    cloturee_le   = models.DateTimeField(null=True, blank=True)
+    cloturee_par  = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='sessions_ipgei_cloturees',
+    )
+
+    class Meta:
+        db_table    = 'ipgei_session_evaluation'
+        ordering    = ['semestre', 'type_session']
+        verbose_name        = 'session de saisie IPGEI'
+        verbose_name_plural = 'sessions de saisie IPGEI'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['semestre', 'type_session'], name='uniq_ipgei_session_evaluation',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_type_session_display()} — {self.semestre}'
+
+    @property
+    def est_saisissable(self) -> bool:
+        """Vrai si la campagne accepte des notes maintenant."""
+        return self.est_ouverte and not self.est_close and not self.semestre.est_cloture
+
+    @property
+    def etat(self) -> str:
+        """`fermee` (pas encore ouverte), `ouverte` ou `close`."""
+        if self.est_close:
+            return 'close'
+        return 'ouverte' if self.est_ouverte else 'fermee'
+
+
+class AnonymatIPGEI(models.Model):
+    """
+    Numéro d'anonymat d'un étudiant pour une campagne de saisie.
+
+    Le correcteur saisit sous un numéro, jamais sous un nom : c'est ce qui rend
+    la correction indépendante de l'identité du candidat. Le numéro vaut pour
+    toute la session — un numéro par épreuve obligerait à redistribuer des
+    étiquettes à chaque devoir surveillé, ce qu'aucune scolarité ne tient.
+
+    Le couple (session, numéro) est unique, comme (session, étudiant) : deux
+    étudiants sous le même numéro rendraient la correspondance ambiguë au
+    moment de reporter les notes.
+    """
+    session     = models.ForeignKey(
+        'ipgei.SessionEvaluationIPGEI', on_delete=models.CASCADE, related_name='anonymats',
+    )
+    inscription = models.ForeignKey(
+        InscriptionIPGEI, on_delete=models.CASCADE, related_name='anonymats',
+    )
+    numero      = models.PositiveIntegerField()
+    genere_le   = models.DateTimeField(auto_now_add=True)
+    genere_par  = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='anonymats_ipgei_generes',
+    )
+
+    class Meta:
+        db_table    = 'ipgei_anonymat'
+        ordering    = ['session', 'numero']
+        verbose_name        = "numéro d'anonymat IPGEI"
+        verbose_name_plural = "numéros d'anonymat IPGEI"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['session', 'inscription'], name='uniq_ipgei_anonymat_inscrit',
+            ),
+            models.UniqueConstraint(
+                fields=['session', 'numero'], name='uniq_ipgei_anonymat_numero',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Anonymat {self.numero} — {self.session}'
+
+
 class Evaluation(models.Model):
     """Un DS ou un examen d'une ligne de note. Nombre libre (1..N) par type."""
     TYPE_DS   = 'ds'
@@ -879,7 +1172,10 @@ class Deliberation(models.Model):
         'parametres.Institution', on_delete=models.PROTECT, related_name='deliberations_ipgei',
     )
     libelle             = models.CharField(max_length=200, blank=True, default='')
-    niveau              = models.CharField(max_length=4, choices=NIVEAU_CHOICES)
+    # Code du niveau délibéré. Sans `choices` : la liste vit dans
+    # `NiveauIPGEI`, et un niveau ajouté après coup doit pouvoir délibérer. Le
+    # serializer valide contre le référentiel.
+    niveau              = models.CharField(max_length=10)
     annee_universitaire = models.CharField(max_length=9)
     portee              = models.CharField(max_length=10, choices=PORTEE_CHOICES, default=PORTEE_ANNUELLE)
     semestre            = models.ForeignKey(
@@ -960,6 +1256,14 @@ class LigneDeliberation(models.Model):
     motif_ajustement  = models.TextField(blank=True, default='')
     observations      = models.TextField(blank=True, default='')
 
+    # ── État de l'inscription avant validation ───────────────────────────────
+    # Écrits au moment de la validation, quand la décision est reportée sur
+    # l'inscription. Sans eux, dévalider un jury ne saurait pas quoi restaurer :
+    # remettre « actif » d'office effacerait un redoublement antérieur, et
+    # décrémenter à l'aveugle fausserait le droit au redoublement.
+    statut_avant           = models.CharField(max_length=15, blank=True, default='')
+    nb_redoublements_avant = models.PositiveSmallIntegerField(null=True, blank=True)
+
     class Meta:
         db_table    = 'ipgei_ligne_deliberation'
         ordering    = ['deliberation', 'rang', '-moyenne_generale']
@@ -975,6 +1279,59 @@ class LigneDeliberation(models.Model):
     @property
     def est_ajustee(self) -> bool:
         return bool(self.decision) and self.decision != self.decision_auto
+
+
+class MembreJuryIPGEI(models.Model):
+    """
+    Membre signataire du procès-verbal d'une délibération.
+
+    Le PV n'engage que par les personnes qui l'ont signé : sans cette table, le
+    document sortait avec une seule signature d'établissement, alors qu'une
+    délibération est un acte collégial. La signature est datée et rattachée à un
+    compte — on ne signe que pour soi.
+    """
+    ROLE_PRESIDENT  = 'president'
+    ROLE_DIRECTEUR  = 'directeur'
+    ROLE_ENSEIGNANT = 'enseignant'
+    ROLE_SECRETAIRE = 'secretaire'
+    ROLE_CHOICES    = [
+        (ROLE_PRESIDENT,  'Président du jury'),
+        (ROLE_DIRECTEUR,  "Directeur des études"),
+        (ROLE_ENSEIGNANT, 'Enseignant'),
+        (ROLE_SECRETAIRE, 'Secrétaire de séance'),
+    ]
+    # Ordre de présentation sur le PV : le rang protocolaire, pas l'ordre de
+    # saisie ni l'alphabet.
+    ORDRE_ROLES = {ROLE_PRESIDENT: 0, ROLE_DIRECTEUR: 1, ROLE_ENSEIGNANT: 2,
+                   ROLE_SECRETAIRE: 3}
+
+    deliberation = models.ForeignKey(
+        Deliberation, on_delete=models.CASCADE, related_name='membres_jury',
+    )
+    utilisateur  = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.PROTECT,
+        related_name='jurys_ipgei',
+    )
+    role         = models.CharField(max_length=15, choices=ROLE_CHOICES)
+    signature_le = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table    = 'ipgei_membre_jury'
+        ordering    = ['deliberation', 'id']
+        verbose_name        = 'membre du jury IPGEI'
+        verbose_name_plural = 'membres du jury IPGEI'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['deliberation', 'utilisateur'], name='uniq_ipgei_membre_jury',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_role_display()} — {self.utilisateur}'
+
+    @property
+    def a_signe(self) -> bool:
+        return self.signature_le is not None
 
 
 class DetailLigneDeliberation(models.Model):
