@@ -34,33 +34,58 @@ CRENEAUX = [
     ('17h00-18h30', 'apres-midi', 5),
 ]
 
-# Maquette indicative MPSI / MP. (code, intitulé, coef, volume horaire, TP ?)
-# Elle donne une base de travail modifiable dans l'écran « Matières » ; rien
-# ici n'est figé dans le code.
+# Maquettes relevées sur les relevés de notes réels de l'IPGEI (2024-2025).
+# Les coefficients sont vérifiés par le calcul — cumul imprimé / total des
+# coefficients doit rendre la moyenne imprimée :
+#   S1  49 coef  800,56 / 49 = 16,34      S3  28 coef   91,53 / 28 = 3,27
+#   S2  49 coef  784,20 / 49 = 16,00      S4  21 coef  123,28 / 21 = 5,87
+#
+# La maquette est PAR SEMESTRE : S3 porte huit matières — dont un second cours
+# de mathématiques et un second de physique — là où S4 n'en porte que six, avec
+# d'autres coefficients. La caler sur le niveau perdrait cette distinction.
+#
+# `TP` reflète la colonne « Tpcolle » du relevé : elle n'est imprimée que pour
+# les matières qui en comportent.
+#
+# (code, intitulé, coef, volume horaire indicatif, TP/colle ?)
 MAQUETTE = {
-    'MPSI': [
-        ('MATH',  'Mathématiques',            8, 180, False),
-        ('PHYS',  'Physique',                 6, 150, True),
-        ('SI',    "Sciences de l'ingénieur",  3,  75, True),
-        ('INFO',  'Informatique',             3,  60, True),
-        ('CHIM',  'Chimie',                   2,  45, True),
-        ('FRAN',  'Français — Philosophie',   2,  45, False),
-        ('ANGL',  'Anglais',                  2,  45, False),
-        ('EPS',   'Éducation physique',       1,  30, False),
+    'S1': [
+        ('MATH',  'Mathématiques',            14, 90, True),
+        ('PHYS',  'Physique — Chimie',        12, 98, True),
+        ('SI',    "Sciences de l'ingénierie",  5, 38, True),
+        ('INFO',  'Informatique',              5, 30, True),
+        ('ANGL',  'Anglais',                   3, 23, False),
+        ('FRAN',  'Français',                 10, 23, False),
     ],
-    'MP': [
-        ('MATH',  'Mathématiques',            9, 190, False),
-        ('PHYS',  'Physique',                 6, 150, True),
-        ('SI',    "Sciences de l'ingénieur",  3,  75, True),
-        ('INFO',  'Informatique',             3,  60, True),
-        ('CHIM',  'Chimie',                   2,  45, True),
-        ('FRAN',  'Français — Philosophie',   2,  45, False),
-        ('ANGL',  'Anglais',                  2,  45, False),
-        ('EPS',   'Éducation physique',       1,  30, False),
+    'S2': [
+        ('MATH',  'Mathématiques',            14, 90, False),
+        ('PHYS',  'Physique — Chimie',        12, 98, True),
+        ('SI',    "Sciences de l'ingénierie",  5, 38, False),
+        ('INFO',  'Informatique',              5, 30, True),
+        ('ANGL',  'Anglais',                   3, 23, False),
+        ('FRAN',  'Français',                 10, 23, False),
+    ],
+    'S3': [
+        ('MATH',  'Mathématiques',             4, 60, True),
+        ('PHYS',  'Physique — Chimie',         5, 60, True),
+        ('SI',    "Sciences de l'ingénierie",  2, 38, True),
+        ('INFO',  'Informatique',              2, 30, True),
+        ('ANGL',  'Anglais',                   2, 23, True),
+        ('FRAN',  'Français',                  4, 23, True),
+        ('PHYS2', 'Physique',                  4, 45, True),
+        ('MATH2', 'Mathématiques 2',           5, 60, True),
+    ],
+    'S4': [
+        ('MATH',  'Mathématiques',             4, 60, False),
+        ('PHYS',  'Physique — Chimie',         4, 60, True),
+        ('SI',    "Sciences de l'ingénierie",  3, 38, False),
+        ('INFO',  'Informatique',              3, 30, False),
+        ('ANGL',  'Anglais',                   3, 23, False),
+        ('FRAN',  'Français',                  4, 23, False),
     ],
 }
+NIVEAU_DU_SEMESTRE = {'S1': 'MPSI', 'S2': 'MPSI', 'S3': 'MP', 'S4': 'MP'}
 
-SEMESTRES_PAR_NIVEAU = {'MPSI': ['S1', 'S2'], 'MP': ['S3', 'S4']}
 
 
 class Command(BaseCommand):
@@ -215,22 +240,23 @@ class Command(BaseCommand):
 
     def _matieres(self, institution):
         cree = 0
-        for niveau, lignes in MAQUETTE.items():
-            for code_semestre in SEMESTRES_PAR_NIVEAU[niveau]:
-                for ordre, (code, intitule, coef, volume, has_tp) in enumerate(lignes, start=1):
-                    defauts = PCT_DEFAUT_AVEC_TP if has_tp else PCT_DEFAUT_SANS_TP
-                    _, nouveau = Matiere.objects.get_or_create(
-                        institution=institution, code=code, code_semestre=code_semestre,
-                        defaults={
-                            'intitule':       intitule,
-                            'coefficient':    Decimal(coef),
-                            'volume_horaire': volume // 2,   # volume annuel réparti sur 2 semestres
-                            'has_tp':         has_tp,
-                            'ordre':          ordre,
-                            **defauts,
-                        },
-                    )
-                    cree += int(nouveau)
+        for code_semestre, lignes in MAQUETTE.items():
+            for ordre, (code, intitule, coef, volume, has_tp) in enumerate(lignes, start=1):
+                defauts = PCT_DEFAUT_AVEC_TP if has_tp else PCT_DEFAUT_SANS_TP
+                _, nouveau = Matiere.objects.get_or_create(
+                    institution=institution, code=code, code_semestre=code_semestre,
+                    defaults={
+                        'intitule':    intitule,
+                        'coefficient': Decimal(coef),
+                        # `volume_horaire` est une propriété : le volume se
+                        # pose sur la composante cours, à ajuster ensuite.
+                        'volume_cm':   volume,
+                        'has_tp':      has_tp,
+                        'ordre':       ordre,
+                        **defauts,
+                    },
+                )
+                cree += int(nouveau)
         self._dire(f'Maquette : {cree} matière(s) ajoutée(s).')
 
     def _classes(self, institution, annee):
