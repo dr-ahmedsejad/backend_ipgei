@@ -160,12 +160,13 @@ def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
     contexte.update({
         'titre':    'RELEVÉ DE NOTES — SEMESTRE',
         'semestre': semestre,
-        'lignes':   [_ligne_note(n) for n in donnees['notes']],
+        'lignes':   [_ligne_note(n, donnees['stats_classe']) for n in donnees['notes']],
         'moyenne':  donnees['moyenne'],
         'total_coefficients': donnees['total_coefficients'],
         'seuil':    donnees['seuil'],
         'valide':   donnees['valide'],
         'absences': donnees['absences'],
+        'rang_general': donnees['rang_general'],
         # Libellés attendus par le gabarit repris du socle.
         'semestre_label':    f'SEMESTRE {semestre.code[1:]}',
         'semestre_label_ar': SEMESTRE_AR.get(semestre.code, semestre.code),
@@ -199,10 +200,16 @@ def _contexte_releve_annuel(doc, inscription, base_url) -> dict:
     return contexte
 
 
-def _ligne_note(note) -> dict:
+def _ligne_note(note, stats_classe: dict | None = None) -> dict:
     """Aplati une ligne de note pour le template (pas de logique dans le HTML)."""
     coef = note.coefficient if note.coefficient is not None else note.matiere.coefficient
+    stats = (stats_classe or {}).get(note.matiere_id, {})
     return {
+        # Repères de classe : la moyenne de la matière et le rang qu'y tient
+        # l'étudiant. Une note isolée ne dit pas si 12 est un bon résultat.
+        'moyenne_classe': stats.get('moyenne_classe'),
+        'rang_matiere':   stats.get('rang'),
+        'effectif_classe': stats.get('effectif'),
         'code':           note.matiere.code,
         'intitule':       note.matiere.intitule,
         'coefficient':    coef,

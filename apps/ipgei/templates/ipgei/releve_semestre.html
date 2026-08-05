@@ -195,9 +195,10 @@ Les écarts tiennent au cursus, pas au goût :
   <tr><td class="sec-notes">
     <table class="notes">
       <colgroup>
-        <col style="width: 13%;"> <col style="width: 33%;"> <col style="width: 8%;">
-        <col style="width: 8%;">  <col style="width: 8%;">  <col style="width: 9%;">
-        <col style="width: 9%;">  <col style="width: 12%;">
+        <col style="width: 10%;"> <col style="width: 24%;"> <col style="width: 7%;">
+        <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 7%;">
+        <col style="width: 8%;">  <col style="width: 10%;"> <col style="width: 10%;">
+        <col style="width: 10%;">
       </colgroup>
       <thead>
         <tr class="th-top">
@@ -205,7 +206,7 @@ Les écarts tiennent au cursus, pas au goût :
           <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">المادة</span><br>Matière</th>
           <th colspan="4"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">{{ semestre_label_ar }}</span><br>{{ semestre_label }}</th>
           <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">المعامل</span><br>Coef.</th>
-          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">الدرجة</span><br>Note retenue</th>
+          <th colspan="3"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">النتيجة</span><br>Résultat</th>
         </tr>
         <tr class="th-sub">
           <th colspan="2"></th>
@@ -213,7 +214,10 @@ Les écarts tiennent au cursus, pas au goût :
           <th>TP</th>
           <th>EX</th>
           <th>RAT</th>
-          <th colspan="2"></th>
+          <th></th>
+          <th>ME</th>
+          <th>MC</th>
+          <th>Rang</th>
         </tr>
       </thead>
       <tbody>
@@ -227,12 +231,15 @@ Les écarts tiennent au cursus, pas au goût :
           <td>{{ ligne.rattrapage|floatformat:2|default:"—" }}</td>
           <td>{{ ligne.coefficient|floatformat:"-2" }}</td>
           <td class="retenue">{{ ligne.note_retenue|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.moyenne_classe|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.rang_matiere|default:"—" }}</td>
         </tr>
         {% empty %}
-        <tr class="em-row"><td colspan="8">Aucune matière notée sur ce semestre.</td></tr>
+        <tr class="em-row"><td colspan="10">Aucune matière notée sur ce semestre.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+
   </td></tr>
 
   <tr><td class="sec-resume">
@@ -247,6 +254,21 @@ Les écarts tiennent au cursus, pas au goût :
         <td class="sum-val">{{ moyenne|floatformat:2|default:"—" }} / 20</td>
         <td class="sum-lbl-ar"><span dir="rtl" lang="ar">معدل السداسي</span></td>
       </tr>
+      {% comment %}
+        Le rang figure dès qu'il est calculable. Le masquer sur une classe d'un
+        seul noté le faisait disparaître sans explication d'un relevé où toutes
+        les autres lignes du bloc étaient là — on le croyait oublié.
+      {% endcomment %}
+      {% if rang_general.rang %}
+      <tr>
+        <td class="sum-lbl-fr">Rang général</td>
+        <td class="sum-val">
+          {{ rang_general.rang }}{% if rang_general.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ rang_general.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب العام</span></td>
+      </tr>
+      {% endif %}
       {% if absences.total %}
       <tr>
         <td class="sum-lbl-fr">Absences</td>
@@ -256,6 +278,7 @@ Les écarts tiennent au cursus, pas au goût :
       {% endif %}
     </table>
   </td></tr>
+
 
   {% comment %}
   Pas de bandeau « Semestre validé », à la différence du relevé du socle : en
@@ -275,6 +298,29 @@ Les écarts tiennent au cursus, pas au goût :
       Chef service de la Scolarité
       <div style="height:28px;"></div>
     </div>
+  </td></tr>
+
+  <!-- Légende sous la signature, à gauche, un sigle par ligne. Sur une seule
+     ligne les trois définitions se lisaient comme une phrase ; placée avant
+     la signature, elle s'interposait entre le résultat et qui l'atteste. -->
+  <tr><td style="padding-top:6px;">
+    <table style="border:none;border-collapse:collapse;">
+      <tr>
+        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">ME</td>
+        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">moyenne de l&rsquo;étudiant dans la matière</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">معدل الطالب في المادة</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">MC</td>
+        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">moyenne de la classe dans la matière</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">معدل القسم في المادة</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">Rang</td>
+        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">rang de l&rsquo;étudiant dans la classe, dans la matière</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">ترتيب الطالب في القسم في المادة</td>
+      </tr>
+    </table>
   </td></tr>
 
 </tbody>

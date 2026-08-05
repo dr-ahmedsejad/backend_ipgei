@@ -1374,6 +1374,126 @@ def bilan_absences(inscription: InscriptionIPGEI, semestre: SemestreIPGEI = None
 # ═════════════════════════════════════════════════════════════════════════════
 # Relevés (support des documents officiels)
 # ═════════════════════════════════════════════════════════════════════════════
+#: Intitulé développé du cursus, tel qu'il figure en tête des documents de
+#: séance de l'IPGEI. Le code — MPSI, MP — sert en interne ; c'est ce libellé
+#: que lisent le jury et les étudiants.
+LIBELLES_CURSUS = {
+    NIVEAU_MPSI: "Math Physique Sciences de l'Ingénieur",
+    NIVEAU_MP:   'Mathématique Physique',
+}
+
+
+def libelle_cursus(code_niveau: str) -> str:
+    """Intitulé développé du cursus, ou le code lui-même s'il est inconnu."""
+    return LIBELLES_CURSUS.get(code_niveau, code_niveau)
+
+
+def libelle_semestre_ordinal(code_semestre: str) -> str:
+    """
+    « 1er Semestre », « 2e Semestre »… — la forme employée sur les documents.
+
+    Le rang du semestre dans l'année ne suffit pas : S3 est le troisième
+    semestre du cursus et s'écrit ainsi, même s'il ouvre la deuxième année.
+    """
+    try:
+        numero = int(code_semestre[1:])
+    except (TypeError, ValueError):
+        return code_semestre
+    return f'{numero}er Semestre' if numero == 1 else f'{numero}e Semestre'
+
+
+def statistiques_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> dict:
+    """
+    Par matière : moyenne de la CLASSE et rang de l'étudiant dedans.
+
+    Le repère est la classe et non le niveau : un étudiant de MPSI A se situe
+    parmi ses camarades, pas parmi tous les premières années — c'est ce que
+    signale l'en-tête du relevé, qui nomme la classe.
+
+    Une seule requête pour toute la classe, puis un regroupement en mémoire :
+    interroger matière par matière coûtait autant d'allers-retours que de
+    lignes au relevé.
+
+    Rang : les ex æquo partagent le même rang, et le suivant saute d'autant —
+    deux premiers, puis un troisième. Les copies sans note retenue ne sont pas
+    classées ; elles ne comptent pas non plus dans la moyenne de classe, sans
+    quoi une absence de saisie la ferait chuter.
+    """
+    lignes = (
+        Note.objects
+        .filter(semestre=semestre,
+                inscription__classe_id=inscription.classe_id,
+                inscription__actif=True,
+                note_retenue__isnull=False)
+        .values_list('matiere_id', 'inscription_id', 'note_retenue')
+    )
+
+    par_matiere = {}
+    for matiere_id, inscription_id, note in lignes:
+        par_matiere.setdefault(matiere_id, []).append((inscription_id, Decimal(note)))
+
+    stats = {}
+    for matiere_id, notes in par_matiere.items():
+        valeurs = [n for _, n in notes]
+        moyenne = _arrondi(sum(valeurs) / len(valeurs))
+
+        mienne = next((n for i, n in notes if i == inscription.pk), None)
+        rang = None
+        if mienne is not None:
+            # Rang = nombre de notes STRICTEMENT supérieures, plus un.
+            rang = sum(1 for n in valeurs if n > mienne) + 1
+
+        stats[matiere_id] = {
+            'moyenne_classe': moyenne,
+            'rang':           rang,
+            'effectif':       len(valeurs),
+        }
+    return stats
+
+
+def rang_general_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> dict:
+    """
+    Rang de l'étudiant dans sa classe sur la moyenne du SEMESTRE, et effectif
+    classé.
+
+    Le classement se refait ici plutôt que de s'appuyer sur la délibération :
+    un relevé s'imprime en cours d'année, avant tout jury, et devrait alors
+    afficher un rang vide alors que les notes existent.
+
+    La moyenne de chaque camarade est recalculée à partir des mêmes lignes de
+    note, avec les coefficients FIGÉS dessus — ceux qui ont servi au calcul.
+    Reprendre ceux de la matière classerait sur une pondération que personne
+    n'a subie.
+
+    Une seule requête pour toute la classe. Les ex æquo partagent leur rang,
+    comme pour le classement par matière.
+    """
+    lignes = (
+        Note.objects
+        .filter(semestre=semestre,
+                inscription__classe_id=inscription.classe_id,
+                inscription__actif=True,
+                note_retenue__isnull=False)
+        .values_list('inscription_id', 'note_retenue', 'coefficient',
+                     'matiere__coefficient')
+    )
+
+    cumuls = {}
+    for inscription_id, note, coef_fige, coef_matiere in lignes:
+        coef = Decimal(coef_fige if coef_fige is not None else coef_matiere)
+        cumul, poids = cumuls.get(inscription_id, (Decimal('0'), Decimal('0')))
+        cumuls[inscription_id] = (cumul + Decimal(note) * coef, poids + coef)
+
+    moyennes = {i: c / p for i, (c, p) in cumuls.items() if p > 0}
+    mienne = moyennes.get(inscription.pk)
+
+    return {
+        'rang':     (sum(1 for m in moyennes.values() if m > mienne) + 1)
+                    if mienne is not None else None,
+        'effectif': len(moyennes),
+    }
+
+
 def releve_semestre(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> dict:
     """Données d'un relevé de semestre — consommées par l'API et le PDF."""
     moyenne, poids, notes = moyenne_semestrielle(inscription, semestre)
@@ -1387,6 +1507,8 @@ def releve_semestre(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> d
         'seuil':       params.seuil_validation,
         'valide':      moyenne is not None and moyenne >= params.seuil_validation,
         'absences':    bilan_absences(inscription, semestre),
+        'stats_classe': statistiques_classe(inscription, semestre),
+        'rang_general': rang_general_classe(inscription, semestre),
     }
 
 
