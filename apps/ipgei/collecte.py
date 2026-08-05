@@ -265,6 +265,23 @@ def _chemin_logo(donnees: dict) -> str:
 #: Côté du logo dans le classeur, en pixels — celui du bandeau PDF.
 _COTE_LOGO = 70
 
+#: Un pixel vaut 9 525 EMU (English Metric Units), l'unité des dessins Office.
+_EMU_PAR_PIXEL = 9525
+
+
+def _emu(pixels: float) -> int:
+    return int(round(pixels * _EMU_PAR_PIXEL))
+
+
+def _px_colonne(largeur: float) -> float:
+    """Largeur d'une colonne en pixels — Excel la compte en caractères."""
+    return largeur * 7 + 5
+
+
+def _px_ligne(hauteur: float) -> float:
+    """Hauteur d'une ligne en pixels — Excel la compte en points (96/72)."""
+    return hauteur * 4 / 3
+
 
 def _logo_reduit(donnees: dict) -> bytes:
     """
@@ -305,6 +322,8 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
     Renvoie le numéro de la première ligne libre.
     """
     from openpyxl.drawing.image import Image
+    from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+    from openpyxl.drawing.xdr import XDRPositiveSize2D
     from openpyxl.styles import Alignment, Border, Font, Side
     from openpyxl.utils import get_column_letter
 
@@ -338,10 +357,32 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
     if nb_colonnes > colonne_logo:
         au_moins(colonne_logo + 1, 26)
 
-    # Hauteur de la bande : quatre lignes de texte à 9 pt, et les 70 px du logo
+    # Blocs gauche et droite mis à ÉGALE largeur, faute de quoi la colonne du
+    # logo n'est pas au milieu de la bande : centré dans sa propre colonne, il
+    # tombait tout de même à droite du centre, et cela se voyait. On ne fait
+    # qu'élargir le plus étroit — jamais rétrécir une colonne du tableau.
+    # Comparaison en PIXELS et non en caractères : chaque colonne coûte cinq
+    # pixels de marge, si bien que deux colonnes de cinquante caractères sont
+    # plus larges qu'une seule — l'écart suffisait à décaler le logo.
+    def largeur_px(colonnes) -> float:
+        return sum(_px_colonne(
+            feuille.column_dimensions[get_column_letter(c)].width or 0)
+            for c in colonnes)
+
+    colonnes_fr = list(range(1, colonne_logo))
+    colonnes_ar = list(range(colonne_logo + 1, nb_colonnes + 1))
+    if colonnes_fr and colonnes_ar:
+        ecart = largeur_px(colonnes_fr) - largeur_px(colonnes_ar)
+        if ecart > 0:
+            au_moins(nb_colonnes,
+                     (feuille.column_dimensions[derniere].width or 0) + ecart / 7)
+        elif ecart < 0:
+            au_moins(1, (feuille.column_dimensions['A'].width or 0) - ecart / 7)
+
+    # Hauteur de la bande : trois lignes de texte à 11 pt, et les 70 px du logo
     # (≈ 53 pt). Une cellule fusionnée ne s'ajuste pas d'elle-même.
     for ligne in (1, 2, 3):
-        feuille.row_dimensions[ligne].height = 22
+        feuille.row_dimensions[ligne].height = 24
 
     gauche = '\n'.join(filter(None, [donnees.get('inst_groupe_fr'),
                                      donnees.get('inst_nom_fr')]))
@@ -349,22 +390,38 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
                                      donnees.get('inst_nom_ar')]))
     cellule = feuille['A1']
     cellule.value = gauche
-    cellule.font = Font(bold=True, size=9)
+    # Même rapport que le bandeau du PDF, où l'arabe est un cran plus grand.
+    cellule.font = Font(bold=True, size=11)
     cellule.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
 
     if nb_colonnes > colonne_logo:
         cellule = feuille.cell(1, colonne_logo + 1)
         cellule.value = droite
-        cellule.font = Font(bold=True, size=9)
+        cellule.font = Font(bold=True, size=12)
         cellule.alignment = Alignment(horizontal='right', vertical='center',
                                       wrap_text=True)
-
-    milieu = colonne_logo
 
     if logo:
         image = Image(io.BytesIO(logo))
         image.width = image.height = _COTE_LOGO
-        feuille.add_image(image, f'{get_column_letter(milieu)}1')
+        # Ancré au coin de la cellule, le logo se collait à gauche et en haut
+        # de sa colonne : il paraissait décalé face au bandeau du PDF, où il
+        # est centré. Excel ne centre pas une image, il l'accroche — on calcule
+        # donc le décalage à partir de la largeur et de la hauteur réelles.
+        largeur_case = _px_colonne(
+            feuille.column_dimensions[lettre_logo].width or 13)
+        hauteur_case = sum(_px_ligne(feuille.row_dimensions[ligne].height or 22)
+                           for ligne in (1, 2, 3))
+        image.anchor = OneCellAnchor(
+            _from=AnchorMarker(
+                col=colonne_logo - 1,
+                colOff=_emu(max(0, (largeur_case - _COTE_LOGO) / 2)),
+                row=0,
+                rowOff=_emu(max(0, (hauteur_case - _COTE_LOGO) / 2)),
+            ),
+            ext=XDRPositiveSize2D(_emu(_COTE_LOGO), _emu(_COTE_LOGO)),
+        )
+        feuille.add_image(image)
 
     # Le filet du PDF, rendu par une bordure basse sur toute la largeur.
     filet = Side(border_style='thin', color='000000')
@@ -390,7 +447,10 @@ def generer_excel(semestre, classe, matieres: list, type_note: str,
     donnees = contexte(semestre, classe, matieres, type_note, anonymat)
 
     VERT = '006633'
-    trait = Side(border_style='thin', color='CCCCCC')
+    # Gris franc et non presque blanc : la feuille se remplit au stylo, les
+    # lignes doivent se voir à l'impression comme à l'écran. C'est le ton du
+    # tableau du PDF.
+    trait = Side(border_style='thin', color='999999')
     bordure = Border(left=trait, right=trait, top=trait, bottom=trait)
     centre = Alignment(horizontal='center', vertical='center')
 
