@@ -1,0 +1,155 @@
+{% comment %}
+Fiche de collecte de notes — feuille que l'enseignant emporte en salle.
+
+Reprend la mise en page de la fiche SIGA (`fiche_collecte_notes.html`) : même
+bandeau d'institution, même bloc d'identification, même tableau à deux colonnes
+vides, même bloc de signature. Un enseignant qui a connu les deux systèmes
+retrouve sa feuille.
+
+Une fiche par matière, chacune sur sa page : l'enseignant n'emporte que la
+sienne, et deux matières sur une feuille l'obligeraient à trier.
+{% endcomment %}
+<style>
+  @page { size: A4 portrait; }
+  body { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 11px; color: #000; margin: 0; }
+
+  .fiche { page-break-after: always; }
+  .fiche:last-child { page-break-after: auto; }
+
+  .titre { text-align: center; font-size: 14px; font-weight: bold; margin: 10px 0 4px; }
+  .sous-titre { text-align: center; font-size: 10px; color: #555; margin-bottom: 14px; }
+
+  .infos { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .infos td { padding: 4px 6px; border: none; vertical-align: middle; }
+  .infos .lbl { font-weight: bold; width: 150px; white-space: nowrap; }
+
+  hr.fin { border: none; border-top: 1px solid #bbb; margin: 8px 0; }
+
+  .etu { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  .etu th {
+    background: #ececec; border: 1px solid #999; padding: 6px 8px;
+    text-align: center; font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+  }
+  /* Hauteur imposée : c'est une feuille qu'on remplit au stylo, une ligne
+     serrée ne laisse pas la place d'écrire un 12,5. */
+  .etu td { border: 1px solid #bbb; padding: 5px 8px; vertical-align: middle; height: 26px; }
+  .etu tbody tr:nth-child(even) { background: #fafafa; }
+
+  .c-mat  { width: 110px; text-align: center; }
+  .c-note { width: 80px;  text-align: center; }
+  .c-obs  { width: 130px; }
+  .code { font-family: 'Courier New', monospace; font-weight: bold; letter-spacing: .5px; }
+
+  .vide td { text-align: center; color: #888; padding: 20px; }
+
+  .signature { margin-top: 22px; width: 42%; margin-left: auto; }
+  .signature p { font-size: 10px; color: #555; margin: 0 0 26px; font-weight: bold; }
+  .signature .trait { border-bottom: 1px solid #888; }
+  .signature .date { font-size: 10px; color: #555; margin-top: 6px; }
+
+  .note-bas { font-size: 9.5px; color: #666; margin-top: 10px; font-style: italic; }
+</style>
+
+{% for fiche in fiches %}
+<div class="fiche">
+
+  {% include '_institution_header.html' %}
+
+  <div class="titre">Fiche de collecte — {{ type_note_label }}</div>
+  <div class="sous-titre">
+    Année universitaire {{ annee_universitaire }}
+    {% if anonymat %}&nbsp;·&nbsp; copies anonymes{% endif %}
+  </div>
+
+  <table class="infos">
+    <tr>
+      <td class="lbl">Classe :</td><td>{{ classe_label }}</td>
+    </tr>
+    {% comment %}
+    L'intitulé seul : « ANGL » est un code de gestion, il ne dit rien à
+    l'enseignant qui reçoit la feuille et alourdit une ligne déjà lisible.
+    {% endcomment %}
+    <tr>
+      <td class="lbl">Matière :</td>
+      <td>{{ fiche.matiere.intitule }}</td>
+    </tr>
+    {% comment %}
+    Le code seul : « S1 (1er Semestre) » redit deux fois la même chose.
+    {% endcomment %}
+    <tr>
+      <td class="lbl">Semestre :</td>
+      <td>{{ semestre.code }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Effectif :</td>
+      <td>{{ fiche.effectif }} étudiant{{ fiche.effectif|pluralize }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Date d'édition :</td><td>{{ date_edition }}</td>
+    </tr>
+  </table>
+
+  <hr class="fin">
+
+  <table class="etu">
+    <thead>
+      <tr>
+        {% if anonymat %}
+        <th class="c-mat">N° anonymat</th>
+        {% else %}
+        <th class="c-mat">Matricule</th>
+        <th>Nom et prénom</th>
+        {% endif %}
+        <th class="c-note">Note /20</th>
+        <th class="c-obs">Observations</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in fiche.lignes %}
+      <tr>
+        {% if anonymat %}
+        <td class="c-mat"><span class="code">{{ ligne.anonymat }}</span></td>
+        {% else %}
+        <td class="c-mat"><span class="code">{{ ligne.matricule }}</span></td>
+        <td>{{ ligne.nom }}</td>
+        {% endif %}
+        <td class="c-note">&nbsp;</td>
+        <td class="c-obs">&nbsp;</td>
+      </tr>
+      {% empty %}
+      <tr class="vide">
+        <td colspan="{% if anonymat %}3{% else %}4{% endif %}">
+          {% if rattrapage %}
+          Aucun étudiant à rattraper dans cette matière.
+          {% else %}
+          Aucun étudiant inscrit dans cette classe.
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if rattrapage and fiche.seuil %}
+  {% comment %}
+  Dire pourquoi la liste est courte : sans cette mention, une feuille de six
+  noms pour une classe de trente passe pour une erreur d'édition.
+  {% endcomment %}
+  <p class="note-bas">
+    Liste restreinte aux étudiants dont la moyenne de la matière est inférieure
+    à {{ fiche.seuil }} / 20.
+  </p>
+  {% endif %}
+
+  <div class="signature">
+    <p>Signature de l&rsquo;enseignant</p>
+    <div class="trait"></div>
+    <div class="date">Date : _____ / _____ / _______</div>
+  </div>
+
+</div>
+{% empty %}
+<p style="text-align:center;padding:40px;color:#888">
+  Aucune matière ne correspond aux critères demandés.
+</p>
+{% endfor %}

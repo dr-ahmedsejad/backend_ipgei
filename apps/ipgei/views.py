@@ -1216,9 +1216,89 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
 
     def get_permissions(self):
         # La feuille de notes d'une matière appartient d'abord à qui l'enseigne.
-        if self.action in ('grille', 'saisie_collective', 'saisie_anonyme', 'mes_feuilles'):
+        if self.action in ('grille', 'saisie_collective', 'saisie_anonyme',
+                           'mes_feuilles', 'fiche_collecte'):
             return [EnseignantDeLaMatiereOuRBAC()]
         return super().get_permissions()
+
+    @action(detail=False, methods=['get'], url_path='fiche-collecte')
+    def fiche_collecte(self, request):
+        """
+        Fiche de collecte : la feuille que l'enseignant emporte en salle.
+
+        Liste des étudiants dans l'ORDRE de la grille de saisie, colonnes de
+        note et d'observations vides, bloc de signature. C'est le pendant papier
+        de la saisie : l'enseignant remplit, signe, la scolarité reporte.
+
+        `matiere` omise, la fiche est éditée pour toutes les matières du
+        semestre — un jeu complet pour la classe. Un enseignant, lui, doit la
+        nommer : le contrôle d'accès se fait matière par matière, et sans elle
+        il obtiendrait les feuilles de ses collègues.
+
+        La CAMPAGNE n'est pas demandée : elle se déduit de l'épreuve. Une fiche
+        de rattrapage relève de la seconde session, les autres de la normale —
+        faire choisir les deux revenait à faire ressaisir la même chose, et
+        laissait produire un DS de rattrapage qui n'existe pas.
+        """
+        from django.http import HttpResponse
+
+        from . import collecte as collecte_notes
+
+        semestre_id = request.query_params.get('semestre')
+        classe_id   = request.query_params.get('classe')
+        if not (semestre_id and classe_id):
+            raise ValidationError('Paramètres requis : semestre, classe.')
+
+        semestre = SemestreIPGEI.objects.filter(pk=semestre_id).first()
+        if semestre is None:
+            raise ValidationError({'semestre': 'Semestre introuvable.'})
+        classe = Classe.objects.filter(pk=classe_id).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe introuvable.'})
+
+        type_note = (request.query_params.get('type_note') or 'EXAM').upper()
+        anonymat  = request.query_params.get('anonymat') in ('1', 'true', 'on')
+        # `sortie` et non `format` : DRF réserve `format` à la négociation de
+        # contenu et répond 404 pour un suffixe qu'aucun renderer ne connaît.
+        excel     = (request.query_params.get('sortie') or 'pdf').lower() == 'excel'
+
+        matiere_id = request.query_params.get('matiere')
+        if matiere_id:
+            matiere = Matiere.objects.filter(pk=matiere_id).first()
+            if matiere is None:
+                raise ValidationError({'matiere': 'Matière introuvable.'})
+            if matiere.code_semestre != semestre.code:
+                raise ValidationError(
+                    {'matiere': f'{matiere.code} relève du semestre '
+                                f'{matiere.code_semestre}, pas de '
+                                f'{semestre.code}.'})
+            matieres = [matiere]
+        else:
+            matieres = collecte_notes.matieres_de(classe, semestre, type_note)
+            if not matieres:
+                raise ValidationError(
+                    'Aucune matière du semestre ne correspond : vérifiez la '
+                    'maquette du niveau de cette classe.')
+
+        libelle = _nom_fichier(f'{classe.nom}_{semestre.code}_{type_note}')
+        if excel:
+            contenu = self._executer(
+                collecte_notes.generer_excel, semestre, classe, matieres,
+                type_note, anonymat)
+            reponse = HttpResponse(
+                contenu,
+                content_type='application/vnd.openxmlformats-officedocument.'
+                             'spreadsheetml.sheet')
+            reponse['Content-Disposition'] = \
+                f'attachment; filename="collecte_{libelle}.xlsx"'
+        else:
+            contenu = self._executer(
+                collecte_notes.generer_pdf, semestre, classe, matieres,
+                type_note, anonymat)
+            reponse = HttpResponse(contenu, content_type='application/pdf')
+            reponse['Content-Disposition'] = \
+                f'attachment; filename="collecte_{libelle}.pdf"'
+        return reponse
 
     @action(detail=False, methods=['get'], url_path='mes-feuilles')
     def mes_feuilles(self, request):
