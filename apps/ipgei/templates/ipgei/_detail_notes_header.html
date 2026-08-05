@@ -11,6 +11,11 @@ quel semestre il s'agit.
 <meta charset="UTF-8">
 <style>
   body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 0; }
+  /* L'en-tête partagé est dimensionné pour un corps de document ; répété en
+     tête de chaque page, il doit tenir dans la marge réservée. */
+  .institution { font-size: 8pt; }
+  .institution img { width: 46px !important; height: 46px !important; }
+  .institution td { font-size: 9pt !important; padding: 0 !important; }
   table { width: 100%; border-collapse: collapse; }
   td {
     border: none; padding: 0 0 3px; font-size: 8.5pt; font-weight: 600;
@@ -20,6 +25,14 @@ quel semestre il s'agit.
 </style>
 </head>
 <body>
+{% comment %}
+En-tête partagé — nom de l'institution, groupe et logo viennent de la base,
+comme sur le suivi et les relevés. Il était écrit en dur dans le corps du
+document : il aurait fallu rééditer le gabarit à chaque changement de raison
+sociale, et rien n'aurait signalé l'écart avec le reste des pièces.
+{% endcomment %}
+<div class="institution">{% include '_institution_header.html' %}</div>
+
 <table>
   <tr>
     <td>{{ libelle_cursus }} ({{ classe_libelle }})</td>

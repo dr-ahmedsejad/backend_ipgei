@@ -59,24 +59,12 @@ page 1 et les trois autres page 2, sans son en-tête.
   }
 </style>
 
+{% comment %}
+L'identité de l'institution est portée par le bandeau RÉPÉTÉ en tête de chaque
+page, qui inclut l'en-tête partagé : la redire ici la ferait paraître deux fois
+sur la première page. Ne reste que la date d'édition.
+{% endcomment %}
 <table class="entete">
-  <tr>
-    <td class="entete-fr">
-      République Islamique de Mauritanie<br>
-      Honneur – Fraternité – Justice<br><br>
-      Groupe Polytechnique<br>
-      Institut Préparatoire aux Grandes<br>Écoles d&rsquo;Ingénieurs
-    </td>
-    <td class="entete-logo">
-      {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
-    </td>
-    <td class="entete-ar" dir="rtl" lang="ar">
-      الجمهورية الإسلامية الموريتانية<br>
-      شرف – إخاء – عدالة<br><br>
-      مجمع بوليتكنيك<br>
-      المعهد التحضيري للمدارس العليا للمهندسين
-    </td>
-  </tr>
   <tr><td colspan="3" class="date-edition">{{ date_edition }}</td></tr>
 </table>
 

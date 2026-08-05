@@ -15,6 +15,7 @@ from datetime import date
 
 from apps.documents.services import _get_logo_b64
 from core.pdf_renderer import render_pdf_bytes
+from core.pdf_utils import get_institution_context
 
 from . import services
 from .models import AnonymatIPGEI, Deliberation, Note, SessionEvaluationIPGEI
@@ -28,8 +29,10 @@ TEMPLATE = 'ipgei/detail_notes.html'
 OPTIONS_PDF = {
     'page-size':     'A4',
     'orientation':   'Portrait',
-    # Marges hautes et basses réservées au bandeau et au pied répétés.
-    'margin-top':    '16mm',
+    # Marges hautes et basses réservées au bandeau et au pied répétés. Le
+    # bandeau porte désormais l'en-tête partagé, logo compris : 16 mm le
+    # faisaient chevaucher la première fiche.
+    'margin-top':    '30mm',
     'margin-bottom': '14mm',
     'margin-left':   '10mm',
     'margin-right':  '10mm',
@@ -191,7 +194,10 @@ def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
             'detail':     detail,
         })
 
-    return {
+    # L'en-tête partagé lit `inst_nom_fr`, `inst_logo_url`… : sans ce contexte
+    # il se rendrait vide, sans la moindre erreur.
+    donnees = get_institution_context()
+    donnees.update({
         'deliberation':      deliberation,
         'institution':       deliberation.institution,
         'logo_b64':          _get_logo_b64(deliberation.institution),
@@ -206,7 +212,8 @@ def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
         'tri':               tri,
         'tri_libelle':       LIBELLES_TRI.get(tri, tri),
         'date_edition':      date.today().strftime('%d/%m/%Y'),
-    }
+    })
+    return donnees
 
 
 def _classes_libelle(lignes) -> str:
