@@ -1,0 +1,170 @@
+{% comment %}
+Détail des notes d'une délibération de semestre.
+
+Document de séance, repris de celui que l'IPGEI éditait jusqu'ici : un bloc par
+élève, classés par moyenne décroissante, avec photo, anonymat, et le détail
+matière par matière où la moyenne de la classe fait face à celle de l'élève.
+
+`page-break-inside: avoid` sur chaque bloc : l'édition précédente coupait un
+élève en deux d'une page à l'autre — on lisait ses trois premières matières
+page 1 et les trois autres page 2, sans son en-tête.
+{% endcomment %}
+<style>
+  @page { size: A4 portrait; }
+  body {
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 8.5pt; color: #1a1a1a; margin: 0;
+  }
+  table { border-collapse: collapse; width: 100%; }
+
+  /* ── En-tête institutionnel ─────────────────────────────────────────── */
+  .entete td { border: none; vertical-align: top; padding: 0; }
+  .entete-fr { font-size: 9pt; line-height: 1.35; font-weight: 600; }
+  .entete-ar { font-size: 9pt; line-height: 1.5; font-weight: 600; text-align: right; }
+  .entete-logo { width: 26mm; text-align: center; }
+  .entete-logo img { width: 22mm; }
+  .date-edition { text-align: right; font-size: 8pt; color: #444; padding-top: 2px; }
+
+  .titre-doc {
+    text-align: center; font-size: 15pt; font-weight: 700;
+    margin: 8px 0 6px;
+  }
+
+  /* ── Bloc élève ─────────────────────────────────────────────────────── */
+  .bloc {
+    border: 1px solid #333; margin-bottom: 7px; padding: 4px 5px;
+    page-break-inside: avoid;
+  }
+  .bloc-tete td { border: none; padding: 0 0 1px; font-size: 8.5pt; }
+  .bloc-photo { width: 20mm; text-align: right; vertical-align: top; }
+  .bloc-photo img {
+    width: 18mm; height: 22mm; object-fit: cover; border: 1px solid #999;
+  }
+  .etiq { color: #333; }
+  .val  { font-weight: 700; }
+
+  /* ── Tableau des matières ───────────────────────────────────────────── */
+  .notes { margin-top: 3px; }
+  .notes th, .notes td {
+    border: 1px solid #555; padding: 2px 3px; font-size: 8pt; text-align: center;
+  }
+  .notes th { background: #f0f0f0; font-weight: 700; }
+  .notes td.matiere { text-align: left; }
+  .notes td.coef    { text-align: right; width: 8%; }
+  .notes td.me      { font-weight: 700; }
+
+  .projet {
+    border: 1px solid #b45309; background: #fffbeb; color: #92400e;
+    padding: 4px 8px; margin-bottom: 6px; font-size: 8.5pt; font-weight: 700;
+  }
+</style>
+
+<table class="entete">
+  <tr>
+    <td class="entete-fr">
+      République Islamique de Mauritanie<br>
+      Honneur – Fraternité – Justice<br><br>
+      Groupe Polytechnique<br>
+      Institut Préparatoire aux Grandes<br>Écoles d&rsquo;Ingénieurs
+    </td>
+    <td class="entete-logo">
+      {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
+    </td>
+    <td class="entete-ar" dir="rtl" lang="ar">
+      الجمهورية الإسلامية الموريتانية<br>
+      شرف – إخاء – عدالة<br><br>
+      مجمع بوليتكنيك<br>
+      المعهد التحضيري للمدارس العليا للمهندسين
+    </td>
+  </tr>
+  <tr><td colspan="3" class="date-edition">{{ date_edition }}</td></tr>
+</table>
+
+{% if est_projet %}
+  {% comment %}
+    Un document de séance non arrêté qui circulerait sans marque serait pris
+    pour le résultat définitif — même règle que le PV.
+  {% endcomment %}
+  <div class="projet">PROJET — délibération non validée</div>
+{% endif %}
+
+<div class="titre-doc">Détail des Notes</div>
+
+
+{% for bloc in blocs %}
+<div class="bloc">
+  <table class="bloc-tete">
+    <tr>
+      <td style="width:52%;">
+        <span class="etiq">Matricule :</span> <span class="val">{{ bloc.matricule }}</span>
+      </td>
+      <td style="width:28%;">
+        {% if bloc.anonymat %}
+          <span class="etiq">Anonymat</span> <span class="val">{{ bloc.anonymat }}</span>
+        {% endif %}
+      </td>
+      <td class="bloc-photo" rowspan="4">
+        {% if bloc.photo_b64 %}<img src="{{ bloc.photo_b64 }}" alt="">{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <span class="etiq">Nom et Prénom :</span> <span class="val">{{ bloc.nom }}</span>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <span class="etiq">Moyenne Générale :</span>
+        <span class="val">{{ bloc.moyenne|floatformat:2|default:"—" }}</span>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <span class="etiq">Rang Général :</span>
+        <span class="val">{{ bloc.rang|default:"—" }}</span>
+      </td>
+      <td>
+        <span class="etiq">MC :</span>
+        <span class="val">{{ moyenne_promotion|floatformat:2|default:"—" }}</span>
+        {% if bloc.groupe %}
+          &nbsp;&nbsp;<span class="etiq">Groupe :</span>
+          <span class="val">{{ bloc.groupe }}</span>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="notes">
+    <thead>
+      <tr>
+        <th style="width:8%;">Coef</th>
+        <th style="width:30%;">Matière</th>
+        <th style="width:11%;">DS</th>
+        <th style="width:13%;">TP/COLLE</th>
+        <th style="width:12%;">EXAMEN</th>
+        <th style="width:10%;">M.E</th>
+        <th style="width:8%;">MC</th>
+        <th style="width:14%;">RANG/MATIÈRE</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for l in bloc.detail %}
+      <tr>
+        <td class="coef">{{ l.coefficient|floatformat:"-2" }}</td>
+        <td class="matiere">{{ l.intitule }}</td>
+        <td>{{ l.ds|floatformat:2|default:"—" }}</td>
+        <td>{{ l.tp|floatformat:2|default:"—" }}</td>
+        <td>{{ l.examen|floatformat:2|default:"—" }}</td>
+        <td class="me">{{ l.me|floatformat:2|default:"—" }}</td>
+        <td>{{ l.mc|floatformat:2|default:"—" }}</td>
+        <td>{{ l.rang|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8">Aucune note saisie pour cet étudiant.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% empty %}
+<p>Aucun étudiant dans cette délibération.</p>
+{% endfor %}

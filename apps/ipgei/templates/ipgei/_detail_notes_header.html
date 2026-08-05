@@ -1,0 +1,33 @@
+{% comment %}
+Bandeau répété en tête de chaque page du détail des notes.
+
+Le document se lit page par page en séance, souvent réparti entre plusieurs
+membres du jury : sans ce rappel, la page 7 ne dit ni de quelle classe ni de
+quel semestre il s'agit.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td {
+    border: none; padding: 0 0 3px; font-size: 8.5pt; font-weight: 600;
+    color: #1a1a1a;
+  }
+  .filet { border-bottom: 1px solid #999; height: 0; padding: 0; }
+</style>
+</head>
+<body>
+<table>
+  <tr>
+    <td>{{ libelle_cursus }} ({{ classe_libelle }})</td>
+    <td style="text-align:center;">{{ effectif }} Étudiant{{ effectif|pluralize }}</td>
+    <td style="text-align:right;">{{ semestre_libelle }}</td>
+  </tr>
+  <tr><td colspan="3" class="filet"></td></tr>
+</table>
+
+</body>
+</html>

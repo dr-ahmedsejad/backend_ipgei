@@ -33,7 +33,7 @@ from rest_framework.permissions import BasePermission
 
 from core.permissions import RBACPermission
 
-from . import edt_pdf, pv, services
+from . import detail_notes, edt_pdf, pv, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
     AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
@@ -1529,6 +1529,24 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         contenu = pv.generer_pdf(deliberation, base_url=request.build_absolute_uri('/'))
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = f'attachment; filename="{_nom_pv(deliberation)}.pdf"'
+        return reponse
+
+    @action(detail=True, methods=['get'], url_path='detail-notes')
+    def detail_notes_pdf(self, request, pk=None):
+        """
+        Document de séance : un bloc par élève, détail matière par matière.
+
+        Complète le PV sans le remplacer — le PV donne une ligne et une décision
+        par élève, celui-ci donne les notes qui la fondent, avec la moyenne de
+        la classe en regard.
+        """
+        from django.http import HttpResponse
+
+        deliberation = self.get_object()
+        contenu = self._executer(detail_notes.generer_pdf, deliberation)
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = (
+            f'attachment; filename="detail-notes-{_nom_pv(deliberation)}.pdf"')
         return reponse
 
     @action(detail=True, methods=['get'], url_path='pv-excel')

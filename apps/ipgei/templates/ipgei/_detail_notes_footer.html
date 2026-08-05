@@ -1,0 +1,50 @@
+{% comment %}
+Pied répété du détail des notes : espace de signature du jury, et pagination.
+
+La pagination n'est pas un ornement sur ce document : il circule en séance,
+feuille par feuille, et « 3/13 » est ce qui permet de vérifier qu'aucune page
+ne manque avant de signer. Les compteurs sont injectés par wkhtmltopdf, qui
+remplace les jetons `page` et `topage` dans le script ci-dessous.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 0; }
+  .zone {
+    border-top: 1px solid #999; padding-top: 3px;
+    font-size: 8pt; color: #444;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  td { border: none; padding: 0; }
+</style>
+</head>
+<body>
+<div class="zone">
+  <table>
+    <tr>
+      <td>Visa des membres du jury</td>
+      <td style="text-align:right;">
+        <span id="page"></span>/<span id="topage"></span>
+      </td>
+    </tr>
+  </table>
+</div>
+<script>
+  // wkhtmltopdf passe les numéros en paramètres d'URL du pied.
+  (function () {
+    var params = {};
+    document.location.search.substring(1).split('&').forEach(function (couple) {
+      var morceaux = couple.split('=', 2);
+      params[morceaux[0]] = morceaux.length === 1 ? '' : decodeURIComponent(morceaux[1]);
+    });
+    ['page', 'topage'].forEach(function (cle) {
+      var cible = document.getElementById(cle);
+      if (cible) { cible.textContent = params[cle] || ''; }
+    });
+  }());
+</script>
+
+</body>
+</html>
