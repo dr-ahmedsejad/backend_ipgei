@@ -57,6 +57,7 @@ from .serializers import (
     NoteSerializer,
     ParametresIPGEISerializer, PermutationEtudiantSerializer,
     PermutationProfSerializer, SaisieAbsencesSerializer,
+    SaisieAnonymeLotSerializer,
     SaisieAnonymeSerializer,
     SaisieCollectiveSerializer, SeanceReelleSerializer, SeanceTypeSerializer,
     SemaineIPGEISerializer, SemestreIPGEISerializer,
@@ -1185,7 +1186,7 @@ class EnseignantDeLaMatiereOuRBAC(BasePermission):
         if semestre is None:
             return False
 
-        if view.action == 'saisie_anonyme':
+        if view.action in ('saisie_anonyme', 'grille_anonyme', 'saisie_anonyme_lot'):
             # Sous anonymat la classe n'est pas transmise : c'est le principe.
             return services.enseigne_matiere(
                 prof, matiere_id=source.get('matiere'), semestre=semestre)
@@ -1217,6 +1218,7 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
     def get_permissions(self):
         # La feuille de notes d'une matière appartient d'abord à qui l'enseigne.
         if self.action in ('grille', 'saisie_collective', 'saisie_anonyme',
+                           'grille_anonyme', 'saisie_anonyme_lot',
                            'mes_feuilles', 'fiche_collecte'):
             return [EnseignantDeLaMatiereOuRBAC()]
         return super().get_permissions()
@@ -1475,6 +1477,7 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         entree = SaisieAnonymeSerializer(data=request.data)
         entree.is_valid(raise_exception=True)
         donnees = entree.validated_data
+        self._type_anonyme(donnees)
 
         matiere  = Matiere.objects.filter(pk=donnees['matiere']).first()
         semestre = SemestreIPGEI.objects.filter(pk=donnees['semestre']).first()
@@ -1513,6 +1516,158 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
             'numero':          donnees['numero'],
             'valeur':          donnees['valeur'],
         })
+
+    # ── Saisie sous anonymat, par paquet de copies ──────────────────────────
+    def _type_anonyme(self, source):
+        """
+        Épreuve corrigée sous anonymat — l'examen, et lui seul.
+
+        Un devoir surveillé se corrige au fil du semestre, souvent en classe et
+        devant les élèves : l'anonymat n'y a pas de prise, et le proposer
+        donnerait une garantie que rien ne tient. C'est l'examen, ramassé sur
+        copie à en-tête détachable, qui s'anonymise.
+        """
+        type_evaluation = source.get('type_evaluation') or Evaluation.TYPE_EXAM
+        if type_evaluation != Evaluation.TYPE_EXAM:
+            raise ValidationError(
+                {'type_evaluation': "Seul l'examen se corrige sous anonymat : "
+                                    'un devoir surveillé se saisit sur la grille '
+                                    'nominative.'})
+        return type_evaluation
+
+    def _contexte_anonyme(self, source):
+        """
+        Matière, semestre et campagne d'une saisie anonyme, contrôlés ensemble.
+
+        La campagne est TOUJOURS la normale : un numéro de rattrapage ne
+        désigne pas le même candidat qu'un numéro de session normale.
+        """
+        matiere  = Matiere.objects.filter(pk=source.get('matiere')).first()
+        semestre = SemestreIPGEI.objects.filter(pk=source.get('semestre')).first()
+        if matiere is None or semestre is None:
+            raise ValidationError('Matière ou semestre introuvable.')
+        if matiere.code_semestre != semestre.code:
+            raise ValidationError(
+                f'La matière {matiere.code} relève du semestre {matiere.code_semestre}.'
+            )
+        session = services.session_saisie(
+            semestre, SessionEvaluationIPGEI.TYPE_NORMALE)
+        return matiere, semestre, session
+
+    @action(detail=False, methods=['get'], url_path='grille-anonyme')
+    def grille_anonyme(self, request):
+        """
+        Feuille de correction : un numéro par ligne, la note en regard.
+
+        Ne renvoie NI nom NI matricule — pas même l'identifiant de
+        l'inscription : le correcteur qui lit cette grille ne doit pas pouvoir
+        remonter à l'étudiant, sans quoi l'anonymat ne protège plus rien. C'est
+        aussi pourquoi les lignes sont classées par numéro et non par étudiant.
+
+        Les notes déjà saisies sont renvoyées : on reprend une correction
+        interrompue sans risquer de la ressaisir par-dessus.
+        """
+        matiere, semestre, session = self._contexte_anonyme(request.query_params)
+        type_evaluation = self._type_anonyme(request.query_params)
+        try:
+            numero = int(request.query_params.get('numero') or 1)
+        except (TypeError, ValueError):
+            raise ValidationError({'numero': "Numéro d'épreuve invalide."})
+
+        anonymats = list(
+            AnonymatIPGEI.objects.filter(session=session)
+            .values_list('inscription_id', 'numero')
+        )
+        # Une passe pour les notes, une pour les évaluations : une requête par
+        # copie coûterait autant d'allers-retours qu'il y a d'étudiants.
+        notes = dict(
+            Note.objects
+            .filter(matiere=matiere, semestre=semestre,
+                    inscription_id__in=[i for i, _ in anonymats])
+            .values_list('inscription_id', 'id')
+        )
+        verrouillees = set(
+            Note.objects.filter(pk__in=notes.values(), verrouillee=True)
+            .values_list('id', flat=True)
+        )
+        valeurs = dict(
+            Evaluation.objects
+            .filter(note_id__in=notes.values(),
+                    type_evaluation=type_evaluation, numero=numero)
+            .values_list('note_id', 'valeur')
+        )
+
+        lignes = []
+        for inscription_id, numero_anonymat in anonymats:
+            note_id = notes.get(inscription_id)
+            lignes.append({
+                'numero_anonymat': numero_anonymat,
+                'valeur':          valeurs.get(note_id),
+                'verrouillee':     note_id in verrouillees,
+            })
+        lignes.sort(key=lambda ligne: ligne['numero_anonymat'])
+
+        return Response({
+            'matiere':         MatiereSerializer(matiere).data,
+            'semestre':        SemestreIPGEISerializer(semestre).data,
+            'type_evaluation': type_evaluation,
+            'numero':          numero,
+            'saisissable':     session.est_saisissable,
+            'lignes':          lignes,
+        })
+
+    @action(detail=False, methods=['post'], url_path='saisie-anonyme-lot')
+    def saisie_anonyme_lot(self, request):
+        """
+        Enregistre toute une feuille de correction en une requête.
+
+        Copie par copie, corriger une classe demandait autant d'allers-retours
+        que d'étudiants, et une coupure au milieu laissait la moitié des notes
+        entrées sans qu'on sache laquelle. Ici tout passe dans une transaction :
+        la feuille est enregistrée entière, ou pas du tout.
+
+        Une valeur nulle EFFACE l'épreuve — c'est ainsi qu'on retire une note
+        saisie par erreur, comme sur la grille nominative.
+        """
+        entree = SaisieAnonymeLotSerializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+        donnees = entree.validated_data
+
+        matiere, semestre, session = self._contexte_anonyme(donnees)
+        self._type_anonyme(donnees)
+        self._executer(services.controler_saisie, semestre, rattrapage=False)
+
+        utilisateur = _utilisateur(request)
+        traitees = 0
+        with transaction.atomic():
+            for ligne in donnees['lignes']:
+                inscription = self._executer(
+                    services.resoudre_anonymat, session, ligne['numero_anonymat'])
+                note, _ = Note.objects.get_or_create(
+                    inscription=inscription, matiere=matiere, semestre=semestre)
+                if note.verrouillee:
+                    raise ValidationError(
+                        f"Copie n° {ligne['numero_anonymat']} : note verrouillée "
+                        'par une délibération validée.')
+
+                if ligne.get('valeur') is None:
+                    Evaluation.objects.filter(
+                        note=note, type_evaluation=donnees['type_evaluation'],
+                        numero=donnees['numero']).delete()
+                else:
+                    Evaluation.objects.update_or_create(
+                        note=note, type_evaluation=donnees['type_evaluation'],
+                        numero=donnees['numero'],
+                        defaults={'valeur': ligne['valeur'],
+                                  'saisie_par': utilisateur},
+                    )
+                self._executer(services.calculer_note, note,
+                               plafond_rattrapage=services.plafond_effectif(semestre))
+                traitees += 1
+
+        # Aucun nom, aucun matricule en retour : la réponse ne doit pas
+        # renseigner celui qui corrige.
+        return Response({'copies_traitees': traitees})
 
     @action(detail=False, methods=['post'], url_path='recalculer-lot')
     def recalculer_lot(self, request):

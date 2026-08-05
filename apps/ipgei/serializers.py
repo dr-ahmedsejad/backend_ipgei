@@ -744,6 +744,38 @@ class SaisieAnonymeSerializer(serializers.Serializer):
     )
 
 
+class LigneAnonymeSerializer(serializers.Serializer):
+    """Une copie de la feuille de correction. `valeur` nulle efface l'épreuve."""
+    numero_anonymat = serializers.IntegerField(min_value=1)
+    valeur          = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal('0'),
+        max_value=Decimal('20'), allow_null=True, required=False,
+    )
+
+
+class SaisieAnonymeLotSerializer(serializers.Serializer):
+    """
+    Une feuille de correction entière : une épreuve d'une matière, toutes ses
+    copies. Le type et le numéro d'épreuve sont communs à la feuille — un
+    correcteur note un paquet de copies de la même épreuve, jamais un mélange.
+    """
+    semestre        = serializers.IntegerField()
+    matiere         = serializers.IntegerField()
+    type_evaluation = serializers.ChoiceField(choices=Evaluation.TYPE_CHOICES)
+    numero          = serializers.IntegerField(min_value=1, max_value=20)
+    lignes          = LigneAnonymeSerializer(many=True, allow_empty=False)
+
+    def validate_lignes(self, valeur):
+        numeros = [ligne['numero_anonymat'] for ligne in valeur]
+        if len(numeros) != len(set(numeros)):
+            raise serializers.ValidationError(
+                'Un même numéro de copie figure deux fois : la feuille serait '
+                'enregistrée deux fois de suite, et la seconde note écraserait '
+                'la première sans que rien ne le signale.'
+            )
+        return valeur
+
+
 class SessionEvaluationIPGEISerializer(serializers.ModelSerializer):
     """
     Fenêtre de saisie. Les états ne se modifient pas au PATCH mais par les
