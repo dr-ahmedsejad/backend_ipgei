@@ -9,7 +9,8 @@ from .models import (
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
     MembreJuryIPGEI, NiveauIPGEI,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
-    SeanceType, SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI, SousGroupeTP,
+    SeanceType, SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI,
+    SignataireIPGEI, SousGroupeTP,
     NIVEAU_CHOICES, PCT_DEFAUT_AVEC_TP, PCT_DEFAUT_SANS_TP,
 )
 
@@ -697,6 +698,38 @@ class NiveauIPGEISerializer(serializers.ModelSerializer):
                 {'redoublement_autorise': 'Le redoublement est interdit en première année.'}
             )
         return attrs
+
+
+class SignataireIPGEISerializer(serializers.ModelSerializer):
+    """
+    Personne habilitée à signer relevés et attestations.
+
+    Aucune image : la signature reste manuscrite. Ce qui est paramétré ici, ce
+    sont le nom et la fonction IMPRIMÉS au-dessus du trait, pour qu'en l'absence
+    du chef de scolarité un autre puisse signer sous son propre nom.
+    """
+    institution = _champ_institution()
+    libelle     = serializers.SerializerMethodField()
+
+    class Meta:
+        model  = SignataireIPGEI
+        fields = ['id', 'institution', 'nom_fr', 'nom_ar', 'titre_fr', 'titre_ar',
+                  'par_defaut', 'actif', 'ordre', 'libelle']
+
+    def get_libelle(self, obj) -> str:
+        return f'{obj.nom_fr} — {obj.titre_fr}'
+
+    def validate_nom_fr(self, valeur):
+        valeur = (valeur or '').strip()
+        if not valeur:
+            raise serializers.ValidationError('Le nom est requis.')
+        return valeur
+
+    def validate_titre_fr(self, valeur):
+        valeur = (valeur or '').strip()
+        if not valeur:
+            raise serializers.ValidationError('La fonction est requise.')
+        return valeur
 
 
 class SaisieAnonymeSerializer(serializers.Serializer):

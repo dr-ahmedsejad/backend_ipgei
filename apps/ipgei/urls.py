@@ -9,7 +9,8 @@ from .views import (
     ParametresIPGEIViewSet,
     PermutationEtudiantViewSet, PermutationProfViewSet, SeanceReelleViewSet,
     SeanceTypeViewSet, SemaineIPGEIViewSet, SemestreIPGEIViewSet,
-    SessionEvaluationIPGEIViewSet, SousGroupeTPViewSet, TableauBordIPGEIViewSet,
+    SessionEvaluationIPGEIViewSet, SignataireIPGEIViewSet, SousGroupeTPViewSet,
+    TableauBordIPGEIViewSet,
 )
 
 router = DefaultRouter()
@@ -41,6 +42,7 @@ router.register(r'permutations-prof',     PermutationProfViewSet,     basename='
 router.register(r'permutations-etudiant', PermutationEtudiantViewSet, basename='ipgei-permutation-etudiant')
 # Documents officiels
 router.register(r'documents',       DocumentIPGEIViewSet,        basename='ipgei-document')
+router.register(r'signataires',     SignataireIPGEIViewSet,      basename='ipgei-signataire')
 # Tableau de bord
 router.register(r'tableau-bord',    TableauBordIPGEIViewSet,     basename='ipgei-tableau-bord')
 

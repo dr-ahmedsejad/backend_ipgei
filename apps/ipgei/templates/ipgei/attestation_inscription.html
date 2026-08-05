@@ -207,9 +207,14 @@ Deux écarts, et deux seulement :
           {% endif %}
         </td>
         <td style="width: 50%; vertical-align: bottom; text-align: right; font-size: 10.5pt; line-height: 1.4; padding-right: 4mm;">
+          {% comment %}
+          Signataire recopié sur le document à l'émission : réimprimer une
+          attestation ne doit pas lui donner rétroactivement un autre auteur.
+          Le blanc de 25 px reste : la signature est manuscrite.
+          {% endcomment %}
           Pour le Directeur et P.O.<br>
-          Le Chef service de la Scolarité<br>
-          <span style="font-weight: 700; display: block; margin-top: 25px; color:#006633;"></span>
+          {{ signataire.titre }}<br>
+          <span style="font-weight: 700; display: block; margin-top: 25px; color:#006633;">{{ signataire.nom }}</span>
         </td>
       </tr>
     </table>

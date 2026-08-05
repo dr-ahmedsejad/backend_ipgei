@@ -228,6 +228,58 @@ class ParametresIPGEI(models.Model):
         return self.seuil_validation
 
 
+class SignataireIPGEI(models.Model):
+    """
+    Personne habilitée à signer les documents officiels.
+
+    Le bloc de signature était écrit en dur dans les gabarits — « Chef service
+    de la Scolarité », un titre sans nom. Quand son titulaire est absent, le
+    document sortait quand même à son intitulé, et un autre signait à la main
+    sous une fonction qui n'était pas la sienne.
+
+    Aucune image ici : la signature reste manuscrite. Ce qui varie, c'est le
+    NOM et le TITRE imprimés au-dessus du trait.
+    """
+    institution = models.ForeignKey(
+        'parametres.Institution', on_delete=models.CASCADE,
+        related_name='signataires_ipgei',
+    )
+    nom_fr   = models.CharField(max_length=150, help_text='Nom imprimé sur le document.')
+    nom_ar   = models.CharField(max_length=150, blank=True, default='')
+    titre_fr = models.CharField(
+        max_length=150,
+        help_text='Fonction : Chef service de la Scolarité, Directeur des études…',
+    )
+    titre_ar = models.CharField(max_length=150, blank=True, default='')
+    #: Proposé d'emblée à la génération. Un seul par institution — le poser
+    #: sur un autre le retire au précédent, sans quoi le choix par défaut
+    #: dépendrait de l'ordre de lecture.
+    par_defaut = models.BooleanField(default=False)
+    actif      = models.BooleanField(default=True)
+    ordre      = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = 'ipgei_signataire'
+        ordering = ['ordre', 'nom_fr']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['institution', 'nom_fr', 'titre_fr'],
+                name='uniq_ipgei_signataire',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.nom_fr} — {self.titre_fr}'
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.par_defaut:
+            (SignataireIPGEI.objects
+             .filter(institution_id=self.institution_id, par_defaut=True)
+             .exclude(pk=self.pk)
+             .update(par_defaut=False))
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. Calendrier : semestres + semaines flexibles
 # ═════════════════════════════════════════════════════════════════════════════

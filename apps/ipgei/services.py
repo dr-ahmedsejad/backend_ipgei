@@ -1509,6 +1509,49 @@ def affecter_a_une_classe(inscription: InscriptionIPGEI, classe: 'Classe',
     return inscription
 
 
+#: Signataire de repli, quand le référentiel est vide. C'est ce que les
+#: gabarits imprimaient en dur avant qu'il existe.
+SIGNATAIRE_DEFAUT = {'nom': '', 'titre': 'Chef service de la Scolarité'}
+
+
+def signataire_du_document(institution, signataire_id=None) -> dict:
+    """
+    Qui signe : le signataire demandé, sinon celui par défaut.
+
+    Renvoie un DICTIONNAIRE et non l'objet : ce qui part sur le document doit
+    être recopié, pas pointé. Une pièce déjà remise ne peut pas changer de
+    signataire parce que l'intéressé a quitté l'établissement.
+
+    Le titre seul suffit si le nom manque — c'est ce que faisaient les gabarits
+    jusqu'ici, et cela reste valable pour un établissement qui signe par
+    fonction plutôt que par personne.
+    """
+    from .models import SignataireIPGEI
+
+    from django.core.exceptions import ValidationError
+
+    requete = SignataireIPGEI.objects.filter(institution=institution, actif=True)
+    if signataire_id:
+        signataire = requete.filter(pk=signataire_id).first()
+        # Un identifiant inconnu — venu d'une autre institution, ou désactivé
+        # depuis l'ouverture de l'écran — ne retombe PAS silencieusement sur le
+        # signataire par défaut : l'agent croirait avoir édité au nom de celui
+        # qu'il a choisi, et le document porterait un autre nom.
+        if signataire is None:
+            raise ValidationError(
+                {'signataire': 'Signataire inconnu ou désactivé pour cette institution.'})
+    else:
+        signataire = requete.filter(par_defaut=True).first() or requete.first()
+    if signataire is None:
+        return dict(SIGNATAIRE_DEFAUT)
+    return {
+        'nom':      signataire.nom_fr,
+        'titre':    signataire.titre_fr,
+        'nom_ar':   signataire.nom_ar,
+        'titre_ar': signataire.titre_ar,
+    }
+
+
 def libelle_annee_du_niveau(code_niveau: str, institution=None) -> str:
     """« 1re année », « 2e année » — déduit du RANG du niveau.
 

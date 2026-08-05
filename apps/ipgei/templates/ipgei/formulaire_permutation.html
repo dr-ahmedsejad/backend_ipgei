@@ -1,0 +1,170 @@
+{% comment %}
+Formulaire papier de demande de permutation ou de transfert de classe.
+
+Il se télécharge vierge, se remplit à la main et se signe : c'est cette feuille
+signée qui fait la demande, pas une saisie dans l'application. La direction des
+études l'applique ensuite d'un geste, sans redemander par écran l'accord que
+les signatures portent déjà.
+
+Les deux cas figurent sur la MÊME feuille : une permutation engage deux élèves
+et deux signatures, un transfert un seul. Deux formulaires distincts auraient
+obligé à choisir avant d'avoir rempli quoi que ce soit.
+{% endcomment %}
+<style>
+  @page { size: A4 portrait; }
+  body {
+    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-size: 10pt; color: #1a1a1a; margin: 0;
+  }
+  table { border-collapse: collapse; width: 100%; }
+
+
+  .titre {
+    text-align: center; font-size: 15pt; font-weight: 700;
+    /* Deux interlignes sous le filet de l'en-tête : collé, le titre se lisait
+       comme une suite du nom de l'institution. */
+    margin: 12mm 0 4px; text-transform: uppercase;
+  }
+  .sous-titre { text-align: center; font-size: 9.5pt; color: #444; margin-bottom: 4mm; }
+
+  .section {
+    font-size: 9.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: #006633;
+    border-bottom: 1px solid #006633; padding-bottom: 3px;
+    /* Une page A4 pour huit lignes : l'espace ne manque pas, et des blocs
+       serrés se lisent comme un seul. */
+    margin: 9mm 0 5mm;
+  }
+
+  /* Lignes à remplir : un filet, pas une case — on écrit dessus au stylo.
+     Le sélecteur porte `td` pour l'emporter sur `.champ td { border: none }` :
+     à spécificité égale c'est la règle la plus spécifique qui gagne, et le
+     filet ne se dessinait pas. */
+  .champ td { border: none; padding: 3mm 0 1mm; font-size: 10pt; }
+  .lab   { width: 42mm; color: #333; vertical-align: bottom; }
+  .champ td.trait {
+    /* Une cellule vide s'effondre : la ligne à remplir doit avoir une hauteur
+       et de quoi écrire dessus. 9 mm est la hauteur d'une écriture manuscrite. */
+    border-bottom: 1px dotted #444;
+    height: 10mm;
+    vertical-align: bottom;
+  }
+  /* Zone de texte libre : plusieurs lignes réglées, comme un cahier. */
+  .champ td.regle {
+    border-bottom: 1px dotted #444;
+    height: 11mm;
+  }
+
+  .cases td { border: none; padding: 2mm 0; font-size: 10pt; }
+  .case {
+    display: inline-block; width: 4.5mm; height: 4.5mm;
+    border: 1.2px solid #333; margin-right: 5px; vertical-align: -1px;
+  }
+
+  .signature { width: 50%; text-align: center; font-size: 9.5pt; }
+  .signature .cadre {
+    border: 1px solid #999; height: 28mm; margin-top: 3mm;
+  }
+</style>
+
+{% comment %}
+  En-tête du socle, partagé avec le suivi : nom de l'institution, groupe et
+  logo viennent de la base. Le mien était écrit en dur — il aurait fallu
+  rééditer le gabarit à chaque changement de raison sociale, et rien n'aurait
+  signalé l'écart avec le reste des documents.
+{% endcomment %}
+{% include '_institution_header.html' %}
+
+<div class="titre">Demande de changement de classe</div>
+<div class="sous-titre">
+  Année universitaire {{ annee_universitaire }} &nbsp;·&nbsp;
+  à remettre à la direction des études, complété et signé
+</div>
+
+<div class="section">1 &nbsp;·&nbsp; Nature de la demande</div>
+<table class="cases">
+  <tr>
+    <td style="width:50%;">
+      <span class="case"></span> <strong>Permutation</strong> — échange avec un autre étudiant
+    </td>
+    <td>
+      <span class="case"></span> <strong>Transfert</strong> — sans contrepartie
+    </td>
+  </tr>
+</table>
+
+<div class="section">2 &nbsp;·&nbsp; Étudiant demandeur</div>
+<table class="champ">
+  <tr>
+    <td class="lab">Nom et prénom</td><td class="trait">&nbsp;</td>
+  </tr>
+  <tr>
+    <td class="lab">Matricule</td><td class="trait" style="width:35%;">&nbsp;</td>
+    <td class="lab" style="padding-left:8mm;">Classe actuelle</td><td class="trait">&nbsp;</td>
+  </tr>
+  <tr>
+    <td class="lab">Classe demandée</td><td class="trait">&nbsp;</td>
+  </tr>
+</table>
+
+<div class="section">
+  3 &nbsp;·&nbsp; Étudiant échangé
+  <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#555;">
+    — à remplir uniquement pour une permutation
+  </span>
+</div>
+<table class="champ">
+  <tr>
+    <td class="lab">Nom et prénom</td><td class="trait">&nbsp;</td>
+  </tr>
+  <tr>
+    <td class="lab">Matricule</td><td class="trait" style="width:35%;">&nbsp;</td>
+    <td class="lab" style="padding-left:8mm;">Classe actuelle</td><td class="trait">&nbsp;</td>
+  </tr>
+</table>
+
+<div class="section">4 &nbsp;·&nbsp; Motif</div>
+<table class="champ">
+  <tr><td class="regle">&nbsp;</td></tr>
+  <tr><td class="regle">&nbsp;</td></tr>
+  <tr><td class="regle">&nbsp;</td></tr>
+</table>
+
+<div class="section">5 &nbsp;·&nbsp; Signatures</div>
+<table>
+  <tr>
+    <td class="signature" style="border:none;padding-right:5mm;">
+      Étudiant demandeur
+      <div class="cadre"></div>
+      <div style="font-size:8pt;color:#666;margin-top:2px;">Date : ____ / ____ / 20____</div>
+    </td>
+    <td class="signature" style="border:none;padding-left:5mm;">
+      Étudiant échangé <span style="color:#666;">(permutation)</span>
+      <div class="cadre"></div>
+      <div style="font-size:8pt;color:#666;margin-top:2px;">Date : ____ / ____ / 20____</div>
+    </td>
+  </tr>
+</table>
+
+<table style="margin-top:14mm;">
+  <tr>
+    <td class="signature" style="border:none;width:100%;">
+      Décision de la direction des études
+      <table style="margin:4px auto 0;width:auto;">
+        <tr>
+          <td style="border:none;padding:0 8mm 0 0;font-size:9.5pt;">
+            <span class="case"></span> Accordée
+          </td>
+          <td style="border:none;padding:0;font-size:9.5pt;">
+            <span class="case"></span> Refusée
+          </td>
+        </tr>
+      </table>
+      <div class="cadre" style="width:60mm;margin:4px auto 0;"></div>
+      <div style="font-size:8pt;color:#666;margin-top:2px;">
+        Nom, signature et cachet &nbsp;·&nbsp; Date : ____ / ____ / 20____
+      </div>
+    </td>
+  </tr>
+</table>
+

@@ -302,10 +302,17 @@ Les écarts tiennent au cursus, pas au goût :
       <span class="sig-date-fr">Fait à {{ ville }}, le {{ date_edition }}</span>
       <span class="sig-date-ar" dir="rtl" lang="ar">{{ ville_ar }}، بتاريخ {{ date_edition }}</span>
     </div>
+    {% comment %}
+    Signataire recopié sur le document à l'émission, et non lu sur le
+    paramétrage courant : un duplicata doit reproduire la pièce délivrée.
+    La signature reste manuscrite — d'où l'espace réservé sous le titre, et le
+    nom imprimé dessous quand il est renseigné.
+    {% endcomment %}
     <div style="text-align:center; font-weight:700; font-size:11pt; margin-top:5px; line-height:1.15;">
       Pour le Directeur et P.O.<br>
-      Chef service de la Scolarité
+      {{ signataire.titre }}
       <div style="height:28px;"></div>
+      {% if signataire.nom %}<div style="font-weight:700;">{{ signataire.nom }}</div>{% endif %}
     </div>
   </td></tr>
 

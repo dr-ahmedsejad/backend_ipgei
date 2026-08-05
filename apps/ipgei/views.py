@@ -42,7 +42,8 @@ from .models import (
     Note,
     ParametresIPGEI,
     PermutationEtudiant, PermutationProf, SeanceReelle, SeanceType, SemaineIPGEI,
-    SemestreIPGEI, SessionEvaluationIPGEI, SousGroupeTP, StatutWorkflow,
+    SemestreIPGEI, SessionEvaluationIPGEI, SignataireIPGEI, SousGroupeTP,
+    StatutWorkflow,
 )
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
@@ -59,7 +60,7 @@ from .serializers import (
     SaisieAnonymeSerializer,
     SaisieCollectiveSerializer, SeanceReelleSerializer, SeanceTypeSerializer,
     SemaineIPGEISerializer, SemestreIPGEISerializer,
-    SessionEvaluationIPGEISerializer, SousGroupeTPSerializer,
+    SessionEvaluationIPGEISerializer, SignataireIPGEISerializer, SousGroupeTPSerializer,
     VersionArchiveSerializer,
 )
 
@@ -936,6 +937,47 @@ class NiveauIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewSe
         from .socle import niveau_socle
         niveau = serializer.save()
         niveau_socle(niveau.code)
+
+
+class SignataireIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewSet):
+    """
+    Qui signe les documents officiels — relevés, attestations.
+
+    Le bloc de signature était figé dans les gabarits, au titre du chef de
+    service de la scolarité. Quand il est en congé, un autre signe à la main
+    sous une fonction qui n'est pas la sienne. Cette liste permet de désigner le
+    signataire au moment de la génération ; la signature, elle, reste manuscrite.
+    """
+    serializer_class   = SignataireIPGEISerializer
+    permission_classes = [RBACPermission]
+    queryset           = SignataireIPGEI.objects.select_related('institution')
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = ['actif', 'par_defaut']
+    ordering           = ['ordre', 'nom_fr']
+    pagination_class   = NoPagination
+
+    @property
+    def required_module(self):
+        """
+        Lire relève des documents, écrire du paramétrage.
+
+        L'agent qui édite un relevé doit voir la liste pour choisir qui signe —
+        sans quoi le sélecteur serait vide pour lui. Décider QUI a le droit de
+        signer est un autre acte, réservé au paramétrage.
+        """
+        return ('ipgei_documents' if self.action in ('list', 'retrieve')
+                else 'ipgei_parametres')
+
+    def perform_destroy(self, instance):
+        """
+        Un signataire qui a servi se désactive, il ne s'efface pas.
+
+        Les documents déjà émis portent son nom recopié : les supprimer d'ici
+        ne les réécrit pas, mais on garde la trace de qui était habilité.
+        """
+        instance.actif = False
+        instance.par_defaut = False
+        instance.save(update_fields=['actif', 'par_defaut'])
 
 
 class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
@@ -2445,6 +2487,81 @@ class PermutationEtudiantViewSet(_WorkflowPermutationMixin, ModelViewSet):
     ordering            = ['-date_demande']
     pagination_class    = StandardPagination
 
+    @action(detail=False, methods=['get'], url_path='formulaire')
+    def formulaire(self, request):
+        """
+        Formulaire papier de demande, à télécharger, remplir et signer.
+
+        Vierge : c'est l'étudiant qui le complète à la main. Le pré-remplir
+        supposerait de savoir qui demande quoi avant qu'il l'ait demandé.
+        """
+        from datetime import date
+
+        from django.http import HttpResponse
+
+        from core.pdf_renderer import render_pdf_bytes
+        from core.pdf_utils import get_institution_context
+
+        # Même en-tête que le suivi : nom, groupe et logo viennent de la base.
+        contexte = get_institution_context()
+        contexte.update({
+            'annee_universitaire': (request.query_params.get('annee')
+                                    or _annee_session(request) or ''),
+            'date_edition': date.today().strftime('%d/%m/%Y'),
+        })
+        contenu = render_pdf_bytes(
+            'ipgei/formulaire_permutation.html',
+            contexte,
+            {
+                'page-size': 'A4', 'orientation': 'Portrait',
+                'margin-top': '12mm', 'margin-bottom': '12mm',
+                'margin-left': '14mm', 'margin-right': '14mm',
+                'encoding': 'UTF-8', 'enable-local-file-access': None,
+            },
+        )
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = (
+            'attachment; filename="demande-changement-de-classe.pdf"')
+        return reponse
+
+    @action(detail=False, methods=['post'], url_path='appliquer-maintenant')
+    def appliquer_maintenant(self, request):
+        """
+        Enregistre et applique le mouvement en une seule transaction.
+
+        Le circuit demande → accord → validation n'a pas d'objet ici : la
+        demande arrive sur un FORMULAIRE PAPIER rempli et signé, et c'est la
+        direction des études qui tranche. Faire ressaisir dans l'application
+        l'accord de chacun redemanderait par écran ce qui a déjà été signé —
+        et, pour un échange, exigerait deux demandes là où il n'y a qu'une
+        décision.
+
+        Le droit est exigé explicitement : une action personnalisée n'est pas
+        dans `ACTION_MAP` et retomberait sinon sur « voir ».
+        """
+        utilisateur = _utilisateur(request)
+        if not _peut_trancher_seul(utilisateur):
+            raise PermissionDenied(
+                'Le mouvement est prononcé par la direction des études.')
+
+        entree = self.get_serializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            inscription = entree.validated_data['inscription']
+            permutation = entree.save(
+                classe_source=inscription.classe,
+                demande_par=utilisateur, action_directe=True,
+                statut=StatutWorkflow.VALIDEE, valide_par=utilisateur,
+                date_validation=_tz.now(),
+            )
+            self._executer(services.appliquer_permutation_etudiant,
+                           permutation, utilisateur)
+
+        permutation.refresh_from_db()
+        return Response(self.get_serializer(permutation).data,
+                        status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
         # La classe de départ est déduite de l'inscription : la faire saisir
         # ouvrirait la porte à une incohérence entre demande et réalité.
@@ -2526,6 +2643,16 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             raise ValidationError({'deliberation': 'Délibération introuvable.'})
         return deliberation
 
+    def _signataire_id(self, request):
+        """
+        Signataire choisi à la génération, ou None pour celui par défaut.
+
+        Sert aux documents que le chef de scolarité signe : quand il est absent,
+        l'agent désigne à sa place qui signera, sans que le PDF sorte à un nom
+        qui n'est pas celui de la main qui l'a signé.
+        """
+        return request.data.get('signataire') or None
+
     def _reponse_pdf(self, doc, pdf: bytes):
         from django.http import HttpResponse
         reponse = HttpResponse(pdf, content_type='application/pdf')
@@ -2548,6 +2675,7 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         doc, pdf = self._executer(
             docs_ipgei.generer_releve_semestre, inscription, semestre,
             utilisateur=_utilisateur(request), base_url=self._base_url(),
+            signataire_id=self._signataire_id(request),
         )
         return self._reponse_pdf(doc, pdf)
 
@@ -2558,6 +2686,7 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         doc, pdf = self._executer(
             docs_ipgei.generer_releve_annuel, inscription,
             utilisateur=_utilisateur(request), base_url=self._base_url(),
+            signataire_id=self._signataire_id(request),
         )
         return self._reponse_pdf(doc, pdf)
 
@@ -2567,6 +2696,7 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         doc, pdf = self._executer(
             docs_ipgei.generer_attestation_inscription, self._inscription(request),
             utilisateur=_utilisateur(request), base_url=self._base_url(),
+            signataire_id=self._signataire_id(request),
         )
         return self._reponse_pdf(doc, pdf)
 

@@ -93,6 +93,13 @@ class DocumentOfficiel(models.Model):
     # universitaire. NULL = jamais généré → la prochaine sera l'original.
     premiere_generation = models.DateTimeField(null=True, blank=True)
 
+    # Signataire, recopié À L'ÉMISSION et non pointé par clé étrangère : le
+    # document doit garder le nom qu'il PORTE, même si l'intéressé quitte
+    # l'établissement ou change de fonction. Une référence vivante réécrirait
+    # après coup ce qu'une pièce déjà remise affirme.
+    signataire_nom   = models.CharField(max_length=150, blank=True, default='')
+    signataire_titre = models.CharField(max_length=150, blank=True, default='')
+
     class Meta:
         db_table = 'documents_officiel'
         ordering = ['-date_generation']

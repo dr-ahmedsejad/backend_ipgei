@@ -99,17 +99,23 @@ def _numero_serie(institution, type_document: str) -> str:
 
 @transaction.atomic
 def creer_document(inscription: InscriptionIPGEI, type_document: str, *,
-                   semestre: SemestreIPGEI = None, utilisateur=None) -> DocumentOfficiel:
+                   semestre: SemestreIPGEI = None, utilisateur=None,
+                   signataire_id=None) -> DocumentOfficiel:
     """
     Enregistre le document au registre (numéro + token de vérification).
 
     Un document est réémis à chaque demande plutôt que réutilisé : chaque tirage
     a son propre numéro, ce qui permet de tracer qui a reçu quoi et quand.
+
+    Le signataire est RECOPIÉ ici, pas pointé : la pièce garde le nom qu'elle
+    porte, même si l'intéressé change de fonction ou quitte l'établissement.
+    C'est aussi ce qui permet de savoir, des mois plus tard, qui a signé.
     """
     if type_document not in TYPES_IPGEI:
         raise ValidationError(f'Type de document IPGEI inconnu : {type_document}')
 
     institution = inscription.classe.institution
+    signataire  = services.signataire_du_document(institution, signataire_id)
     return DocumentOfficiel.objects.create(
         institution=institution,
         etudiant=inscription.etudiant,
@@ -117,6 +123,8 @@ def creer_document(inscription: InscriptionIPGEI, type_document: str, *,
         numero_serie=_numero_serie(institution, type_document),
         annee_universitaire=inscription.annee_universitaire,
         genere_par=utilisateur if getattr(utilisateur, 'is_authenticated', False) else None,
+        signataire_nom=signataire['nom'],
+        signataire_titre=signataire['titre'],
     )
 
 
@@ -146,6 +154,13 @@ def _contexte_commun(doc: DocumentOfficiel, inscription: InscriptionIPGEI,
         'photo_b64':    _imagefield_b64(getattr(etudiant, 'photo', None)),
         'qr_b64':       _get_qr_base64(str(doc.token_verification), base_url, etudiant=etudiant, doc=doc),
         'verify_url':   f'{base_url}/verifier/{doc.token_verification}' if base_url else '',
+        # Lu sur le document, pas sur le paramétrage courant : rééditer un
+        # duplicata doit redonner la pièce telle qu'elle a été délivrée, avec
+        # le nom de qui l'a signée ce jour-là.
+        'signataire':   {
+            'nom':   doc.signataire_nom,
+            'titre': doc.signataire_titre or services.SIGNATAIRE_DEFAUT['titre'],
+        },
     }
 
 
@@ -338,17 +353,20 @@ def generer_pdf(doc: DocumentOfficiel, contexte: dict) -> bytes:
     return pdf
 
 
-def generer_releve_semestre(inscription, semestre, *, utilisateur=None, base_url=''):
+def generer_releve_semestre(inscription, semestre, *, utilisateur=None, base_url='',
+                            signataire_id=None):
     # `DocumentOfficiel.semestre` pointe sur le `parametres.Semestre` du socle
     # LMD : on le laisse vide, le semestre IPGEI figurant dans le PDF et dans le
     # contexte de rendu.
-    doc = creer_document(inscription, TYPE_RELEVE_SEMESTRE, semestre=semestre, utilisateur=utilisateur)
+    doc = creer_document(inscription, TYPE_RELEVE_SEMESTRE, semestre=semestre,
+                         utilisateur=utilisateur, signataire_id=signataire_id)
     pdf = generer_pdf(doc, _contexte_releve_semestre(doc, inscription, semestre, base_url))
     return doc, pdf
 
 
-def generer_releve_annuel(inscription, *, utilisateur=None, base_url=''):
-    doc = creer_document(inscription, TYPE_RELEVE_ANNUEL, utilisateur=utilisateur)
+def generer_releve_annuel(inscription, *, utilisateur=None, base_url='', signataire_id=None):
+    doc = creer_document(inscription, TYPE_RELEVE_ANNUEL, utilisateur=utilisateur,
+                         signataire_id=signataire_id)
     pdf = generer_pdf(doc, _contexte_releve_annuel(doc, inscription, base_url))
     return doc, pdf
 
@@ -491,7 +509,8 @@ def _contexte_recu(doc, inscription, base_url) -> dict:
     return contexte
 
 
-def generer_attestation_inscription(inscription, *, utilisateur=None, base_url=''):
+def generer_attestation_inscription(inscription, *, utilisateur=None, base_url='',
+                                    signataire_id=None):
     """
     Attestation de scolarité de l'année en cours.
 
@@ -503,7 +522,8 @@ def generer_attestation_inscription(inscription, *, utilisateur=None, base_url='
         raise ValidationError(
             "Cette inscription n'est pas active : aucune attestation ne peut en être tirée."
         )
-    doc = creer_document(inscription, TYPE_ATTESTATION, utilisateur=utilisateur)
+    doc = creer_document(inscription, TYPE_ATTESTATION, utilisateur=utilisateur,
+                         signataire_id=signataire_id)
     pdf = generer_pdf(doc, _contexte_attestation(doc, inscription, base_url))
     return doc, pdf
 

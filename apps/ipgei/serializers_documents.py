@@ -18,6 +18,10 @@ class DocumentIPGEISerializer(serializers.ModelSerializer):
             'etudiant', 'etudiant_nom', 'etudiant_matricule',
             'annee_universitaire', 'est_valide', 'date_generation',
             'premiere_generation', 'genere_par', 'genere_par_nom', 'a_pdf',
+            # Qui signe la pièce, recopié à l'émission : c'est la seule trace
+            # permettant, des mois plus tard, de savoir au nom de qui elle est
+            # partie — le paramétrage, lui, aura changé.
+            'signataire_nom', 'signataire_titre',
         ]
         # Le token de verification et le hash ne sortent jamais de l'API de
         # gestion : le token circule uniquement dans le QR du PDF.
