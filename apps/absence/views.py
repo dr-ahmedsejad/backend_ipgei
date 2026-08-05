@@ -264,6 +264,15 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
         if ins_filtres:
             qs = qs.filter(**ins_filtres).distinct()
 
+        # Statut de l'inscription IPGEI — décision du jury, et non le statut
+        # administratif du référentiel. Filtrer sur ce dernier ne distinguait
+        # pas un admis d'un redoublant : tous deux y sont « actif ».
+        if (v := self.request.query_params.get('statut_ipgei')):
+            qs = qs.filter(
+                inscriptions_ipgei__statut=v,
+                inscriptions_ipgei__actif=True,
+            ).distinct()
+
         return qs
     filter_backends    = [DjangoFilterBackend, SearchFilter]
     filterset_class    = EtudiantFilter

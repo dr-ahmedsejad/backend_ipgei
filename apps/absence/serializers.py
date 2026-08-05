@@ -21,10 +21,48 @@ class EtudiantSerializer(serializers.ModelSerializer):
     # Etudiant.statut n'est jamais basculé à 'diplome' à l'attribution → on le dérive.
     est_diplome     = serializers.SerializerMethodField()
     statut_effectif = serializers.SerializerMethodField()
+    # Rattachement IPGEI. `filiere` et `departement` restent vides sur les
+    # étudiants de prépa — ils n'ont ni l'un ni l'autre — si bien que les
+    # colonnes « Filière » et « Niveau » n'affichaient qu'un tiret. La classe
+    # est le vrai rattachement : MPSI A, MP B.
+    classe_ipgei = serializers.SerializerMethodField()
 
     class Meta:
         model  = Etudiant
         fields = '__all__'
+
+    def get_classe_ipgei(self, obj) -> dict | None:
+        """
+        Classe de l'inscription IPGEI active la plus récente, ou None.
+
+        Import local : `absence` est chargé bien avant `ipgei`, et l'importer
+        en tête créerait un cycle au démarrage.
+        """
+        try:
+            from apps.ipgei.models import InscriptionIPGEI
+        except Exception:
+            return None
+        inscription = (
+            InscriptionIPGEI.objects
+            .filter(etudiant=obj, actif=True)
+            .select_related('classe', 'classe__niveau', 'sous_groupe')
+            .order_by('-annee_universitaire')
+            .first()
+        )
+        if inscription is None:
+            return None
+        return {
+            'classe':              inscription.classe.nom,
+            'niveau':              inscription.classe.niveau_code,
+            'sous_groupe':         inscription.sous_groupe.libelle if inscription.sous_groupe_id else None,
+            'annee_universitaire': inscription.annee_universitaire,
+            # Le statut qui compte en prépa : celui que le jury prononce. Le
+            # `statut` du référentiel reste administratif (actif, transféré…) et
+            # ne dit rien du parcours.
+            'statut':              inscription.statut,
+            'statut_display':      inscription.get_statut_display(),
+            'actif':               inscription.actif,
+        }
 
     def _is_diplome(self, obj):
         """Utilise l'annotation Exists (_est_diplome) posée par EtudiantViewSet →
