@@ -612,6 +612,19 @@ class Classe(Departement):
     def effectif(self) -> int:
         return self.inscriptions.filter(actif=True).count()
 
+    @property
+    def est_conteneur(self) -> bool:
+        """
+        Classe d'attente d'un niveau, sans suffixe : « MPSI » plutôt que
+        « MPSI A ».
+
+        Elle reçoit les inscrits à leur arrivée, avant qu'on sache combien de
+        classes ouvrir et comment les répartir. Elle ne se planifie pas : ni
+        emploi du temps, ni suivi, ni appel — le socle exclut partout les
+        départements marqués `is_container`.
+        """
+        return not (self.groupe or '').strip()
+
     def save(self, *args, **kwargs):
         # Import local : `socle` importe ce module, l'importer en tête créerait
         # un cycle.
@@ -619,7 +632,9 @@ class Classe(Departement):
 
         self.nom          = f'{self.niveau_code} {self.groupe}'.strip()
         self.code         = f'{self.niveau_code}-{self.groupe}'.strip('-')
-        self.is_container = False       # une classe se planifie, ce n'est pas un conteneur
+        # Une classe se planifie ; une classe d'attente, non. Le socle s'appuie
+        # sur ce drapeau pour l'écarter des emplois, du suivi et de l'appel.
+        self.is_container = self.est_conteneur
         if not self.filiere_id:
             self.filiere = filiere_socle(self.institution)
         self.cle_unicite = (
@@ -767,6 +782,24 @@ class InscriptionIPGEI(models.Model):
     def clean(self):
         if self.sous_groupe_id and self.classe_id and self.sous_groupe.classe_id != self.classe_id:
             raise ValidationError({'sous_groupe': "Le sous-groupe n'appartient pas à cette classe."})
+
+    def save(self, *args, **kwargs):
+        """
+        Enregistre l'inscription et fait suivre le département de l'étudiant.
+
+        Le module Absences du socle liste les étudiants d'une séance par
+        `Etudiant.departement` — que l'inscription IPGEI ne renseignait pas.
+        L'appel n'affichait donc PERSONNE, quelle que soit la classe, sans le
+        moindre message : la classe était pleine côté IPGEI et vide côté appel.
+
+        Le rattachement suit ici plutôt que de se saisir à part : deux endroits
+        où dire dans quelle classe est un étudiant finissent par se contredire,
+        et c'est l'inscription qui fait foi.
+        """
+        super().save(*args, **kwargs)
+        if self.actif and self.classe_id and self.etudiant.departement_id != self.classe_id:
+            self.etudiant.departement_id = self.classe_id
+            self.etudiant.save(update_fields=['departement'])
 
 
 class HistoriqueClasse(models.Model):
@@ -1612,17 +1645,42 @@ class PermutationProf(models.Model):
 
 class PermutationEtudiant(models.Model):
     """
-    Changement de classe d'un étudiant. Le rattachement est déplacé, jamais
-    dupliqué : notes et absences pointent sur l'inscription et suivent
-    automatiquement (plan §4.6).
+    Mouvement d'étudiant entre classes, sous deux formes.
+
+    **Échange** — `inscription_b` renseignée : les deux élèves croisent, chacun
+    prenant la classe de l'autre. C'est la forme courante, parce qu'une classe
+    pleine ne peut accueillir qu'en libérant une place ; la traiter comme deux
+    transferts séparés laissait un intervalle où l'une était en surnombre et
+    l'autre incomplète, et rien ne rattachait les deux décisions.
+
+    **Transfert** — `inscription_b` vide : un élève rejoint une classe qui a de
+    la place, sans contrepartie.
+
+    Dans les deux cas le rattachement est DÉPLACÉ, jamais dupliqué : notes,
+    absences et lignes de délibération pointent sur l'inscription, dont
+    l'identité ne change pas. L'historique reste donc intact et suit l'étudiant
+    (plan §4.6).
     """
     inscription    = models.ForeignKey(
         InscriptionIPGEI, on_delete=models.CASCADE, related_name='permutations',
+    )
+    #: Contrepartie de l'échange. Vide pour un transfert simple. Sa classe est
+    #: `classe_cible`, et elle rejoint `classe_source` — l'échange est
+    #: symétrique, aucune colonne de destination ne lui est nécessaire.
+    inscription_b  = models.ForeignKey(
+        InscriptionIPGEI, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='permutations_en_contrepartie',
+        help_text="Étudiant qui prend la classe de l'autre. Vide = transfert simple.",
     )
     classe_source  = models.ForeignKey(Classe, on_delete=models.PROTECT, related_name='permutations_sortantes')
     classe_cible   = models.ForeignKey(Classe, on_delete=models.PROTECT, related_name='permutations_entrantes')
     sous_groupe_cible = models.ForeignKey(
         SousGroupeTP, on_delete=models.SET_NULL, null=True, blank=True, related_name='permutations_entrantes',
+    )
+    #: Sous-groupe d'arrivée de la contrepartie, dans `classe_source`.
+    sous_groupe_cible_b = models.ForeignKey(
+        SousGroupeTP, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='permutations_entrantes_b',
     )
     statut         = models.CharField(
         max_length=10, choices=StatutWorkflow.choices, default=StatutWorkflow.DEMANDEE,
@@ -1653,7 +1711,14 @@ class PermutationEtudiant(models.Model):
         ordering = ['-date_demande']
         indexes  = [models.Index(fields=['statut'])]
 
+    @property
+    def est_echange(self) -> bool:
+        return self.inscription_b_id is not None
+
     def __str__(self):
+        if self.est_echange:
+            return (f'{self.inscription.etudiant} ⇄ {self.inscription_b.etudiant} '
+                    f'({self.classe_source} / {self.classe_cible})')
         return f'{self.inscription.etudiant} : {self.classe_source} → {self.classe_cible}'
 
     def clean(self):
@@ -1662,6 +1727,19 @@ class PermutationEtudiant(models.Model):
                 raise ValidationError('La classe cible doit différer de la classe actuelle.')
             if self.classe_source.niveau != self.classe_cible.niveau:
                 raise ValidationError('Un changement de classe reste au même niveau (MPSI ou MP).')
+
+        if self.inscription_b_id:
+            if self.inscription_b_id == self.inscription_id:
+                raise ValidationError({'inscription_b': 'Un étudiant ne permute pas avec lui-même.'})
+            # La contrepartie doit venir de la classe visée : sans cela
+            # l'« échange » déplacerait deux élèves sans qu'aucune place ne se
+            # libère là où il faut.
+            if self.inscription_b.classe_id != self.classe_cible_id:
+                raise ValidationError({'inscription_b': (
+                    'La contrepartie doit être inscrite dans la classe visée '
+                    f'({self.classe_cible}).')})
+            if not self.inscription_b.actif:
+                raise ValidationError({'inscription_b': "L'inscription de la contrepartie n'est pas active."})
 
 
 # ═════════════════════════════════════════════════════════════════════════════

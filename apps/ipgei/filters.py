@@ -26,7 +26,18 @@ class InscriptionIPGEIFilter(django_filters.FilterSet):
     classe__niveau = django_filters.CharFilter(
         field_name='classe__niveau__niveau', lookup_expr='iexact',
     )
+    #: `?en_attente=1` — les inscrits encore dans la classe d'attente de leur
+    #: niveau. Une classe d'attente n'a pas de suffixe : c'est ce vide qui la
+    #: distingue, et non un drapeau à tenir à jour.
+    en_attente = django_filters.BooleanFilter(method='filtrer_en_attente')
+
+    def filtrer_en_attente(self, queryset, nom, valeur):
+        if valeur is None:
+            return queryset
+        return (queryset.filter(classe__groupe='') if valeur
+                else queryset.exclude(classe__groupe=''))
 
     class Meta:
         model  = InscriptionIPGEI
-        fields = ['classe', 'annee_universitaire', 'statut', 'actif', 'sous_groupe']
+        fields = ['classe', 'annee_universitaire', 'statut', 'actif', 'sous_groupe',
+                  'en_attente']

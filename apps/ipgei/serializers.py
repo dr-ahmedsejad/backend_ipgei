@@ -392,10 +392,15 @@ class ClasseSelectSerializer(serializers.ModelSerializer):
     nom     = serializers.CharField(read_only=True)
     niveau  = ChampNiveauPrepa(read_only=True)
     libelle = serializers.CharField(source='groupe', read_only=True)
+    #: Classe d'attente d'un niveau : elle reçoit les inscrits avant leur
+    #: répartition et ne se planifie pas. Les écrans doivent pouvoir l'écarter
+    #: de leurs listes sans deviner à l'absence de suffixe.
+    est_conteneur = serializers.BooleanField(read_only=True)
 
     class Meta:
         model  = Classe
-        fields = ['id', 'nom', 'niveau', 'libelle', 'annee_universitaire']
+        fields = ['id', 'nom', 'niveau', 'libelle', 'est_conteneur',
+                  'annee_universitaire']
 
 
 # ── Inscriptions ─────────────────────────────────────────────────────────────
@@ -444,11 +449,21 @@ class InscriptionCompleteSerializer(serializers.Serializer):
     """
     etudiant          = serializers.IntegerField(required=False, allow_null=True)
     nouvel_etudiant   = NouvelEtudiantSerializer(required=False)
-    classe            = serializers.IntegerField()
+    #: Classe d'arrivée. Facultative : à la rentrée on ignore encore combien
+    #: de classes ouvrir, et `niveau` suffit — l'inscrit rejoint alors la
+    #: classe d'attente du niveau, d'où on l'affectera ensuite.
+    classe            = serializers.IntegerField(required=False, allow_null=True)
+    niveau            = serializers.CharField(required=False, allow_blank=True)
+    annee_universitaire = serializers.CharField(required=False, allow_blank=True)
     sous_groupe       = serializers.IntegerField(required=False, allow_null=True)
     numero_ordre      = serializers.IntegerField(required=False, allow_null=True)
 
     def validate(self, attrs):
+        if not attrs.get('classe') and not attrs.get('niveau'):
+            raise serializers.ValidationError(
+                'Indiquez une classe, ou un niveau pour inscrire en attente '
+                "d'affectation."
+            )
         if not attrs.get('etudiant') and not attrs.get('nouvel_etudiant'):
             raise serializers.ValidationError(
                 'Indiquez un étudiant existant ou les informations du nouvel étudiant.'
@@ -475,6 +490,9 @@ class HistoriqueClasseSerializer(serializers.ModelSerializer):
 
 
 class InscriptionIPGEISerializer(serializers.ModelSerializer):
+    #: Vrai tant que l'inscrit est dans la classe d'attente de son niveau :
+    #: inscrit, doté de sa maquette et de ses frais, mais sans groupe de cours.
+    en_attente_affectation = serializers.SerializerMethodField()
     etudiant_nom       = serializers.CharField(source='etudiant.nom_display', read_only=True)
     etudiant_matricule = serializers.CharField(source='etudiant.matricule', read_only=True)
     classe_nom         = serializers.CharField(source='classe.nom', read_only=True)
@@ -487,10 +505,14 @@ class InscriptionIPGEISerializer(serializers.ModelSerializer):
         fields = [
             'id', 'etudiant', 'etudiant_nom', 'etudiant_matricule', 'classe', 'classe_nom',
             'sous_groupe', 'sous_groupe_libelle', 'annee_universitaire', 'numero_ordre',
-            'niveau', 'statut', 'statut_display', 'nb_redoublements',
-            'date_inscription', 'actif',
+            'niveau', 'en_attente_affectation', 'statut', 'statut_display',
+            'nb_redoublements', 'date_inscription', 'actif',
             'montant_frais', 'est_payee', 'date_paiement', 'recu_paiement',
         ]
+
+    def get_en_attente_affectation(self, obj) -> bool:
+        """L'inscrit est-il encore dans la classe d'attente de son niveau ?"""
+        return bool(obj.classe_id) and obj.classe.est_conteneur
 
     def validate(self, attrs):
         classe      = attrs.get('classe',      getattr(self.instance, 'classe', None))
@@ -1208,6 +1230,12 @@ class PermutationEtudiantSerializer(serializers.ModelSerializer):
     etudiant_matricule = serializers.CharField(source='inscription.etudiant.matricule', read_only=True)
     classe_source_nom  = serializers.CharField(source='classe_source.nom', read_only=True)
     classe_cible_nom   = serializers.CharField(source='classe_cible.nom', read_only=True)
+    # Contrepartie de l'échange — vide sur un transfert simple.
+    etudiant_b_nom       = serializers.CharField(
+        source='inscription_b.etudiant.nom_display', read_only=True, default='')
+    etudiant_b_matricule = serializers.CharField(
+        source='inscription_b.etudiant.matricule', read_only=True, default='')
+    est_echange        = serializers.BooleanField(read_only=True)
     statut_display     = serializers.CharField(source='get_statut_display', read_only=True)
     demande_par_nom    = serializers.CharField(source='demande_par.name', read_only=True, default='')
 
@@ -1215,8 +1243,9 @@ class PermutationEtudiantSerializer(serializers.ModelSerializer):
         model  = PermutationEtudiant
         fields = [
             'id', 'inscription', 'etudiant_nom', 'etudiant_matricule',
+            'inscription_b', 'etudiant_b_nom', 'etudiant_b_matricule', 'est_echange',
             'classe_source', 'classe_source_nom', 'classe_cible', 'classe_cible_nom',
-            'sous_groupe_cible', 'statut', 'statut_display', 'action_directe',
+            'sous_groupe_cible', 'sous_groupe_cible_b', 'statut', 'statut_display', 'action_directe',
             'motif', 'motif_refus', 'demande_par', 'demande_par_nom', 'accord_par',
             'valide_par', 'date_demande', 'date_accord', 'date_validation', 'date_application',
         ]
@@ -1246,6 +1275,29 @@ class PermutationEtudiantSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'sous_groupe_cible': "Ce sous-groupe n'appartient pas à la classe cible."}
             )
+
+        # ── Échange réciproque ─────────────────────────────────────────────
+        contrepartie = attrs.get('inscription_b', getattr(self.instance, 'inscription_b', None))
+        sg_b = attrs.get('sous_groupe_cible_b', getattr(self.instance, 'sous_groupe_cible_b', None))
+        if contrepartie:
+            if inscription and contrepartie.pk == inscription.pk:
+                raise serializers.ValidationError(
+                    {'inscription_b': 'Un étudiant ne permute pas avec lui-même.'})
+            if not contrepartie.actif:
+                raise serializers.ValidationError(
+                    {'inscription_b': "L'inscription de la contrepartie n'est pas active."})
+            # Sans cette règle, l'« échange » déplacerait deux élèves sans
+            # qu'aucune place ne se libère là où il faut.
+            if cible and contrepartie.classe_id != cible.id:
+                raise serializers.ValidationError({'inscription_b': (
+                    f'La contrepartie doit être inscrite en {cible.nom}.')})
+        if sg_b:
+            if not contrepartie:
+                raise serializers.ValidationError({'sous_groupe_cible_b': (
+                    'Aucune contrepartie : ce sous-groupe est sans objet.')})
+            if inscription and sg_b.classe_id != inscription.classe_id:
+                raise serializers.ValidationError({'sous_groupe_cible_b': (
+                    "Ce sous-groupe n'appartient pas à la classe que rejoint la contrepartie.")})
         return attrs
 
 

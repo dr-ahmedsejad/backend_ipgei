@@ -1281,12 +1281,39 @@ def appliquer_permutation_prof(permutation: PermutationProf, utilisateur=None) -
 
 
 @transaction.atomic
+def _deplacer(inscription: InscriptionIPGEI, classe_cible, sous_groupe_cible,
+              motif: str, utilisateur=None) -> None:
+    """
+    Rattache une inscription à une autre classe, en journalisant le mouvement.
+
+    Rien n'est copié ni recréé : notes, absences et lignes de délibération
+    pointent sur l'INSCRIPTION, dont l'identité ne change pas. L'historique
+    reste donc intact et suit l'étudiant dans sa nouvelle classe.
+    """
+    HistoriqueClasse.objects.create(
+        inscription=inscription,
+        classe_avant=inscription.classe,
+        classe_apres=classe_cible,
+        motif=motif,
+        decide_par=utilisateur if getattr(utilisateur, 'is_authenticated', False) else None,
+    )
+    inscription.classe = classe_cible
+    # Le sous-groupe appartient à l'ancienne classe : on le remplace par celui
+    # choisi dans la cible, ou on le vide pour éviter un rattachement incohérent.
+    inscription.sous_groupe = sous_groupe_cible
+    # `save()` complet et non `update_fields` : c'est lui qui fait suivre le
+    # département de l'étudiant, dont dépend la liste d'appel.
+    inscription.save()
+
+
+@transaction.atomic
 def appliquer_permutation_etudiant(permutation: PermutationEtudiant, utilisateur=None) -> InscriptionIPGEI:
     """
-    Déplace l'inscription vers la classe cible et journalise le mouvement.
+    Applique le mouvement : échange réciproque, ou transfert simple.
 
-    Rien n'est copié : notes, absences et lignes de délibération pointent sur
-    l'inscription, donc l'historique reste intact et suit l'étudiant.
+    Les deux déplacements d'un échange se font dans la MÊME transaction. Traités
+    séparément, un échec sur le second laisserait une classe en surnombre et
+    l'autre incomplète, sans que rien ne relie les deux moitiés.
     """
     if permutation.statut == StatutWorkflow.APPLIQUEE:
         raise ValidationError('Permutation déjà appliquée.')
@@ -1294,21 +1321,20 @@ def appliquer_permutation_etudiant(permutation: PermutationEtudiant, utilisateur
         raise ValidationError('La permutation doit être validée par le directeur avant application.')
 
     inscription = permutation.inscription
-    classe_avant = inscription.classe
+    classe_a    = inscription.classe
 
-    HistoriqueClasse.objects.create(
-        inscription=inscription,
-        classe_avant=classe_avant,
-        classe_apres=permutation.classe_cible,
-        motif=permutation.motif,
-        decide_par=utilisateur if getattr(utilisateur, 'is_authenticated', False) else None,
-    )
-
-    inscription.classe = permutation.classe_cible
-    # Le sous-groupe appartient à l'ancienne classe : on le remplace par celui
-    # choisi dans la cible, ou on le vide pour éviter un rattachement incohérent.
-    inscription.sous_groupe = permutation.sous_groupe_cible
-    inscription.save(update_fields=['classe', 'sous_groupe'])
+    if permutation.inscription_b_id:
+        contrepartie = permutation.inscription_b
+        # Les classes se lisent AVANT tout déplacement : après le premier, la
+        # seconde inscription pointerait déjà sur une classe qui a changé.
+        classe_b = contrepartie.classe
+        _deplacer(inscription, classe_b, permutation.sous_groupe_cible,
+                  permutation.motif, utilisateur)
+        _deplacer(contrepartie, classe_a, permutation.sous_groupe_cible_b,
+                  permutation.motif, utilisateur)
+    else:
+        _deplacer(inscription, permutation.classe_cible, permutation.sous_groupe_cible,
+                  permutation.motif, utilisateur)
 
     permutation.statut           = StatutWorkflow.APPLIQUEE
     permutation.date_application = timezone.now()
@@ -1358,34 +1384,156 @@ def saisir_absences(seance: SeanceReelle, saisies: list, utilisateur=None) -> di
     return {'enregistrees': len(vus), 'reinitialisees': supprimees}
 
 
+#: Statuts du socle (`absence.Presence`). Les valeurs sont numériques là-bas ;
+#: on les nomme ici plutôt que d'écrire `statut=1` dans les requêtes.
+PRESENCE_ABSENT     = 1
+PRESENCE_SANCTIONNE = 2
+PRESENCE_JUSTIFIEE  = 3
+
+
 def bilan_absences(inscription: InscriptionIPGEI, semestre: SemestreIPGEI = None) -> dict:
-    """Compte des absences d'un étudiant, éventuellement bornées à un semestre."""
-    qs = AbsenceSeance.objects.filter(inscription=inscription)
+    """
+    Compte des absences d'un étudiant, éventuellement bornées à un semestre.
+
+    Lit `absence.Presence`, le registre du socle : l'IPGEI y saisit ses
+    absences depuis le module « Absences », qui offre la saisie par séance, le
+    mode salle, les rapports et l'arbitrage des justificatifs. En tenir un
+    second dans `ipgei` obligeait à tout réécrire, et deux registres finissent
+    par diverger.
+
+    Le rattachement passe par le SUIVI, lui-même daté par sa semaine et son
+    année : c'est ce qui permet de borner à un semestre.
+    """
+    from apps.absence.models import Presence
+
+    qs = Presence.objects.filter(etudiant_id=inscription.etudiant_id)
     if semestre is not None:
-        qs = qs.filter(seance__semaine__semestre=semestre)
+        # Les semaines du semestre, telles que le suivi les numérote.
+        numeros = list(
+            semestre.semaines.filter(numero__isnull=False)
+            .values_list('numero', flat=True)
+        )
+        qs = qs.filter(
+            suivi__annee_universitaire=semestre.annee_universitaire,
+            suivi__numero_semaine__in=numeros or [0],
+        )
+
+    absences   = qs.filter(statut=PRESENCE_ABSENT).count()
+    justifiees = qs.filter(statut=PRESENCE_JUSTIFIEE).count()
+    sanctions  = qs.filter(statut=PRESENCE_SANCTIONNE).count()
     return {
-        'absences':   qs.filter(statut=AbsenceSeance.STATUT_ABSENT).count(),
-        'retards':    qs.filter(statut=AbsenceSeance.STATUT_RETARD).count(),
-        'justifiees': qs.filter(statut=AbsenceSeance.STATUT_JUSTIFIEE).count(),
-        'total':      qs.count(),
+        'absences':   absences,
+        # Le socle n'a pas de « retard » : il a « sanctionné ». On expose la
+        # clé attendue par les gabarits plutôt que d'en changer partout.
+        'retards':    sanctions,
+        'justifiees': justifiees,
+        'total':      absences + justifiees + sanctions,
     }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Relevés (support des documents officiels)
 # ═════════════════════════════════════════════════════════════════════════════
-#: Intitulé développé du cursus, tel qu'il figure en tête des documents de
-#: séance de l'IPGEI. Le code — MPSI, MP — sert en interne ; c'est ce libellé
-#: que lisent le jury et les étudiants.
-LIBELLES_CURSUS = {
+#: Intitulés de repli, pour une base antérieure au référentiel de niveaux.
+#: Ne servent qu'à défaut : l'intitulé se saisit dans « Niveaux du cursus »,
+#: sans quoi un niveau ajouté — MPI — n'aurait jamais le sien.
+LIBELLES_CURSUS_DEFAUT = {
     NIVEAU_MPSI: "Math Physique Sciences de l'Ingénieur",
     NIVEAU_MP:   'Mathématique Physique',
 }
 
 
-def libelle_cursus(code_niveau: str) -> str:
-    """Intitulé développé du cursus, ou le code lui-même s'il est inconnu."""
-    return LIBELLES_CURSUS.get(code_niveau, code_niveau)
+def libelle_cursus(code_niveau: str, institution=None) -> str:
+    """
+    Intitulé développé du cursus, tel qu'il coiffe les documents de séance.
+
+    Lu dans le référentiel, où il s'administre. Une table en dur ignorait tout
+    niveau ajouté après coup et lui aurait imprimé son code brut.
+    """
+    fiche = niveau_ref(code_niveau, institution)
+    if fiche is not None and fiche.libelle:
+        return fiche.libelle
+    return LIBELLES_CURSUS_DEFAUT.get(code_niveau, code_niveau)
+
+
+def classe_attente(code_niveau: str, annee_universitaire: str, institution) -> 'Classe':
+    """
+    Classe d'attente d'un niveau pour une année — créée au besoin.
+
+    Sans suffixe : « MPSI », et non « MPSI A ». C'est là qu'arrivent les
+    inscrits tant qu'on ignore combien de classes ouvrir. Elle porte le NIVEAU,
+    ce qui suffit pour que l'étudiant reçoive sa maquette et ses frais dès
+    l'inscription — un rattachement en attente n'est pas une inscription
+    incomplète.
+
+    Marquée conteneur par `Classe.save()`, elle reste hors des emplois du
+    temps, du suivi et des listes d'appel.
+    """
+    from .socle import niveau_socle
+
+    classe, _ = Classe.objects.get_or_create(
+        institution=institution,
+        niveau=niveau_socle(code_niveau),
+        groupe='',
+        annee_universitaire=annee_universitaire,
+    )
+    return classe
+
+
+def classes_reelles(annee_universitaire: str, institution=None):
+    """Classes planifiables — la classe d'attente exclue."""
+    qs = Classe.objects.filter(annee_universitaire=annee_universitaire).exclude(groupe='')
+    if institution is not None:
+        qs = qs.filter(institution=institution)
+    return qs
+
+
+def affecter_a_une_classe(inscription: InscriptionIPGEI, classe: 'Classe',
+                          utilisateur=None) -> InscriptionIPGEI:
+    """
+    Sort un inscrit de la classe d'attente pour le poser dans une vraie classe.
+
+    Passe par le même chemin qu'un changement de classe : le mouvement est
+    journalisé et le département de l'étudiant suit, sans quoi il resterait
+    absent des listes d'appel.
+    """
+    if classe.est_conteneur:
+        raise ValidationError("Une classe d'attente n'est pas une affectation.")
+    if inscription.classe_id == classe.pk:
+        raise ValidationError(f'{inscription.etudiant} est déjà en {classe.nom}.')
+    if inscription.classe.niveau_id != classe.niveau_id:
+        raise ValidationError("L'affectation reste au même niveau.")
+
+    _deplacer(inscription, classe, None, "Affectation depuis la classe d'attente",
+              utilisateur)
+    return inscription
+
+
+def libelle_annee_du_niveau(code_niveau: str, institution=None) -> str:
+    """« 1re année », « 2e année » — déduit du RANG du niveau.
+
+    Le déduire du code, en testant `== 'MPSI'`, rangeait tout autre niveau de
+    première année — MPI — en deuxième.
+    """
+    rang = rang_du_niveau(code_niveau, institution)
+    return '1re année' if rang == 1 else f'{rang}e année'
+
+
+def libelle_classe(classe) -> str:
+    """
+    Classe telle qu'elle se nomme sur les documents : « Cursus (Classe) ».
+
+        Math Physique Sciences de l'Ingénieur (MPSI A)
+        Mathématique Physique (MP C)
+
+    Le seul code de classe — « MPSI A » — ne dit rien à qui lit l'attestation
+    hors de l'établissement : ni le contenu du cursus, ni son niveau. C'est la
+    forme employée par l'IPGEI sur ses propres relevés.
+    """
+    if classe is None:
+        return ''
+    intitule = libelle_cursus(classe.niveau_code, getattr(classe, 'institution', None))
+    return f'{intitule} ({classe.nom})' if intitule and intitule != classe.niveau_code else classe.nom
 
 
 def libelle_semestre_ordinal(code_semestre: str) -> str:

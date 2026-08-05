@@ -76,6 +76,17 @@ def _nom_fichier(libelle: str) -> str:
     return re.sub(r'_+', '_', re.sub(r'[^\w]+', '_', sans_accent)).strip('_') or 'edt'
 
 
+def _annee_session(request) -> str:
+    """Année universitaire du contexte de l'utilisateur, ou chaîne vide."""
+    from apps.authentication.models import UserContexte
+
+    utilisateur = _utilisateur(request)
+    if utilisateur is None:
+        return ''
+    contexte = UserContexte.objects.filter(user=utilisateur).first()
+    return contexte.annee_universitaire if contexte else ''
+
+
 def _institution_principale():
     from apps.parametres.models import Institution
     return Institution.objects.filter(est_principale=True).first()
@@ -317,6 +328,25 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
     ordering           = ['classe', 'numero_ordre', 'etudiant__nom']
     pagination_class   = StandardPagination
 
+    @action(detail=True, methods=['post'], url_path='affecter')
+    def affecter(self, request, pk=None):
+        """
+        Sort un inscrit de la classe d'attente pour le poser dans une classe.
+
+        Passe par le même chemin qu'un changement de classe : le mouvement est
+        journalisé, et le département de l'étudiant suit — sans quoi il
+        resterait absent des listes d'appel.
+        """
+        inscription = self.get_object()
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe introuvable.'})
+
+        self._executer(services.affecter_a_une_classe, inscription, classe,
+                       _utilisateur(request))
+        inscription.refresh_from_db()
+        return Response(self.get_serializer(inscription).data)
+
     @action(detail=False, methods=['post'], url_path='nouvelle')
     def nouvelle(self, request):
         """
@@ -334,9 +364,20 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         entree.is_valid(raise_exception=True)
         donnees = entree.validated_data
 
-        classe = Classe.objects.filter(pk=donnees['classe']).first()
-        if classe is None:
-            raise ValidationError({'classe': 'Classe introuvable.'})
+        if donnees.get('classe'):
+            classe = Classe.objects.filter(pk=donnees['classe']).first()
+            if classe is None:
+                raise ValidationError({'classe': 'Classe introuvable.'})
+        else:
+            # Inscription en attente : le niveau suffit. L'étudiant reçoit dès
+            # maintenant sa maquette et ses frais — ce qui manque est
+            # seulement le groupe où il suivra les cours.
+            institution = _institution_principale()
+            annee = donnees.get('annee_universitaire') or _annee_session(request)
+            if not annee:
+                raise ValidationError(
+                    {'annee_universitaire': "Précisez l'année universitaire."})
+            classe = services.classe_attente(donnees['niveau'], annee, institution)
 
         sous_groupe_id = donnees.get('sous_groupe')
         if sous_groupe_id and not SousGroupeTP.objects.filter(
