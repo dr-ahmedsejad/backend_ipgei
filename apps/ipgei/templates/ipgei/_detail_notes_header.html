@@ -24,7 +24,14 @@ quel semestre il s'agit.
   <tr>
     <td>{{ libelle_cursus }} ({{ classe_libelle }})</td>
     <td style="text-align:center;">{{ effectif }} Étudiant{{ effectif|pluralize }}</td>
-    <td style="text-align:right;">{{ semestre_libelle }}</td>
+    {% comment %}
+    L'ordre de lecture est imprimé : deux tirages du même document, l'un par
+    classement l'autre par matricule, sont impossibles à distinguer sur la
+    table du jury sans cette mention.
+    {% endcomment %}
+    <td style="text-align:right;">
+      {{ semestre_libelle }}{% if tri_libelle %} &middot; par {{ tri_libelle }}{% endif %}
+    </td>
   </tr>
   <tr><td colspan="3" class="filet"></td></tr>
 </table>

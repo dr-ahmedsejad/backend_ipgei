@@ -1867,10 +1867,14 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         from django.http import HttpResponse
 
         deliberation = self.get_object()
-        contenu = self._executer(detail_notes.generer_pdf, deliberation)
+        # `tri` commande l'ordre des blocs : par classement pour délibérer du
+        # haut vers le bas, par matricule pour retrouver un dossier qu'on
+        # presente au jury, par moyenne pour examiner les cas limites.
+        tri = request.query_params.get('tri') or detail_notes.TRI_RANG
+        contenu = self._executer(detail_notes.generer_pdf, deliberation, tri)
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = (
-            f'attachment; filename="detail-notes-{_nom_pv(deliberation)}.pdf"')
+            f'attachment; filename="detail-notes-{_nom_pv(deliberation)}-{tri}.pdf"')
         return reponse
 
     @action(detail=True, methods=['get'], url_path='pv-excel')

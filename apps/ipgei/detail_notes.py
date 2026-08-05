@@ -76,9 +76,42 @@ def _anonymats(deliberation: Deliberation) -> dict:
     )
 
 
-def contexte(deliberation: Deliberation) -> dict:
+#: Ordres de lecture du document de séance.
+#:
+#: Le jury ne parcourt pas toujours la promotion de la même façon : par RANG
+#: pour délibérer du haut vers le bas, par MATRICULE pour retrouver un dossier
+#: qu'on lui présente, par MOYENNE quand il examine les cas limites. Un seul
+#: ordre imposé obligeait à feuilleter.
+TRI_RANG      = 'rang'
+TRI_MATRICULE = 'matricule'
+TRI_MOYENNE   = 'moyenne'
+TRIS = (TRI_RANG, TRI_MATRICULE, TRI_MOYENNE)
+
+LIBELLES_TRI = {
+    TRI_RANG:      'classement',
+    TRI_MATRICULE: 'matricule',
+    TRI_MOYENNE:   'moyenne décroissante',
+}
+
+
+def _clef_tri(tri: str):
     """
-    Contexte de rendu — un bloc par élève, classés par moyenne décroissante.
+    Clé de tri des blocs. Les lignes sans moyenne — copie blanche, dossier
+    incomplet — passent en fin de liste plutôt qu'en tête : un `None` trié
+    comme un zéro placerait ces élèves parmi les plus faibles, ce qu'ils ne
+    sont pas encore.
+    """
+    if tri == TRI_MATRICULE:
+        return lambda bloc: str(bloc['matricule'] or '')
+    if tri == TRI_MOYENNE:
+        return lambda bloc: (bloc['moyenne'] is None,
+                             -(bloc['moyenne'] or 0))
+    return lambda bloc: (bloc['rang'] is None, bloc['rang'] or 0)
+
+
+def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
+    """
+    Contexte de rendu — un bloc par élève, dans l'ordre demandé.
 
     Les notes sont lues une seule fois pour toute la promotion, puis
     redistribuées en mémoire : une requête par élève et par matière aurait
@@ -169,7 +202,9 @@ def contexte(deliberation: Deliberation) -> dict:
         'semestre_libelle':  services.libelle_semestre_ordinal(semestre.code) if semestre else '',
         'effectif':          len(lignes),
         'moyenne_promotion': moyenne_promotion,
-        'blocs':             blocs,
+        'blocs':             sorted(blocs, key=_clef_tri(tri)),
+        'tri':               tri,
+        'tri_libelle':       LIBELLES_TRI.get(tri, tri),
         'date_edition':      date.today().strftime('%d/%m/%Y'),
     }
 
@@ -199,7 +234,7 @@ def _fichier_temporaire(gabarit: str, donnees: dict) -> str:
     return fichier.name
 
 
-def generer_pdf(deliberation: Deliberation) -> bytes:
+def generer_pdf(deliberation: Deliberation, tri: str = TRI_RANG) -> bytes:
     """
     PDF du détail des notes, bandeau et pied répétés sur chaque page.
 
@@ -216,7 +251,11 @@ def generer_pdf(deliberation: Deliberation) -> bytes:
             'délibération annuelle, éditez celui de chaque semestre.'
         )
 
-    donnees = contexte(deliberation)
+    if tri not in TRIS:
+        from django.core.exceptions import ValidationError
+        raise ValidationError(f'Ordre de tri inconnu : {tri}.')
+
+    donnees = contexte(deliberation, tri)
     options = dict(OPTIONS_PDF)
     fichiers = []
     try:
