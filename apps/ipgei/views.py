@@ -1600,9 +1600,15 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         lignes = []
         for inscription_id, numero_anonymat in anonymats:
             note_id = notes.get(inscription_id)
+            valeur = valeurs.get(note_id)
             lignes.append({
                 'numero_anonymat': numero_anonymat,
-                'valeur':          valeurs.get(note_id),
+                # Chaine et non nombre, comme partout ailleurs dans l'API :
+                # DRF serialise ses DecimalField en chaines
+                # (COERCE_DECIMAL_TO_STRING), mais ce dictionnaire est construit
+                # a la main et le rendu JSON en aurait fait un flottant. L'ecran
+                # traite la note comme une chaine, il tombait sur un nombre.
+                'valeur':          None if valeur is None else str(valeur),
                 'verrouillee':     note_id in verrouillees,
             })
         lignes.sort(key=lambda ligne: ligne['numero_anonymat'])
