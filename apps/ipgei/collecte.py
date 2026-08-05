@@ -511,6 +511,12 @@ def generer_excel(semestre, classe, matieres: list, type_note: str,
             cellule.alignment = centre
             cellule.border = bordure
 
+        # Le repère de l'étudiant et la case de note se lisent en colonne :
+        # centrés, on les balaie d'un coup d'œil, alors qu'un matricule collé
+        # à gauche et une note collée à droite obligent à zigzaguer. Le nom et
+        # les observations, eux, restent alignés à gauche : c'est du texte.
+        colonnes_centrees = {1, 2} if anonymat else {1, 3}
+
         rang = ligne_entete + 1
         for ligne in fiche['lignes']:
             valeurs = ([ligne['anonymat'], None, None] if anonymat
@@ -518,6 +524,8 @@ def generer_excel(semestre, classe, matieres: list, type_note: str,
             for colonne, valeur in enumerate(valeurs, 1):
                 cellule = feuille.cell(rang, colonne, valeur)
                 cellule.border = bordure
+                if colonne in colonnes_centrees:
+                    cellule.alignment = centre
             rang += 1
 
         if fiche['seuil'] is not None:
