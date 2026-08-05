@@ -1222,7 +1222,12 @@ class Evaluation(models.Model):
 # ═════════════════════════════════════════════════════════════════════════════
 class Deliberation(models.Model):
     """
-    Jury de fin de semestre ou de fin d'année, pour un niveau et une année.
+    Jury de fin de semestre ou de fin d'année, pour une CLASSE et une année.
+
+    Le jury siège classe par classe : c'est la classe qui a un professeur
+    principal, un effectif qu'on parcourt en séance, et un procès-verbal que
+    l'on signe. Délibérer sur tout un niveau mêlait deux classes dans un même
+    classement, où le rang d'un élève dépendait d'élèves qu'il ne côtoie pas.
 
     Le seuil et le plafond de rattrapage sont **copiés depuis les paramètres à
     la création** puis figés dans la délibération : rejouer un calcul donne
@@ -1249,6 +1254,14 @@ class Deliberation(models.Model):
     # `NiveauIPGEI`, et un niveau ajouté après coup doit pouvoir délibérer. Le
     # serializer valide contre le référentiel.
     niveau              = models.CharField(max_length=10)
+    #: Classe délibérée. Nullable pour les jurys tenus avant que la règle ne
+    #: change — eux portent tout le niveau, et leurs PV déjà signés ne doivent
+    #: pas se mettre à dire autre chose. Toute nouvelle délibération en exige
+    #: une.
+    classe              = models.ForeignKey(
+        'ipgei.Classe', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='deliberations',
+    )
     annee_universitaire = models.CharField(max_length=9)
     portee              = models.CharField(max_length=10, choices=PORTEE_CHOICES, default=PORTEE_ANNUELLE)
     semestre            = models.ForeignKey(
@@ -1281,11 +1294,15 @@ class Deliberation(models.Model):
 
     def __str__(self):
         cible = self.semestre.code if self.semestre_id else self.annee_universitaire
-        return f'Délibération {self.niveau} {cible}'
+        return f'Délibération {self.classe.nom if self.classe_id else self.niveau} {cible}'
 
     def clean(self):
         if self.portee == self.PORTEE_SEMESTRE and not self.semestre_id:
             raise ValidationError({'semestre': 'Une délibération de semestre doit cibler un semestre.'})
+        if self.classe_id and self.classe.niveau_code != self.niveau:
+            raise ValidationError(
+                {'classe': f'{self.classe.nom} relève du niveau '
+                           f'{self.classe.niveau_code}, pas de {self.niveau}.'})
 
     @property
     def est_verrouillee(self) -> bool:

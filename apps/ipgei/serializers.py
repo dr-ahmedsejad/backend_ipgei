@@ -906,6 +906,7 @@ class LigneDeliberationListSerializer(LigneDeliberationSerializer):
 class DeliberationSerializer(serializers.ModelSerializer):
     institution      = _champ_institution()
     semestre_code    = serializers.CharField(source='semestre.code', read_only=True, default='')
+    classe_nom       = serializers.CharField(source='classe.nom', read_only=True, default='')
     statut_display   = serializers.CharField(source='get_statut_display', read_only=True)
     validee_par_nom  = serializers.CharField(source='validee_par.name', read_only=True, default='')
     nb_lignes        = serializers.SerializerMethodField()
@@ -918,7 +919,8 @@ class DeliberationSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Deliberation
         fields = [
-            'id', 'institution', 'libelle', 'niveau', 'annee_universitaire', 'portee',
+            'id', 'institution', 'libelle', 'niveau', 'classe', 'classe_nom',
+            'annee_universitaire', 'portee',
             'semestre', 'semestre_code', 'seuil_validation', 'plafond_rattrapage',
             'statut', 'statut_display', 'est_verrouillee', 'observations',
             'date_creation', 'date_calcul', 'date_validation',
@@ -986,6 +988,32 @@ class DeliberationSerializer(serializers.ModelSerializer):
             )
         if portee == Deliberation.PORTEE_ANNUELLE:
             attrs['semestre'] = None
+
+        classe = attrs.get('classe', getattr(self.instance, 'classe', None))
+        # Exigée à la CRÉATION seulement : les jurys tenus avant la règle
+        # portent tout un niveau, et les rouvrir pour les modifier ne doit pas
+        # buter sur un champ qu'ils n'ont jamais eu.
+        if self.instance is None and classe is None:
+            raise serializers.ValidationError(
+                {'classe': 'Le jury siège classe par classe : indiquez la classe '
+                           'délibérée.'}
+            )
+        if classe is not None:
+            niveau = attrs.get('niveau', getattr(self.instance, 'niveau', None))
+            if niveau and classe.niveau_code != niveau:
+                raise serializers.ValidationError(
+                    {'classe': f'{classe.nom} relève du niveau {classe.niveau_code}, '
+                               f'pas de {niveau}.'})
+            annee = attrs.get('annee_universitaire',
+                              getattr(self.instance, 'annee_universitaire', None))
+            if annee and classe.annee_universitaire != annee:
+                raise serializers.ValidationError(
+                    {'classe': f'{classe.nom} est une classe de '
+                               f'{classe.annee_universitaire}, pas de {annee}.'})
+            if classe.est_conteneur:
+                raise serializers.ValidationError(
+                    {'classe': "La classe d'attente ne se délibère pas : ses "
+                               "inscrits n'ont pas encore de classe."})
         return attrs
 
 

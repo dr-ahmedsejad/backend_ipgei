@@ -525,16 +525,25 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     params = ParametresIPGEI.pour(deliberation.institution)
     droit_max = params.droit_redoublement_max
 
+    # Le jury siège classe par classe : le rang qu'il arrête est le rang DANS
+    # LA CLASSE. Mêler deux classes le ferait dépendre d'élèves que celui-ci ne
+    # côtoie pas, et le PV d'une classe porterait le classement de l'autre.
+    # Les jurys tenus avant la règle n'ont pas de classe : ils gardent leur
+    # portée de niveau, sans quoi leurs lignes disparaîtraient au recalcul.
     inscriptions = (
         InscriptionIPGEI.objects
         .filter(
             annee_universitaire=deliberation.annee_universitaire,
-            classe__niveau__niveau=deliberation.niveau,
             classe__institution=deliberation.institution,
             actif=True,
         )
         .select_related('etudiant', 'classe')
     )
+    if deliberation.classe_id:
+        inscriptions = inscriptions.filter(classe_id=deliberation.classe_id)
+    else:
+        inscriptions = inscriptions.filter(
+            classe__niveau__niveau=deliberation.niveau)
 
     resultats = []
     for inscription in inscriptions:

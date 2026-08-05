@@ -1733,9 +1733,11 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
     serializer_class   = DeliberationSerializer
     permission_classes = [RBACPermission]
     required_module    = 'ipgei_deliberation'
-    queryset           = Deliberation.objects.select_related('institution', 'semestre', 'validee_par')
+    queryset           = Deliberation.objects.select_related(
+        'institution', 'semestre', 'validee_par', 'classe')
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields   = ['niveau', 'annee_universitaire', 'portee', 'statut', 'semestre']
+    filterset_fields   = ['niveau', 'classe', 'annee_universitaire', 'portee',
+                          'statut', 'semestre']
     ordering           = ['-annee_universitaire', 'niveau']
     pagination_class   = StandardPagination
 
