@@ -1226,9 +1226,21 @@ class StatistiquesSemestresView(APIView):
         libelle_semestres = "pairs" if ts == "Pairs" else "impairs"
 
         # 3. Récupération des codes semestres (S1, S2, S3...)
+        #
+        # Le rattachement d'un EM à un département sert ici à le DATER. Une
+        # matière IPGEI, elle, n'a pas d'année : la maquette de prépa vaut pour
+        # toutes les promotions, et son ancrage ne lui donne qu'un niveau — il
+        # reste sur la première classe créée. La filtrer sur l'année de cet
+        # ancrage vidait donc l'écran dès l'ouverture de l'année suivante :
+        # aucun label, aucune barre, alors que des séances étaient pointées.
+        # Les heures RÉALISÉES restent filtrées sur l'année demandée, plus bas.
+        # Même correctif que `_compute_avancement_em`, qui l'avait déjà reçu.
+        base_em = EM.objects.filter(semestre__type_semestre=type_semestre).filter(
+            Q(departement__annee_universitaire=annee)
+            | Q(departement__classe_ipgei__isnull=False)
+        )
         sem_codes = (
-            EM.objects
-            .filter(semestre__type_semestre=type_semestre, departement__annee_universitaire=annee)
+            base_em
             .values_list('semestre__code_semestre', flat=True)
             .distinct()
             .order_by('semestre__code_semestre')
@@ -1242,10 +1254,14 @@ class StatistiquesSemestresView(APIView):
 
         # 4. Calculs pour chaque semestre
         for code in sem_codes:
+            # Dédoublonnage par code : une même matière ancrée sur deux classes
+            # compterait deux fois son volume, et le prévu doublerait.
             ems = EM.objects.filter(
-                semestre__code_semestre=code,
-                semestre__type_semestre=type_semestre,
-                departement__annee_universitaire=annee
+                id__in=list(
+                    base_em.filter(semestre__code_semestre=code)
+                    .values('code_em').annotate(premier=Min('id'))
+                    .values_list('premier', flat=True)
+                )
             )
 
             # Volume horaire PREVU
