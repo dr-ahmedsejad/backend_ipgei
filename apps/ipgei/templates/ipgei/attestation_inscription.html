@@ -143,10 +143,9 @@ Deux écarts, et deux seulement :
         <div style="margin-top: 5px;">
           est {{ inscrit_e }} sous le numéro :
           <strong style="font-size: 11.5pt; color:#006633;">{{ etudiant.matricule }}</strong> <br>
-          En <strong style="font-size: 11.5pt;">{{ niveau_label }}
-          <span style="font-weight: normal;">{{ filiere_nom }}</span><br>
-          {% if groupe %}<span style="font-size: 10pt;">Classe: {{ groupe }}</span>{% endif %}
-          <br> aux enseignements suivants :</strong>
+          En <strong style="font-size: 11.5pt;">{{ niveau_label }}</strong><br>
+          {% if groupe %}<strong style="font-size: 10.5pt;">{{ groupe }}</strong><br>{% endif %}
+          <strong>aux enseignements suivants :</strong>
         </div>
       </td>
 

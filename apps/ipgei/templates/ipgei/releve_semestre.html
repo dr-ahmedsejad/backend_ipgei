@@ -189,6 +189,15 @@ Les écarts tiennent au cursus, pas au goût :
         <td colspan="2" style="text-align:center;font-weight:700;font-family:monospace;font-size:13pt;">{{ etudiant.matricule }}</td>
         <td class="st-lbl-ar"><span dir="rtl" lang="ar">رقم التسجيل :</span></td>
       </tr>
+      {% comment %}
+        Le cursus développé et la classe : « MPSI A » seul ne dit rien du
+        contenu de la formation à qui lit le relevé hors de l'établissement.
+      {% endcomment %}
+      <tr>
+        <td class="st-lbl-fr">Classe :</td>
+        <td colspan="2" style="text-align:center;font-weight:600;">{{ classe_label|default:classe.nom }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">القسم :</span></td>
+      </tr>
     </table>
   </td></tr>
 
@@ -300,25 +309,28 @@ Les écarts tiennent au cursus, pas au goût :
     </div>
   </td></tr>
 
-  <!-- Légende sous la signature, à gauche, un sigle par ligne. Sur une seule
-     ligne les trois définitions se lisaient comme une phrase ; placée avant
-     la signature, elle s'interposait entre le résultat et qui l'atteste. -->
-  <tr><td style="padding-top:6px;">
+  <!-- Légende repoussée en bas de page, à gauche. L'espace au-dessus n'est
+       pas décoratif : c'est celui où l'on signe. Collée à la mention du
+       signataire, elle ne laissait pas de quoi apposer une signature. -->
+  <tr><td style="padding-top:26mm;">
     <table style="border:none;border-collapse:collapse;">
       <tr>
-        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">ME</td>
-        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">moyenne de l&rsquo;étudiant dans la matière</td>
-        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">معدل الطالب في المادة</td>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">ME</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">moyenne de l&rsquo;étudiant</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">معدل الطالب</td>
       </tr>
       <tr>
-        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">MC</td>
-        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">moyenne de la classe dans la matière</td>
-        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">معدل القسم في المادة</td>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">MC</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">moyenne de la classe</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">معدل القسم</td>
       </tr>
       <tr>
-        <td style="border:none;padding:0 6px 1px 0;font-size:7.5pt;font-weight:700;color:#333;white-space:nowrap;">Rang</td>
-        <td style="border:none;padding:0 8px 1px 0;font-size:7.5pt;color:#555;">rang de l&rsquo;étudiant dans la classe, dans la matière</td>
-        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:7.5pt;color:#888;">ترتيب الطالب في القسم في المادة</td>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">Rang</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">rang de l&rsquo;étudiant</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">ترتيب الطالب</td>
       </tr>
     </table>
   </td></tr>

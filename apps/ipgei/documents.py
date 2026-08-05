@@ -134,6 +134,9 @@ def _contexte_commun(doc: DocumentOfficiel, inscription: InscriptionIPGEI,
         'inscription':  inscription,
         'classe':       inscription.classe,
         'niveau':       inscription.classe.niveau_code,
+        # « Math Physique Sciences de l'Ingénieur (MPSI A) » : le code seul ne
+        # dit rien à qui lit le document hors de l'établissement.
+        'classe_label': services.libelle_classe(inscription.classe),
         'annee_universitaire': inscription.annee_universitaire,
         'numero_serie': doc.numero_serie,
         'date_edition': date.today().strftime('%d/%m/%Y'),
@@ -463,9 +466,9 @@ def _contexte_attestation(doc, inscription, base_url) -> dict:
 
         'today':       date.today().strftime('%d/%m/%Y'),
         'ville':       getattr(institution, 'ville_fr', '') or 'Nouakchott',
-        'niveau_label': '1re année' if niveau == 'MPSI' else '2e année',
-        'filiere_nom':  f'Classes préparatoires — {niveau}',
-        'groupe':       inscription.classe.nom,
+        'niveau_label': services.libelle_annee_du_niveau(niveau, institution),
+        'filiere_nom':  services.libelle_cursus(niveau, institution),
+        'groupe':       services.libelle_classe(inscription.classe),
         'annee_univ_label': inscription.annee_universitaire,
         'email_univ':   f'{etudiant.matricule}@{domaine}',
 

@@ -136,7 +136,8 @@ propre contenu, dans le bloc `contenu`.
           <tr><td class="lab">Né(e) le</td>
               <td class="val">{{ etudiant.date_naissance|date:"d/m/Y" }}{% if etudiant.lieu_naissance_fr %} à {{ etudiant.lieu_naissance_fr }}{% endif %}</td></tr>
           {% endif %}
-          <tr><td class="lab">Classe</td><td class="val">{{ classe.nom }}</td></tr>
+          <tr><td class="lab">Classe</td>
+              <td class="val">{{ classe_label|default:classe.nom }}</td></tr>
           <tr><td class="lab">Niveau</td>
               <td class="val">{% if niveau == 'MPSI' %}MPSI — 1re année{% else %}MP — 2e année{% endif %}</td></tr>
         </table>
