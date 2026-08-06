@@ -199,22 +199,31 @@ Deux écarts, et deux seulement :
     <table style="width: 100%; margin-top: 10px;  border-collapse: collapse;">
       <tr>
         <td style="width: 50%; vertical-align: bottom; text-align: left;">
+          {% comment %}
+          Le QR sans légende : il porte l'adresse de vérification, et
+          « Document certifié » ne disait rien de plus que la présence du code.
+          {% endcomment %}
           {% if qr_b64 %}
           <div class="qr-box">
             <img src="{{ qr_b64 }}" alt="QR">
           </div>
-          <div style="font-size: 7pt; color: #555; margin-top: 2px;">Document certifié</div>
           {% endif %}
         </td>
-        <td style="width: 50%; vertical-align: bottom; text-align: right; font-size: 10.5pt; line-height: 1.4; padding-right: 4mm;">
+        <td style="width: 50%; vertical-align: bottom; text-align: center; font-size: 10.5pt; line-height: 1.4; padding-right: 4mm;">
           {% comment %}
           Signataire recopié sur le document à l'émission : réimprimer une
           attestation ne doit pas lui donner rétroactivement un autre auteur.
-          Le blanc de 25 px reste : la signature est manuscrite.
+
+          Son NOM vient au-dessus de la qualité, centré sur le bloc. Le blanc
+          reste dessous : c'est là que la signature manuscrite se pose, entre
+          la qualité et le bas de page.
           {% endcomment %}
+          {% if signataire.nom %}
+          <div style="font-weight: 700; color: #006633;">{{ signataire.nom }}</div>
+          {% endif %}
           Pour le Directeur et P.O.<br>
-          {{ signataire.titre }}<br>
-          <span style="font-weight: 700; display: block; margin-top: 25px; color:#006633;">{{ signataire.nom }}</span>
+          {{ signataire.titre }}
+          <div style="height: 25px;"></div>
         </td>
       </tr>
     </table>
