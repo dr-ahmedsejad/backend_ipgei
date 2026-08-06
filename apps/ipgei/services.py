@@ -2074,3 +2074,176 @@ def frais_pour(classe) -> Decimal:
         **({'type_diplome': type_diplome} if type_diplome else {}),
     ).values_list('montant', flat=True).first()
     return montant if montant is not None else Decimal('0')
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Passage en année supérieure
+# ═════════════════════════════════════════════════════════════════════════════
+def annee_suivante(annee_universitaire: str) -> str:
+    """« 2026-2027 » → « 2027-2028 ». Rendue telle quelle si la forme surprend."""
+    try:
+        debut, fin = (int(part) for part in annee_universitaire.split('-'))
+    except (AttributeError, ValueError):
+        return annee_universitaire
+    return f'{debut + 1}-{fin + 1}'
+
+
+def niveaux_du_rang(rang: int, institution=None) -> list:
+    """Niveaux actifs d'un rang d'année, dans l'ordre d'affichage."""
+    from .models import NiveauIPGEI
+
+    requete = NiveauIPGEI.objects.filter(rang=rang, actif=True)
+    if institution is not None:
+        requete = requete.filter(institution=institution)
+    return list(requete.order_by('ordre', 'code'))
+
+
+#: Ce qu'une décision de jury commande pour l'année suivante.
+#:
+#: Seuls deux cas font repartir un étudiant : l'admission le fait monter d'un
+#: rang, le redoublement le laisse au sien. Réorienté, exclu et abandon ne
+#: repartent pas ; « autorisé à concourir » non plus — c'est une décision de
+#: DEUXIÈME année, qui ouvre le concours, pas une troisième année de prépa.
+PASSAGE_MONTE     = 'monte'
+PASSAGE_REDOUBLE  = 'redouble'
+SUITE_PAR_STATUT  = {
+    InscriptionIPGEI.STATUT_ADMIS:      PASSAGE_MONTE,
+    InscriptionIPGEI.STATUT_REDOUBLANT: PASSAGE_REDOUBLE,
+}
+
+
+def candidats_passage(deliberation: Deliberation) -> list:
+    """
+    Qui repart l'an prochain, et vers quel niveau.
+
+    Lit les LIGNES du jury et non le statut des inscriptions : c'est la décision
+    prononcée qui fait foi, et elle est là même si le report sur l'inscription
+    a été défait depuis. Chaque entrée dit l'inscription, la suite qui lui est
+    faite et le code de niveau visé.
+    """
+    institution = deliberation.institution
+    rang_actuel = rang_du_niveau(deliberation.niveau, institution)
+
+    sortie = []
+    for ligne in deliberation.lignes.select_related('inscription__etudiant',
+                                                    'inscription__classe'):
+        suite = SUITE_PAR_STATUT.get(
+            {
+                LigneDeliberation.DECISION_ADMIS:      InscriptionIPGEI.STATUT_ADMIS,
+                LigneDeliberation.DECISION_REDOUBLANT: InscriptionIPGEI.STATUT_REDOUBLANT,
+            }.get(ligne.decision)
+        )
+        if suite is None:
+            continue
+        rang_cible = rang_actuel + 1 if suite == PASSAGE_MONTE else rang_actuel
+        niveaux = niveaux_du_rang(rang_cible, institution)
+        sortie.append({
+            'ligne':       ligne,
+            'inscription': ligne.inscription,
+            'suite':       suite,
+            'rang_cible':  rang_cible,
+            'niveaux':     [n.code for n in niveaux],
+        })
+    return sortie
+
+
+def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = '',
+                             annee_cible: str = '', utilisateur=None) -> dict:
+    """
+    Ouvre l'année suivante aux étudiants que le jury a fait repartir.
+
+    Chaque inscription est créée dans la CLASSE D'ATTENTE du niveau visé, jamais
+    dans une classe nommée : à ce moment on ignore encore combien de classes
+    ouvrir et comment les équilibrer. L'écran « Affectation aux classes » les
+    répartit ensuite, et l'étudiant y reçoit déjà sa maquette et ses frais.
+
+    Réservé à une délibération VALIDÉE : inscrire sur des décisions qui peuvent
+    encore changer créerait des dossiers à défaire un par un.
+
+    Rejoué, il ne fait rien de plus : un étudiant déjà inscrit sur l'année cible
+    est compté « déjà inscrit » et laissé tel quel. C'est ce qui permet de
+    relancer après avoir corrigé un cas sans redouter les doublons.
+    """
+    if deliberation.statut != Deliberation.STATUT_VALIDEE:
+        raise ValidationError(
+            'Le passage suppose un jury validé : tant que les décisions peuvent '
+            'changer, les inscriptions créées seraient à défaire une par une.'
+        )
+    if deliberation.portee != Deliberation.PORTEE_ANNUELLE:
+        raise ValidationError(
+            "Seul un jury ANNUEL prononce un passage : un jury de semestre n'est "
+            "qu'un bilan intermédiaire."
+        )
+
+    institution = deliberation.institution
+    cible = annee_cible or annee_suivante(deliberation.annee_universitaire)
+
+    crees, deja, refuses = [], [], []
+    with transaction.atomic():
+        for candidat in candidats_passage(deliberation):
+            inscription = candidat['inscription']
+            etudiant    = inscription.etudiant
+
+            codes = candidat['niveaux']
+            if niveau_cible:
+                codes = [niveau_cible] if niveau_cible in codes else []
+            if not codes:
+                refuses.append({
+                    'etudiant': etudiant.matricule,
+                    'motif': f"Aucun niveau actif de rang {candidat['rang_cible']} "
+                             f'ne correspond.',
+                })
+                continue
+            # Un seul niveau du rang visé : le choix ne se pose pas. Plusieurs,
+            # et sans consigne, on ne devine pas — mieux vaut le dire.
+            if len(codes) > 1:
+                refuses.append({
+                    'etudiant': etudiant.matricule,
+                    'motif': 'Plusieurs niveaux possibles (' + ', '.join(codes)
+                             + ') : précisez lequel.',
+                })
+                continue
+
+            if InscriptionIPGEI.objects.filter(
+                etudiant=etudiant, annee_universitaire=cible,
+            ).exists():
+                deja.append(etudiant.matricule)
+                continue
+
+            classe = classe_attente(codes[0], cible, institution)
+            try:
+                statut, nb = controler_reinscription(etudiant, classe)
+                montant = frais_pour(classe)
+                nouvelle = InscriptionIPGEI.objects.create(
+                    etudiant=etudiant, classe=classe, annee_universitaire=cible,
+                    statut=statut, nb_redoublements=nb,
+                    montant_frais=montant,
+                )
+                inscrire_aux_matieres(nouvelle)
+            except ValidationError as exc:
+                refuses.append({
+                    'etudiant': etudiant.matricule,
+                    'motif': (getattr(exc, 'messages', None) or [str(exc)])[0][:200],
+                })
+                continue
+            crees.append({
+                'etudiant': etudiant.matricule,
+                'niveau':   codes[0],
+                'suite':    candidat['suite'],
+                'montant':  str(montant),
+            })
+
+    # Un tarif à zéro n'est pas une erreur — la grille du socle n'est
+    # simplement pas encore renseignée pour l'année visée — mais ouvrir
+    # quatorze dossiers à zéro sans le dire les rendrait invisibles jusqu'au
+    # jour où la scolarité s'étonne qu'aucun ne soit dû.
+    sans_tarif = [c['etudiant'] for c in crees if Decimal(c['montant']) == 0]
+
+    return {
+        'annee_cible':   cible,
+        'inscriptions':  len(crees),
+        'deja_inscrits': len(deja),
+        'crees':         crees,
+        'refuses':       refuses,
+        'sans_tarif':    len(sans_tarif),
+    }

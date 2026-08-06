@@ -1822,6 +1822,56 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
             'deliberation': self.get_serializer(deliberation).data,
         })
 
+    @action(detail=True, methods=['get', 'post'], url_path='passage')
+    def passage(self, request, pk=None):
+        """
+        Ouvre l'année suivante aux étudiants que le jury a fait repartir.
+
+        GET  → qui repart, vers quel niveau, et qui est déjà inscrit : de quoi
+               décider avant d'agir.
+        POST → crée les inscriptions dans la classe d'attente du niveau visé.
+               `niveau` tranche quand plusieurs niveaux partagent le rang ;
+               `annee` force l'année cible, celle qui suit par défaut.
+
+        Deux verbes sur une même action : deux `@action` de même `url_path` se
+        masqueraient dans le routeur, la seconde répondant 405.
+        """
+        deliberation = self.get_object()
+
+        if request.method == 'GET':
+            candidats = self._executer(services.candidats_passage, deliberation)
+            cible = services.annee_suivante(deliberation.annee_universitaire)
+            deja = set(
+                InscriptionIPGEI.objects
+                .filter(annee_universitaire=cible,
+                        etudiant__in=[c['inscription'].etudiant_id for c in candidats])
+                .values_list('etudiant_id', flat=True)
+            )
+            return Response({
+                'annee_cible': cible,
+                'validee':     deliberation.statut == Deliberation.STATUT_VALIDEE,
+                'annuelle':    deliberation.portee == Deliberation.PORTEE_ANNUELLE,
+                'candidats': [
+                    {
+                        'inscription':        c['inscription'].pk,
+                        'etudiant_nom':       c['inscription'].etudiant.nom_display,
+                        'etudiant_matricule': c['inscription'].etudiant.matricule,
+                        'suite':              c['suite'],
+                        'niveaux':            c['niveaux'],
+                        'deja_inscrit':       c['inscription'].etudiant_id in deja,
+                    }
+                    for c in candidats
+                ],
+            })
+
+        bilan = self._executer(
+            services.passer_en_annee_suivante, deliberation,
+            niveau_cible=request.data.get('niveau') or '',
+            annee_cible=request.data.get('annee') or '',
+            utilisateur=_utilisateur(request),
+        )
+        return Response(bilan)
+
     @action(detail=True, methods=['post'], url_path='valider')
     def valider(self, request, pk=None):
         deliberation = self.get_object()
