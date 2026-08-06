@@ -2318,3 +2318,71 @@ def recalculer_frais(annee_universitaire: str, institution=None,
         'deja_payees':         payees,
         'inchangees':          inchangees,
     }
+
+
+@transaction.atomic
+def repartir_inscriptions(mouvements: list, utilisateur=None,
+                          motif: str = 'Répartition entre classes') -> dict:
+    """
+    Déplace plusieurs inscrits d'un coup, d'une classe vers une autre.
+
+    À la rentrée, on ne traite pas des demandes individuelles : on constitue
+    des groupes. Le circuit de la permutation — formulaire signé, accord des
+    deux élèves — a tout son sens quand un étudiant demande à changer en cours
+    d'année, et aucun quand la scolarité répartit dix-sept arrivants entre deux
+    classes. D'où ce chemin distinct, qui emprunte pourtant le MÊME mouvement :
+    l'historique est journalisé ligne à ligne, et le département de l'étudiant
+    suit — sans quoi il disparaîtrait des listes d'appel.
+
+    Tout passe ou rien : un mouvement refusé annule les précédents. Une
+    répartition à moitié appliquée laisserait deux classes fausses, et il
+    faudrait deviner lesquelles reprendre.
+
+    `mouvements` : `[{'inscription': id, 'classe': id}, …]`
+    """
+    from .models import Classe
+
+    if not mouvements:
+        raise ValidationError('Aucun mouvement demandé.')
+
+    inscriptions = {
+        i.pk: i for i in InscriptionIPGEI.objects
+        .filter(pk__in=[m.get('inscription') for m in mouvements])
+        .select_related('classe__niveau', 'etudiant')
+    }
+    classes = {
+        c.pk: c for c in Classe.objects
+        .filter(pk__in=[m.get('classe') for m in mouvements])
+        .select_related('niveau')
+    }
+
+    deplacees = []
+    for mouvement in mouvements:
+        inscription = inscriptions.get(mouvement.get('inscription'))
+        cible = classes.get(mouvement.get('classe'))
+        if inscription is None or cible is None:
+            raise ValidationError('Inscription ou classe introuvable.')
+        if cible.est_conteneur:
+            raise ValidationError(
+                f"{cible.nom} est une classe d'attente : on n'y répartit pas, "
+                "on en sort."
+            )
+        if inscription.classe_id == cible.pk:
+            continue
+        if inscription.classe.niveau_id != cible.niveau_id:
+            raise ValidationError(
+                f'{inscription.etudiant} est en {inscription.classe.niveau_code}, '
+                f'{cible.nom} relève de {cible.niveau_code} : une répartition ne '
+                'change pas de niveau.'
+            )
+        if inscription.annee_universitaire != cible.annee_universitaire:
+            raise ValidationError(
+                f'{inscription.etudiant} est inscrit en '
+                f'{inscription.annee_universitaire} et {cible.nom} est une classe '
+                f'de {cible.annee_universitaire}.'
+            )
+        _deplacer(inscription, cible, None, motif, utilisateur)
+        deplacees.append({'etudiant': inscription.etudiant.matricule,
+                          'vers': cible.nom})
+
+    return {'deplacees': len(deplacees), 'mouvements': deplacees}

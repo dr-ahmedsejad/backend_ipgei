@@ -317,6 +317,27 @@ class SousGroupeTPViewSet(ModelViewSet):
 class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
     """Rattachement des étudiants aux classes."""
 
+    @action(detail=False, methods=['post'], url_path='repartir')
+    def repartir(self, request):
+        """
+        Déplace plusieurs inscrits d'une classe vers une autre, en une fois.
+
+        À la rentrée, on ne traite pas des demandes individuelles : on constitue
+        des groupes. Le circuit de la permutation — formulaire signé, accord des
+        deux élèves — vaut pour un changement demandé en cours d'année, pas pour
+        une répartition d'arrivants.
+
+        Corps : `{mouvements: [{inscription, classe}, …], motif}`. Tout passe ou
+        rien : une répartition à moitié appliquée laisserait deux classes
+        fausses.
+        """
+        mouvements = request.data.get('mouvements') or []
+        return Response(self._executer(
+            services.repartir_inscriptions, mouvements,
+            utilisateur=_utilisateur(request),
+            motif=request.data.get('motif') or 'Répartition entre classes',
+        ))
+
     @action(detail=False, methods=['post'], url_path='recalculer-frais')
     def recalculer_frais(self, request):
         """
