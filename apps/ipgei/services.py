@@ -351,40 +351,105 @@ def initialiser_notes(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) ->
     return len(nouvelles)
 
 
-def moyenne_semestrielle(inscription: InscriptionIPGEI, semestre: SemestreIPGEI):
+def moyenne_semestrielle(inscription: InscriptionIPGEI, semestre: SemestreIPGEI,
+                         *, absents_a_zero: bool = False):
     """
     Moyenne pondérée par les coefficients sur un semestre.
     Renvoie (moyenne, total_coefficients, [notes]).
+
+    `absents_a_zero` : règle du jury — une matière sans note vaut zéro, avec
+    son coefficient. Réservé au calcul de la délibération ; les écrans de
+    saisie et les relevés gardent la moyenne des seules matières notées, sans
+    quoi toute promotion afficherait des moyennes catastrophiques tant que la
+    saisie n'est pas terminée.
     """
     notes = list(
         Note.objects.filter(inscription=inscription, semestre=semestre)
         .select_related('matiere')
     )
-    return _agreger(notes)
+    return _agreger(
+        notes, absents_a_zero=absents_a_zero,
+        maquette=maquette_du_semestre(inscription, semestre) if absents_a_zero else None,
+    )
 
 
-def _agreger(notes):
-    """Agrège des lignes de note en moyenne pondérée par coefficient."""
+def _agreger(notes, *, absents_a_zero: bool = False, maquette=None):
+    """
+    Agrège des lignes de note en moyenne pondérée par coefficient.
+
+    `absents_a_zero` compte ZÉRO toute matière sans note retenue, avec son
+    coefficient — la règle du jury : une épreuve non rendue vaut zéro, elle ne
+    s'efface pas du calcul. Sans cela, un étudiant n'ayant composé que dans
+    trois matières obtenait la moyenne de ces trois-là, et passait devant ceux
+    qui avaient tout rendu.
+
+    `maquette` fournit les matières ATTENDUES. Elle est indispensable : une
+    matière jamais saisie n'a pas de ligne de note du tout, et compter zéro
+    seulement les lignes présentes laisserait un semestre entier hors du calcul.
+    """
     cumul  = Decimal('0')
     poids  = Decimal('0')
+    notees = set()
     for n in notes:
+        coef = Decimal(n.coefficient if n.coefficient is not None else n.matiere.coefficient)
         if n.note_retenue is None:
+            if not absents_a_zero:
+                continue
+            # Zéro : on ajoute le poids sans rien au cumul.
+            poids += coef
+            notees.add(n.matiere_id)
             continue
         # Coefficient snapshoté s'il existe, sinon celui de la matière : une
         # note jamais calculée ne doit pas faire disparaître la matière du total.
-        coef = Decimal(n.coefficient if n.coefficient is not None else n.matiere.coefficient)
         cumul += Decimal(n.note_retenue) * coef
         poids += coef
+        notees.add(n.matiere_id)
+
+    if absents_a_zero and maquette is not None:
+        for matiere in maquette:
+            if matiere.pk not in notees:
+                poids += Decimal(matiere.coefficient)
+
     if poids == 0:
         return None, Decimal('0'), notes
     return _arrondi(cumul / poids), poids, notes
 
 
-def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str):
+def maquette_du_semestre(inscription: InscriptionIPGEI, semestre):
+    """Matières attendues d'un étudiant sur un semestre — sa maquette."""
+    from .models import Matiere
+
+    return list(Matiere.objects.filter(
+        institution=inscription.classe.institution,
+        niveau_ref__code=inscription.niveau,
+        code_semestre=semestre.code,
+        actif=True,
+    ))
+
+
+def maquette_de_lannee(inscription: InscriptionIPGEI, annee_universitaire: str):
+    """Matières attendues sur toute l'année — les deux semestres du niveau."""
+    from .models import Matiere
+
+    return list(Matiere.objects.filter(
+        institution=inscription.classe.institution,
+        niveau_ref__code=inscription.niveau,
+        code_semestre__in=codes_semestres_du_niveau(
+            inscription.niveau, inscription.classe.institution),
+        actif=True,
+    ))
+
+
+def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
+                     *, absents_a_zero: bool = False):
     """
     Moyenne annuelle : tous les semestres du niveau de l'étudiant pour l'année.
     Les semestres pèsent au prorata des coefficients de leurs matières, ce qui
     revient à une moyenne pondérée unique sur l'ensemble des matières.
+
+    `absents_a_zero` : voir `moyenne_semestrielle`. C'est ce qui permet au jury
+    de statuer sur un étudiant dont un semestre entier manque — il pèse alors
+    zéro, et la décision se prononce là-dessus plutôt que de rester en blanc.
     """
     codes = codes_semestres_du_niveau(inscription.niveau,
                                       inscription.classe.institution)
@@ -395,7 +460,11 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str):
             semestre__code__in=codes,
         ).select_related('matiere', 'semestre')
     )
-    return _agreger(notes)
+    return _agreger(
+        notes, absents_a_zero=absents_a_zero,
+        maquette=(maquette_de_lannee(inscription, annee_universitaire)
+                  if absents_a_zero else None),
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -545,13 +614,19 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
         inscriptions = inscriptions.filter(
             classe__niveau__niveau=deliberation.niveau)
 
+    # Devant le jury, une matière sans note vaut ZÉRO, avec son coefficient :
+    # une épreuve non rendue ne s'efface pas du calcul. Sans cette règle, un
+    # étudiant n'ayant composé que dans trois matières obtenait la moyenne de
+    # ces trois-là et passait devant ceux qui avaient tout rendu.
     resultats = []
     for inscription in inscriptions:
         if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
-            moyenne, poids, notes = moyenne_semestrielle(inscription, deliberation.semestre)
+            moyenne, poids, notes = moyenne_semestrielle(
+                inscription, deliberation.semestre, absents_a_zero=True)
         else:
             moyenne, poids, notes = moyenne_annuelle(
                 inscription, deliberation.annee_universitaire,
+                absents_a_zero=True,
             )
         resultats.append((inscription, moyenne, poids, notes))
 
@@ -561,17 +636,20 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     )
     rangs = {r[0].id: i + 1 for i, r in enumerate(classables)}
 
-    # Une décision de passage engage l'ANNÉE. Deux situations interdisent de la
-    # proposer : un jury de semestre, qui n'est qu'un bilan intermédiaire, et
-    # une année dont un semestre n'est pas encore noté. Dans les deux cas le
-    # jury reste libre de trancher à la main — c'est la *proposition* qu'on
-    # retient, pas la décision.
+    # Une décision de passage engage l'ANNÉE : un jury de semestre, simple bilan
+    # intermédiaire, n'en propose pas.
+    #
+    # Un semestre non noté ne suspend PLUS la proposition. Il la suspendait
+    # parce que la moyenne ne reposait alors que sur l'autre semestre, et qu'un
+    # « admis » sortait avant même que le second ait commencé. Les matières
+    # manquantes comptant désormais zéro, la moyenne dit le vrai : celui à qui
+    # il manque un semestre est proposé pour ce qu'il a rendu, et le jury reste
+    # libre de trancher autrement — c'est la *proposition* qu'on retient, pas
+    # la décision.
     semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
 
     for inscription, moyenne, poids, notes in resultats:
         if semestrielle:
-            auto = ''
-        elif semestres_incomplets(inscription, deliberation.annee_universitaire):
             auto = ''
         else:
             auto = decision_automatique(
