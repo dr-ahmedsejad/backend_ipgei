@@ -74,10 +74,16 @@ de documents se ressemblent.
     font-size: 12pt; font-weight: 700; text-transform: uppercase;
   }
 
-  .cartouche { width: 100%; margin: 8px 0 10px; border-collapse: collapse; }
-  .cartouche td { font-size: 12pt; padding: 4px 7px; }
-  .cartouche .lab { color: #666; }
-  .cartouche .val { font-weight: 700; }
+  /* Largeur AUTOMATIQUE : à 100 %, les six cellules s'étiraient sur toute la
+     page et chaque valeur se retrouvait loin de son intitulé — « Effectif
+     délibéré » d'un côté, « 21 » de l'autre. Le cartouche se lit par paires,
+     il doit donc se serrer sur son contenu ; ce sont les groupes qu'on sépare,
+     pas les mots d'un même groupe. */
+  .cartouche { width: auto; margin: 8px 0 10px; border-collapse: collapse; }
+  .cartouche td { font-size: 12pt; padding: 4px 0; white-space: nowrap; }
+  .cartouche .lab { color: #666; padding-right: 8px; }
+  .cartouche .val { font-weight: 700; padding-right: 26px; }
+  .cartouche tr td:last-child { padding-right: 0; }
 
   table.pv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
   table.pv th {
