@@ -417,7 +417,7 @@ def _build_attestation_qr(prof, annee, date_debut, date_fin, titre_document, heu
 
     # ⚠️ TOUJOURS le domaine public de vérification (jamais l'hôte de la requête).
     base_url = (getattr(settings, 'DOCUMENTS_BASE_URL', '') or '').rstrip('/') \
-        or 'https://ent.iss-gp.mr'
+        or 'https://ent.ipgei.mr'
     verify_url = f'{base_url}/verifier/{att.token_verification}'
 
     qr_data_uri = None

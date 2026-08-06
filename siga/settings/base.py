@@ -245,11 +245,11 @@ CORS_ALLOWED_ORIGINS = config(
 # ── Base URL publique des documents (QR de vérification) ──────────────────────
 # Domaine FIXE de vérification des documents officiels : le QR code encode
 # {DOCUMENTS_BASE_URL}/verifier/{token}. Scanné par un téléphone, il ouvre la page
-# publique de vérification. Le domaine de vérification est FIXE — https://ent.iss-gp.mr
+# publique de vérification. Le domaine de vérification est FIXE — https://ent.ipgei.mr
 # — et sert de défaut (indépendant de DOMAIN, qui gère hosts/CORS). Surchargeable via
 # la variable d'env DOCUMENTS_BASE_URL (ex. en dev local pour pointer vers le
 # frontend de test). DOIT rester une URL absolue avec hôte.
-DOCUMENTS_BASE_URL = config('DOCUMENTS_BASE_URL', default='https://ent.iss-gp.mr')
+DOCUMENTS_BASE_URL = config('DOCUMENTS_BASE_URL', default='https://ent.ipgei.mr')
 
 # ── Signature numérique des PDF officiels (PAdES — anti-falsification) ─────────
 # Si activée ET le certificat PKCS#12 existe, chaque document officiel est signé
