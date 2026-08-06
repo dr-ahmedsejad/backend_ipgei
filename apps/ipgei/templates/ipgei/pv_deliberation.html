@@ -19,7 +19,7 @@ de documents se ressemblent.
      sans repli le nom arabe de l'institution sortirait en carrés. */
   body {
     font-family: Calibri, 'Cairo', 'Segoe UI', Arial, sans-serif;
-    font-size: 11pt; color: #1a1a1a;
+    font-size: 12pt; color: #1a1a1a;
   }
   /* Pas de largeur fixe : la page était bâtie sur 297 mm — la feuille ENTIÈRE —
      puis glissée dans les 277 mm qui restent une fois les marges du PDF ôtées.
@@ -32,7 +32,7 @@ de documents se ressemblent.
   .entete td { vertical-align: middle; }
   /* Le bandeau partagé est calibré pour un corps de document : ramené à la
      largeur d'un PV paysage, son texte pèserait trop. */
-  .entete td { font-size: 11pt !important; }
+  .entete td { font-size: 12pt !important; }
   .entete img { height: 52px !important; width: auto !important; }
   /* L'arabe du bandeau partagé : Calibri n'a pas ces glyphes, et le repli
      déclaré plus haut ne joue pas dans ce moteur — le nom arabe disparaissait
@@ -43,11 +43,11 @@ de documents se ressemblent.
   }
   .entete hr { display: none; }
   .ministere { width: 100%; margin-top: 2px; }
-  .ministere td { font-size: 9.5pt !important; color: #444; width: 50%; }
+  .ministere td { font-size: 12pt !important; color: #444; width: 50%; }
   .ministere td:last-child {
     text-align: right; font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
   }
-  .entete-fr, .entete-ar { font-size: 9.5pt; color: #444; line-height: 1.4; width: 36%; }
+  .entete-fr, .entete-ar { font-size: 12pt; color: #444; line-height: 1.4; width: 36%; }
   /* L'arabe garde sa propre pile de polices : Calibri n'a pas ces glyphes, et
      le repli au niveau du `body` n'a pas suffi — seul Calibri s'embarquait
      dans le PDF, et le nom arabe de l'institution disparaissait. */
@@ -65,51 +65,51 @@ de documents se ressemblent.
     display: inline-block; background: #006633; color: #fff; font-size: 15pt;
     font-weight: 700; padding: 5px 24px; border-radius: 5px; text-transform: uppercase;
   }
-  .sous-titre { display: block; margin-top: 4px; font-size: 10.5pt; color: #555; }
+  .sous-titre { display: block; margin-top: 4px; font-size: 12pt; color: #555; }
 
   /* Une édition non validée doit se reconnaître au premier coup d'œil. */
   .projet {
     display: inline-block; margin-top: 5px; padding: 3px 14px; border-radius: 4px;
     background: #fff4e5; border: 1px solid #f0b429; color: #8a5a00;
-    font-size: 9.5pt; font-weight: 700; text-transform: uppercase;
+    font-size: 12pt; font-weight: 700; text-transform: uppercase;
   }
 
   .cartouche { width: 100%; margin: 8px 0 10px; border-collapse: collapse; }
-  .cartouche td { font-size: 10pt; padding: 4px 7px; }
+  .cartouche td { font-size: 12pt; padding: 4px 7px; }
   .cartouche .lab { color: #666; }
   .cartouche .val { font-weight: 700; }
 
   table.pv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
   table.pv th {
-    background: #006633; color: #fff; font-size: 10.5pt; font-weight: 700;
+    background: #006633; color: #fff; font-size: 12pt; font-weight: 700;
     padding: 7px 4px; border: 1px solid #005229; text-align: center;
     line-height: 1.25;
   }
-  table.pv td { font-size: 10.5pt; padding: 5px 4px; border: 1px solid #d5d5d5; text-align: center; }
+  table.pv td { font-size: 12pt; padding: 5px 4px; border: 1px solid #d5d5d5; text-align: center; }
   table.pv td.gauche { text-align: left; }
   table.pv tr:nth-child(even) td { background: #f7faf8; }
   table.pv .moy { font-weight: 700; color: #006633; }
   table.pv .ajustee { background: #fff8e6 !important; }
 
-  .synthese { margin: 6px 0 12px; font-size: 10pt; color: #333; }
+  .synthese { margin: 6px 0 12px; font-size: 12pt; color: #333; }
   .synthese span { display: inline-block; margin-right: 14px; }
   .synthese b { color: #006633; }
 
   .jury-titre {
-    font-size: 11pt; font-weight: 700; color: #006633; text-transform: uppercase;
+    font-size: 12pt; font-weight: 700; color: #006633; text-transform: uppercase;
     border-bottom: 1px solid #006633; padding-bottom: 3px; margin-bottom: 6px;
   }
   table.jury { width: 100%; border-collapse: collapse; }
   table.jury td {
-    width: 25%; vertical-align: top; padding: 7px 8px 5px; font-size: 10pt;
+    width: 25%; vertical-align: top; padding: 7px 8px 5px; font-size: 12pt;
     border: 1px solid #d5d5d5;
   }
-  table.jury .role { color: #666; font-size: 9pt; }
+  table.jury .role { color: #666; font-size: 12pt; }
   table.jury .nom { font-weight: 700; }
-  table.jury .signature { margin-top: 12mm; font-size: 9pt; color: #555; }
+  table.jury .signature { margin-top: 12mm; font-size: 12pt; color: #555; }
   table.jury .signee { color: #006633; font-weight: 700; }
 
-  .mentions { margin-top: 10px; font-size: 9pt; color: #777; text-align: center; }
+  .mentions { margin-top: 10px; font-size: 12pt; color: #777; text-align: center; }
 </style>
 </head>
 <body>
@@ -158,8 +158,8 @@ de documents se ressemblent.
   <table class="pv">
     <thead>
       <tr>
-        <th style="width:13mm">Rang</th>
-        <th style="width:26mm">Matricule</th>
+        <th style="width:12mm">Rang</th>
+        <th style="width:24mm">Matricule</th>
         <th class="gauche">Nom et prénom</th>
         {% if not deliberation.classe %}<th style="width:20mm">Classe</th>{% endif %}
         {% comment %}
@@ -168,11 +168,11 @@ de documents se ressemblent.
         semestres également faibles — c'est pourtant ce qui fonde la décision.
         {% endcomment %}
         {% for code in codes_semestres %}<th style="width:16mm">{{ code }}</th>{% endfor %}
-        <th style="width:20mm">Moyenne</th>
-        <th style="width:16mm">Coef.</th>
+        <th style="width:18mm">Moyenne</th>
+        <th style="width:15mm">Coef.</th>
         <th style="width:33mm">Décision proposée</th>
         <th style="width:33mm">Décision du jury</th>
-        <th class="gauche" style="width:40mm">Motif de l'écart</th>
+        <th class="gauche" style="width:36mm">Motif de l'écart</th>
       </tr>
     </thead>
     <tbody>
