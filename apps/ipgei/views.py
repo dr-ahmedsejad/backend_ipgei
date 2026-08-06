@@ -1738,7 +1738,10 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
     filterset_fields   = ['niveau', 'classe', 'annee_universitaire', 'portee',
                           'statut', 'semestre']
-    ordering           = ['-annee_universitaire', 'niveau']
+    # La plus récente en tête : on ouvre cet écran pour le jury en cours, pas
+    # pour celui de l'an dernier. L'année d'abord — un jury de 2026-2027 créé
+    # avant un rattrapage de 2025-2026 reste devant lui —, puis la création.
+    ordering           = ['-annee_universitaire', '-date_creation']
     pagination_class   = StandardPagination
 
     def perform_create(self, serializer):
