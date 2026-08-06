@@ -14,13 +14,25 @@ de documents se ressemblent.
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @page { size: A4 landscape; margin: 0; }
 
-  body { font-family: 'Cairo', 'Segoe UI', Arial, sans-serif; font-size: 9pt; color: #1a1a1a; }
+  /* Calibri, comme les PV que l'institut édite depuis toujours. Les polices
+     qui suivent ne sont pas décoratives : Calibri ne couvre pas l'arabe, et
+     sans repli le nom arabe de l'institution sortirait en carrés. */
+  body {
+    font-family: Calibri, 'Cairo', 'Segoe UI', Arial, sans-serif;
+    font-size: 9pt; color: #1a1a1a;
+  }
   .page { width: 297mm; padding: 10mm 12mm; position: relative; }
 
   .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 6px; }
   .entete td { vertical-align: middle; }
   .entete-fr, .entete-ar { font-size: 8pt; color: #444; line-height: 1.4; width: 36%; }
-  .entete-ar { direction: rtl; text-align: center; }
+  /* L'arabe garde sa propre pile de polices : Calibri n'a pas ces glyphes, et
+     le repli au niveau du `body` n'a pas suffi — seul Calibri s'embarquait
+     dans le PDF, et le nom arabe de l'institution disparaissait. */
+  .entete-ar {
+    direction: rtl; text-align: center;
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
   .entete-fr { text-align: center; }
   .entete-logo { text-align: center; width: 28%; }
   .entete-logo img { height: 48px; object-fit: contain; }
