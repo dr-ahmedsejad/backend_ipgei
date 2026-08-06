@@ -1757,6 +1757,26 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
                 extra['plafond_rattrapage'] = params.plafond_rattrapage
         serializer.save(**extra)
 
+    #: Ce qu'une délibération validée ne peut plus laisser toucher. Le seuil et
+    #: le plafond ont produit les décisions déjà notifiées ; les changer après
+    #: coup ferait dire au PV signé autre chose que ce qu'il affirme.
+    CHAMPS_FIGES = ('seuil_validation', 'plafond_rattrapage', 'niveau',
+                    'classe', 'portee', 'semestre', 'annee_universitaire')
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance.est_verrouillee:
+            touches = [champ for champ in self.CHAMPS_FIGES
+                       if champ in serializer.validated_data
+                       and serializer.validated_data[champ] != getattr(instance, champ)]
+            if touches:
+                raise ValidationError(
+                    'Délibération validée : ' + ', '.join(touches) +
+                    ' ne peu' + ('vent' if len(touches) > 1 else 't') +
+                    " plus changer. Dévalidez d'abord — les décisions déjà "
+                    'émises seront alors remises en cause.')
+        serializer.save()
+
     def perform_destroy(self, instance):
         if instance.est_verrouillee:
             raise ValidationError('Délibération validée — suppression interdite.')
@@ -1764,7 +1784,34 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
 
     @action(detail=True, methods=['post'], url_path='calculer')
     def calculer(self, request, pk=None):
+        """
+        (Re)calcule le jury, éventuellement sous un AUTRE seuil.
+
+        Le seuil est figé à la création pour qu'un recalcul redonne le même
+        résultat. Mais le jury, en séance, veut voir ce que donnerait un seuil
+        de 9,50 avant d'en décider : passer `seuil_validation` dans le corps le
+        pose sur la délibération PUIS recalcule, en une fois. Deux requêtes
+        laisseraient, entre les deux, une délibération dont le seuil ne
+        correspond plus aux décisions affichées.
+        """
         deliberation = self.get_object()
+
+        seuil = request.data.get('seuil_validation')
+        if seuil not in (None, ''):
+            if deliberation.est_verrouillee:
+                raise ValidationError(
+                    {'seuil_validation': 'Délibération validée : le seuil qui a '
+                                         'fondé les décisions ne peut plus changer.'})
+            try:
+                seuil = Decimal(str(seuil))
+            except (ArithmeticError, TypeError, ValueError):
+                raise ValidationError({'seuil_validation': 'Seuil invalide.'})
+            if not (Decimal('0') <= seuil <= Decimal('20')):
+                raise ValidationError(
+                    {'seuil_validation': 'Le seuil se situe entre 0 et 20.'})
+            deliberation.seuil_validation = seuil
+            deliberation.save(update_fields=['seuil_validation'])
+
         total = self._executer(services.calculer_deliberation, deliberation)
         deliberation.refresh_from_db()
         return Response({
