@@ -206,6 +206,7 @@ def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
                                              deliberation.institution),
         'classe_libelle':    _classes_libelle(lignes),
         'semestre_libelle':  services.libelle_semestre_ordinal(semestre.code) if semestre else '',
+        'annee_universitaire': deliberation.annee_universitaire,
         'effectif':          len(lignes),
         'moyenne_promotion': moyenne_promotion,
         'blocs':             sorted(blocs, key=_clef_tri(tri)),

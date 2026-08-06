@@ -22,6 +22,10 @@ quel semestre il s'agit.
     color: #1a1a1a;
   }
   .filet { border-bottom: 1px solid #999; height: 0; padding: 0; }
+  .annee {
+    text-align: center; font-size: 8pt; font-weight: 600;
+    color: #555; padding: 2px 0 0;
+  }
 </style>
 </head>
 <body>
@@ -33,20 +37,33 @@ sociale, et rien n'aurait signalé l'écart avec le reste des pièces.
 {% endcomment %}
 <div class="institution">{% include '_institution_header.html' %}</div>
 
+{% comment %}
+Largeurs imposées aux trois cellules : sans elles, chacune se dimensionne sur
+son contenu et l'effectif se retrouve là où le texte le pousse — jamais au
+milieu de la page. 40 / 20 / 40 place le compte au centre exact.
+{% endcomment %}
 <table>
   <tr>
-    <td>{{ libelle_cursus }} ({{ classe_libelle }})</td>
-    <td style="text-align:center;">{{ effectif }} Étudiant{{ effectif|pluralize }}</td>
+    <td style="width:40%;">{{ libelle_cursus }} ({{ classe_libelle }})</td>
+    <td style="width:20%;text-align:center;white-space:nowrap;">
+      {{ effectif }} Étudiant{{ effectif|pluralize }}
+    </td>
     {% comment %}
     L'ordre de lecture est imprimé : deux tirages du même document, l'un par
     classement l'autre par matricule, sont impossibles à distinguer sur la
     table du jury sans cette mention.
     {% endcomment %}
-    <td style="text-align:right;">
+    <td style="width:40%;text-align:right;">
       {{ semestre_libelle }}{% if tri_libelle %} &middot; par {{ tri_libelle }}{% endif %}
     </td>
   </tr>
   <tr><td colspan="3" class="filet"></td></tr>
+  {% comment %}
+  L'année universitaire sous le filet : le document circule d'une promotion à
+  l'autre dans les archives du jury, et rien sur la page ne disait de laquelle
+  il s'agissait.
+  {% endcomment %}
+  <tr><td colspan="3" class="annee">{{ annee_universitaire }}</td></tr>
 </table>
 
 </body>
