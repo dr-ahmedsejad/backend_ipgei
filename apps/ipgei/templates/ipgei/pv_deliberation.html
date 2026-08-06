@@ -151,8 +151,6 @@ de documents se ressemblent.
     <tr>
       <td class="lab">Effectif délibéré</td><td class="val">{{ effectif }}</td>
       <td class="lab">Seuil de validation</td><td class="val">{{ deliberation.seuil_validation|floatformat:2 }} / 20</td>
-      <td class="lab">Plafond de rattrapage</td>
-      <td class="val">{% if deliberation.plafond_rattrapage %}{{ deliberation.plafond_rattrapage|floatformat:2 }}{% else %}aucun{% endif %}</td>
       <td class="lab">Date de validation</td>
       <td class="val">{% if deliberation.date_validation %}{{ deliberation.date_validation|date:"d/m/Y" }}{% else %}—{% endif %}</td>
     </tr>
