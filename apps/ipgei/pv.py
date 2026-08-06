@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from apps.documents.services import _get_logo_b64
 from core.pdf_renderer import render_pdf_bytes
+from core.pdf_utils import get_institution_context
 
 from . import services
 from .models import Deliberation, LigneDeliberation
@@ -109,7 +110,10 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
         if ligne.decision:
             repartition[ligne.decision] = repartition.get(ligne.decision, 0) + 1
 
-    return {
+    # L'en-tête partagé lit `inst_nom_fr`, `inst_logo_url`… : sans ce contexte
+    # il se rendrait vide, sans la moindre erreur.
+    donnees = get_institution_context()
+    donnees.update({
         'deliberation':  deliberation,
         'institution':   deliberation.institution,
         'logo_b64':      _get_logo_b64(deliberation.institution),
@@ -131,7 +135,8 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
         ],
         'date_edition':  date.today().strftime('%d/%m/%Y'),
         'base_url':      base_url,
-    }
+    })
+    return donnees
 
 
 def generer_pdf(deliberation: Deliberation, *, base_url: str = '') -> bytes:

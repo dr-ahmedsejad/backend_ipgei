@@ -28,8 +28,18 @@ de documents se ressemblent.
      libre, le contenu occupe exactement la zone imprimable, à l'échelle 1. */
   .page { width: auto; padding: 0; position: relative; }
 
-  .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 6px; }
+  .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 4px; }
   .entete td { vertical-align: middle; }
+  /* Le bandeau partagé est calibré pour un corps de document : ramené à la
+     largeur d'un PV paysage, son texte pèserait trop. */
+  .entete td { font-size: 11pt !important; }
+  .entete img { height: 52px !important; width: auto !important; }
+  .entete hr { display: none; }
+  .ministere { width: 100%; margin-top: 2px; }
+  .ministere td { font-size: 9.5pt !important; color: #444; width: 50%; }
+  .ministere td:last-child {
+    text-align: right; font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
   .entete-fr, .entete-ar { font-size: 9.5pt; color: #444; line-height: 1.4; width: 36%; }
   /* L'arabe garde sa propre pile de polices : Calibri n'a pas ces glyphes, et
      le repli au niveau du `body` n'a pas suffi — seul Calibri s'embarquait
@@ -98,21 +108,24 @@ de documents se ressemblent.
 <body>
 <div class="page">
 
-  <table class="entete">
-    <tr>
-      <td class="entete-fr">
-        {% if institution.ministere_fr %}<div>{{ institution.ministere_fr }}</div>{% endif %}
-        <span class="inst-nom">{{ institution.nom_display }}</span>
-      </td>
-      <td class="entete-logo">
-        {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
-      </td>
-      <td class="entete-ar">
-        {% if institution.ministere_ar %}<div>{{ institution.ministere_ar }}</div>{% endif %}
-        {% if institution.nom_ar %}<span class="inst-nom">{{ institution.nom_ar }}</span>{% endif %}
-      </td>
-    </tr>
-  </table>
+  {% comment %}
+  En-tête partagé — celui du suivi, des relevés, de la fiche de collecte et du
+  détail des notes. Le PV avait le sien, qui lisait pourtant les mêmes champs :
+  deux gabarits à tenir pour un seul bandeau, et deux occasions de diverger.
+  Le ministère, que celui-ci n'affiche pas, reste sous le filet — il figure sur
+  les PV de l'institut, et le perdre serait une régression.
+  {% endcomment %}
+  <div class="entete">
+    {% include '_institution_header.html' %}
+    {% if institution.ministere_fr or institution.ministere_ar %}
+    <table class="ministere">
+      <tr>
+        <td>{{ institution.ministere_fr }}</td>
+        <td dir="rtl" lang="ar">{{ institution.ministere_ar }}</td>
+      </tr>
+    </table>
+    {% endif %}
+  </div>
 
   <div class="titre-zone">
     <span class="titre">{{ titre }}</span>
