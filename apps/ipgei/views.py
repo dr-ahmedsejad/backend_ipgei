@@ -3178,21 +3178,33 @@ class TableauBordIPGEIViewSet(GenericViewSet):
     @action(detail=False, methods=['get'], url_path='annees', pagination_class=NoPagination)
     def annees(self, request):
         """
-        Années universitaires ayant au moins une classe — sélecteur global.
+        Années universitaires proposées par le sélecteur global.
 
-        `?saisissables=1` ne renvoie que celles où des notes peuvent encore être
-        saisies, c'est-à-dire dont un semestre au moins n'est pas clôturé. Les
-        écrans de saisie s'en servent pour ne pas proposer une année sur laquelle
-        toute écriture serait refusée — proposer un choix qui ne mène qu'à un
-        message d'erreur n'est pas un choix.
+        UNION de deux ensembles, et c'est voulu :
+
+          · celles DÉCLARÉES au registre du socle (`parametres.Year`, l'écran
+            Paramètres → Années), pour qu'une année ouverte par la scolarité
+            soit sélectionnable avant même qu'une classe y existe ;
+          · celles qui portent DÉJÀ des classes IPGEI, pour qu'aucune année
+            peuplée ne devienne inatteignable si elle manque au registre.
+
+        Ne lire que le registre ferait disparaître des écrans une année où des
+        étudiants sont inscrits ; ne lire que les classes laisse le registre et
+        IPGEI diverger sans que rien ne le dise. Les deux sources restent
+        alignées par `socle.annee_socle()`, appelé dès qu'IPGEI ouvre une année.
+
+        `?saisissables=1` ne renvoie que celles où une note peut encore être
+        écrite — un semestre au moins non clôturé, et l'année non close au
+        registre. Proposer un choix qui ne mène qu'à un refus n'est pas un choix.
         """
-        annees = list(
-            Classe.objects.values_list('annee_universitaire', flat=True)
-            .distinct().order_by('-annee_universitaire')
+        from apps.parametres.models import Year
+
+        annees = sorted(
+            set(Classe.objects.values_list('annee_universitaire', flat=True))
+            | set(Year.objects.values_list('annee', flat=True)),
+            reverse=True,
         )
         if str(request.query_params.get('saisissables', '')).lower() in ('1', 'true', 'on'):
-            from apps.parametres.models import Year
-
             # Deux verrous, indépendants : l'année close au registre du socle
             # (décision d'établissement) et le semestre clôturé au calendrier
             # IPGEI. N'en regarder qu'un laissait proposer une année fermée.

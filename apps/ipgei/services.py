@@ -1868,6 +1868,12 @@ def creer_semestres_annee(annee_universitaire: str, institution) -> list:
             {'annee_universitaire': "Année attendue sous la forme « 2026-2027 »."}
         )
 
+    # L'année est d'abord déclarée au REGISTRE du socle : c'est lui l'autorité
+    # — l'écran Paramètres → Années la montre, la grille tarifaire s'y accroche.
+    # L'ouvrir ici sans l'y inscrire laissait les deux sources diverger.
+    from .socle import annee_socle
+    annee_socle(annee_universitaire)
+
     parametres = ParametresIPGEI.pour(institution)
     crees = []
     for code, _ in CODE_SEMESTRE_CHOICES:
@@ -2177,6 +2183,11 @@ def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = 
 
     institution = deliberation.institution
     cible = annee_cible or annee_suivante(deliberation.annee_universitaire)
+    # Le passage OUVRE une année : elle doit exister au registre du socle avant
+    # qu'on y inscrive qui que ce soit, sans quoi la grille tarifaire ne s'y
+    # accroche pas et les frais sortent à zéro.
+    from .socle import annee_socle
+    annee_socle(cible)
 
     crees, deja, refuses = [], [], []
     with transaction.atomic():

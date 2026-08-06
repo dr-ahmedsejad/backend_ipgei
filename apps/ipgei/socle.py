@@ -56,6 +56,27 @@ def filiere_socle(institution) -> Filiere:
     return filiere
 
 
+def annee_socle(annee_universitaire: str):
+    """
+    Inscrit l'année au registre du socle (`parametres.Year`, table `annee`) si
+    elle n'y est pas, et la renvoie.
+
+    IPGEI porte l'année en TEXTE sur ses classes, ses semestres et ses
+    inscriptions ; le socle la porte en TABLE, et c'est celle-là qui est
+    l'autorité — l'écran Paramètres → Années la montre, la grille tarifaire s'y
+    accroche, la clôture d'exercice s'y décide.
+
+    Ouvrir une année côté IPGEI sans l'y déclarer laissait les deux sources
+    diverger en silence : `frais_pour()` cherche l'année au registre et, ne la
+    trouvant pas, rendait un tarif NUL. C'est ainsi que des inscriptions se sont
+    ouvertes à zéro sans que rien ne l'explique.
+    """
+    from apps.parametres.models import Year
+
+    annee, _ = Year.objects.get_or_create(annee=annee_universitaire)
+    return annee
+
+
 def niveau_socle(libelle: str) -> Niveau:
     """`parametres.Niveau` correspondant à MPSI ou MP, créé au besoin."""
     niveau, _ = Niveau.objects.get_or_create(niveau=libelle)
