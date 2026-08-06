@@ -87,6 +87,9 @@ de documents se ressemblent.
   }
   table.pv td { font-size: 12pt; padding: 5px 4px; border: 1px solid #d5d5d5; text-align: center; }
   table.pv td.gauche { text-align: left; }
+  /* Coupure aux espaces seulement, et pas de césure : les deux libellés les
+     plus longs tiennent sur deux lignes entières plutôt que sur trois morceaux. */
+  table.pv td { word-break: keep-all; hyphens: none; }
   table.pv tr:nth-child(even) td { background: #f7faf8; }
   table.pv .moy { font-weight: 700; color: #006633; }
   table.pv .ajustee { background: #fff8e6 !important; }
@@ -169,10 +172,9 @@ de documents se ressemblent.
         {% endcomment %}
         {% for code in codes_semestres %}<th style="width:16mm">{{ code }}</th>{% endfor %}
         <th style="width:18mm">Moyenne</th>
-        <th style="width:15mm">Coef.</th>
-        <th style="width:33mm">Décision proposée</th>
-        <th style="width:33mm">Décision du jury</th>
-        <th class="gauche" style="width:36mm">Motif de l'écart</th>
+        <th style="width:42mm">Décision proposée</th>
+        <th style="width:42mm">Décision du jury</th>
+        <th class="gauche" style="width:32mm">Motif de l'écart</th>
       </tr>
     </thead>
     <tbody>
@@ -186,7 +188,6 @@ de documents se ressemblent.
           <td>{{ moyenne|default_if_none:"—"|floatformat:2 }}</td>
         {% endfor %}
         <td class="moy">{{ ligne.moyenne_generale|default_if_none:"—"|floatformat:2 }}</td>
-        <td>{{ ligne.total_coefficients|default_if_none:"—"|floatformat:2 }}</td>
         <td>{{ ligne.get_decision_auto_display|default:"—" }}</td>
         <td class="{% if ligne.est_ajustee %}ajustee{% endif %}">
           {{ ligne.get_decision_display|default:"—" }}
@@ -194,7 +195,7 @@ de documents se ressemblent.
         <td class="gauche {% if ligne.est_ajustee %}ajustee{% endif %}">{{ ligne.motif_ajustement }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="{{ codes_semestres|length|add:9 }}">Aucun étudiant délibéré.</td></tr>
+      <tr><td colspan="{{ codes_semestres|length|add:8 }}">Aucun étudiant délibéré.</td></tr>
       {% endfor %}
     </tbody>
   </table>
