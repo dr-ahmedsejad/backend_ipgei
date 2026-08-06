@@ -21,7 +21,12 @@ de documents se ressemblent.
     font-family: Calibri, 'Cairo', 'Segoe UI', Arial, sans-serif;
     font-size: 11pt; color: #1a1a1a;
   }
-  .page { width: 297mm; padding: 10mm 12mm; position: relative; }
+  /* Pas de largeur fixe : la page était bâtie sur 297 mm — la feuille ENTIÈRE —
+     puis glissée dans les 277 mm qui restent une fois les marges du PDF ôtées.
+     wkhtmltopdf réduisait donc tout d'un vingtième, ce qui rapetissait le texte
+     et empêchait le tableau d'atteindre les bords. En laissant la largeur
+     libre, le contenu occupe exactement la zone imprimable, à l'échelle 1. */
+  .page { width: auto; padding: 0; position: relative; }
 
   .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 6px; }
   .entete td { vertical-align: middle; }
@@ -59,8 +64,9 @@ de documents se ressemblent.
 
   table.pv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
   table.pv th {
-    background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
-    padding: 6px 3px; border: 1px solid #005229; text-align: center;
+    background: #006633; color: #fff; font-size: 10.5pt; font-weight: 700;
+    padding: 7px 4px; border: 1px solid #005229; text-align: center;
+    line-height: 1.25;
   }
   table.pv td { font-size: 10.5pt; padding: 5px 4px; border: 1px solid #d5d5d5; text-align: center; }
   table.pv td.gauche { text-align: left; }
