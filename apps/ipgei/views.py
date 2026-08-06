@@ -316,6 +316,28 @@ class SousGroupeTPViewSet(ModelViewSet):
 
 class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
     """Rattachement des étudiants aux classes."""
+
+    @action(detail=False, methods=['post'], url_path='recalculer-frais')
+    def recalculer_frais(self, request):
+        """
+        Repose le tarif de la grille sur les inscriptions d'une année.
+
+        Le montant est figé à la création — c'est ce qui garde un reçu exact
+        quand la grille change en cours d'année. Mais renseignée APRÈS coup,
+        elle laissait les dossiers à zéro sans que rien ne les rattrape : le
+        cas d'un passage en année supérieure ouvert avant que la scolarité
+        n'ait fixé les tarifs.
+
+        Les inscriptions déjà payées sont laissées telles quelles.
+        """
+        annee = request.data.get('annee_universitaire')
+        if not annee:
+            raise ValidationError({'annee_universitaire': 'Année requise.'})
+        return Response(self._executer(
+            services.recalculer_frais, annee,
+            institution=_institution_principale(),
+            classe_id=request.data.get('classe'),
+        ))
     serializer_class   = InscriptionIPGEISerializer
     permission_classes = [RBACPermission]
     required_module    = 'ipgei_inscriptions'

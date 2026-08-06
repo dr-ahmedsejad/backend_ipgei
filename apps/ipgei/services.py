@@ -2258,3 +2258,50 @@ def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = 
         'refuses':       refuses,
         'sans_tarif':    len(sans_tarif),
     }
+
+
+def recalculer_frais(annee_universitaire: str, institution=None,
+                     classe_id=None) -> dict:
+    """
+    Repose le tarif de la grille sur les inscriptions d'une année.
+
+    Le montant est FIGÉ sur l'inscription à sa création : c'est ce qui permet
+    à un reçu de rester exact quand la grille change en cours d'année. Mais
+    quand la grille est renseignée APRÈS coup — le cas d'un passage en année
+    supérieure ouvert avant que la scolarité n'ait fixé les tarifs —, les
+    dossiers restent à zéro et rien ne le rattrape.
+
+    Les inscriptions DÉJÀ PAYÉES ne sont pas touchées : un reçu porte le
+    montant encaissé, le réécrire ferait mentir une pièce déjà remise. Elles
+    sont comptées à part, pour qu'un écart connu ne passe pas pour un oubli.
+    """
+    requete = (InscriptionIPGEI.objects
+               .filter(annee_universitaire=annee_universitaire)
+               .select_related('classe'))
+    if institution is not None:
+        requete = requete.filter(classe__institution=institution)
+    if classe_id:
+        requete = requete.filter(classe_id=classe_id)
+
+    tarifs = {}
+    modifiees, payees, inchangees = 0, 0, 0
+    for inscription in requete:
+        if inscription.est_payee:
+            payees += 1
+            continue
+        if inscription.classe_id not in tarifs:
+            tarifs[inscription.classe_id] = frais_pour(inscription.classe)
+        montant = tarifs[inscription.classe_id]
+        if inscription.montant_frais == montant:
+            inchangees += 1
+            continue
+        inscription.montant_frais = montant
+        inscription.save(update_fields=['montant_frais'])
+        modifiees += 1
+
+    return {
+        'annee_universitaire': annee_universitaire,
+        'mises_a_jour':        modifiees,
+        'deja_payees':         payees,
+        'inchangees':          inchangees,
+    }
