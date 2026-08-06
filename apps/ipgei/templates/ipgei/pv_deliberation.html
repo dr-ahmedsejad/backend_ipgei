@@ -34,6 +34,13 @@ de documents se ressemblent.
      largeur d'un PV paysage, son texte pèserait trop. */
   .entete td { font-size: 11pt !important; }
   .entete img { height: 52px !important; width: auto !important; }
+  /* L'arabe du bandeau partagé : Calibri n'a pas ces glyphes, et le repli
+     déclaré plus haut ne joue pas dans ce moteur — le nom arabe disparaissait
+     du PDF sans erreur. Le bandeau n'ayant pas de classe sur ses cellules,
+     c'est la dernière qui le porte. */
+  .entete td:last-child {
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
   .entete hr { display: none; }
   .ministere { width: 100%; margin-top: 2px; }
   .ministere td { font-size: 9.5pt !important; color: #444; width: 50%; }
