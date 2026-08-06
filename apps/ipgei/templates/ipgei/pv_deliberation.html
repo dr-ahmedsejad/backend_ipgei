@@ -124,6 +124,12 @@ de documents se ressemblent.
         <th style="width:24mm">Matricule</th>
         <th class="gauche">Nom et prénom</th>
         <th style="width:20mm">Classe</th>
+        {% comment %}
+        Les moyennes de semestre, sur un PV annuel : sans elles le jury lit un
+        9,80 sans savoir s'il vient d'un semestre raté puis rattrapé ou de deux
+        semestres également faibles — c'est pourtant ce qui fonde la décision.
+        {% endcomment %}
+        {% for code in codes_semestres %}<th style="width:14mm">{{ code }}</th>{% endfor %}
         <th style="width:18mm">Moyenne</th>
         <th style="width:16mm">Coef.</th>
         <th style="width:34mm">Décision proposée</th>
@@ -138,6 +144,9 @@ de documents se ressemblent.
         <td>{{ ligne.inscription.etudiant.matricule }}</td>
         <td class="gauche">{{ ligne.inscription.etudiant.nom_display }}</td>
         <td>{{ ligne.inscription.classe.nom }}</td>
+        {% for moyenne in ligne.par_semestre %}
+          <td>{{ moyenne|default_if_none:"—"|floatformat:2 }}</td>
+        {% endfor %}
         <td class="moy">{{ ligne.moyenne_generale|default_if_none:"—"|floatformat:2 }}</td>
         <td>{{ ligne.total_coefficients|default_if_none:"—"|floatformat:2 }}</td>
         <td>{{ ligne.get_decision_auto_display|default:"—" }}</td>
@@ -147,7 +156,7 @@ de documents se ressemblent.
         <td class="gauche {% if ligne.est_ajustee %}ajustee{% endif %}">{{ ligne.motif_ajustement }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="9">Aucun étudiant délibéré.</td></tr>
+      <tr><td colspan="{{ codes_semestres|length|add:9 }}">Aucun étudiant délibéré.</td></tr>
       {% endfor %}
     </tbody>
   </table>

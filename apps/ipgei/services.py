@@ -1571,6 +1571,25 @@ def libelle_annee_du_niveau(code_niveau: str, institution=None) -> str:
     return '1re année' if rang == 1 else f'{rang}e année'
 
 
+def libelle_pv(deliberation) -> str:
+    """
+    Titre du procès-verbal, dans la forme que l'institut édite depuis
+    toujours : « PV des Résultats annuels de la Classe MPSI A ».
+
+    Il nomme la CLASSE : deux PV d'un même niveau ne se distinguaient
+    autrement qu'à leur contenu, ce qui, sur une table de jury où circulent
+    quatre feuillets, ne suffit pas. Les jurys tenus avant que la
+    délibération ne soit rattachée à une classe portent leur niveau — dire
+    « Classe MPSI » d'un document qui couvre deux classes serait faux.
+    """
+    portee = ('annuels' if deliberation.portee == deliberation.PORTEE_ANNUELLE
+              else f'du {deliberation.semestre.code}'
+                   if deliberation.semestre_id else '')
+    cible = (f'la Classe {deliberation.classe.nom}' if deliberation.classe_id
+             else f'du niveau {deliberation.niveau}')
+    return f'PV des Résultats {portee} de {cible}'.replace('  ', ' ')
+
+
 def libelle_classe(classe) -> str:
     """
     Classe telle qu'elle se nomme sur les documents : « Cursus (Classe) ».

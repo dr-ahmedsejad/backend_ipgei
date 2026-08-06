@@ -13,6 +13,7 @@ document définitif.
 """
 import logging
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 from django.utils import timezone
@@ -50,8 +51,37 @@ def _lignes(deliberation: Deliberation):
     return (
         deliberation.lignes
         .select_related('inscription__etudiant', 'inscription__classe')
+        .prefetch_related('details__semestre')
         .order_by('rang', '-moyenne_generale')
     )
+
+
+def _moyennes_par_semestre(lignes, codes: list) -> None:
+    """
+    Pose sur chaque ligne la moyenne de chaque semestre de l'année.
+
+    Un PV annuel qui ne montre que la moyenne générale ne dit pas ce qui la
+    compose : le jury voit un 9,80 sans savoir s'il vient d'un semestre raté
+    rattrapé, ou de deux semestres également faibles — et c'est justement la
+    différence qui fonde une décision.
+
+    Calculées sur les DÉTAILS figés à la délibération, non recalculées depuis
+    les notes : le PV doit dire ce que le jury a vu, même si une note a bougé
+    depuis.
+    """
+    for ligne in lignes:
+        cumuls = {code: [Decimal('0'), Decimal('0')] for code in codes}
+        for detail in ligne.details.all():
+            code = detail.semestre.code if detail.semestre_id else None
+            if code not in cumuls or detail.note_retenue is None:
+                continue
+            coef = Decimal(detail.coefficient or 0)
+            cumuls[code][0] += Decimal(detail.note_retenue) * coef
+            cumuls[code][1] += coef
+        ligne.par_semestre = [
+            (cumul / poids).quantize(Decimal('0.01')) if poids else None
+            for cumul, poids in (cumuls[code] for code in codes)
+        ]
 
 
 def _libelle_decision(code: str) -> str:
@@ -62,6 +92,15 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
     """Contexte de rendu du PV — partagé par le PDF et, en partie, par l'Excel."""
     lignes = list(_lignes(deliberation))
     membres = services.membres_jury_ordonnes(deliberation)
+
+    # Colonnes de semestre : seulement sur un PV ANNUEL. Sur un PV de semestre,
+    # elles répéteraient la moyenne générale dans une colonne voisine.
+    codes_semestres = (
+        services.codes_semestres_du_niveau(deliberation.niveau, deliberation.institution)
+        if deliberation.portee == Deliberation.PORTEE_ANNUELLE else []
+    )
+    if codes_semestres:
+        _moyennes_par_semestre(lignes, codes_semestres)
 
     # Répartition des décisions : le jury la relit avant de signer, et elle
     # évite de recompter à la main sur une promotion de 80 élèves.
@@ -74,7 +113,11 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
         'deliberation':  deliberation,
         'institution':   deliberation.institution,
         'logo_b64':      _get_logo_b64(deliberation.institution),
-        'titre':         'Procès-verbal de délibération',
+        # Le titre nomme la CLASSE, comme les PV que l'institut édite depuis
+        # toujours : « PV des Résultats annuels de la Classe MPSI A ». Sans
+        # elle, deux PV d'un même niveau ne se distinguent qu'au contenu.
+        'titre':         services.libelle_pv(deliberation),
+        'codes_semestres': codes_semestres,
         'est_projet':    deliberation.statut != Deliberation.STATUT_VALIDEE,
         'niveau_libelle': 'MPSI — 1re année' if deliberation.niveau == 'MPSI' else 'MP — 2e année',
         'portee_libelle': (f'Semestre {deliberation.semestre.code}'
@@ -104,6 +147,7 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
     classeur = Workbook()
     feuille  = classeur.active
@@ -113,8 +157,8 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     blanc   = Font(color='FFFFFF', bold=True, size=10)
     bordure = Border(*[Side(style='thin', color='D5D5D5')] * 4)
 
-    feuille['A1'] = f'Procès-verbal de délibération — {deliberation.niveau} '\
-                    f'{deliberation.annee_universitaire}'
+    feuille['A1'] = (f'{services.libelle_pv(deliberation)} — '
+                     f'{deliberation.annee_universitaire}')
     feuille['A1'].font = Font(bold=True, size=13, color='006633')
     feuille['A2'] = (f'{"Semestre " + deliberation.semestre.code if deliberation.semestre_id else "Année complète"}'
                      f' · Seuil {deliberation.seuil_validation} · '
@@ -122,18 +166,32 @@ def generer_excel(deliberation: Deliberation) -> bytes:
                      f'{" — PROJET, non validé" if deliberation.statut != Deliberation.STATUT_VALIDEE else ""}')
     feuille['A2'].font = Font(size=9, italic=True, color='555555')
 
-    for colonne, libelle in enumerate(EN_TETES, start=1):
+    # Mêmes colonnes que le PDF, semestres compris : le classeur sert à
+    # retrier et à recompter, il ne doit pas montrer moins que la feuille
+    # signée.
+    codes_semestres = (
+        services.codes_semestres_du_niveau(deliberation.niveau, deliberation.institution)
+        if deliberation.portee == Deliberation.PORTEE_ANNUELLE else []
+    )
+    entetes = EN_TETES[:4] + list(codes_semestres) + EN_TETES[4:]
+    for colonne, libelle in enumerate(entetes, start=1):
         cellule = feuille.cell(row=4, column=colonne, value=libelle)
         cellule.fill, cellule.font, cellule.border = vert, blanc, bordure
         cellule.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-    for index, ligne in enumerate(_lignes(deliberation), start=5):
+    lignes = list(_lignes(deliberation))
+    if codes_semestres:
+        _moyennes_par_semestre(lignes, codes_semestres)
+
+    for index, ligne in enumerate(lignes, start=5):
         etudiant = ligne.inscription.etudiant
         valeurs = [
             ligne.rang,
             etudiant.matricule,
             getattr(etudiant, 'nom_display', None) or etudiant.nom,
             ligne.inscription.classe.nom,
+            *[float(m) if m is not None else None
+              for m in getattr(ligne, 'par_semestre', [])],
             float(ligne.moyenne_generale) if ligne.moyenne_generale is not None else None,
             float(ligne.total_coefficients) if ligne.total_coefficients is not None else None,
             _libelle_decision(ligne.decision_auto),
@@ -141,14 +199,21 @@ def generer_excel(deliberation: Deliberation) -> bytes:
             ligne.motif_ajustement,
             ligne.observations,
         ]
+        # Les colonnes numériques suivent le nombre de semestres insérés : les
+        # figer à (5, 6) laissait la moyenne générale en texte dès qu'une
+        # colonne s'ajoutait devant.
+        numeriques = set(range(5, 5 + len(codes_semestres) + 2))
         for colonne, valeur in enumerate(valeurs, start=1):
             cellule = feuille.cell(row=index, column=colonne, value=valeur)
             cellule.border = bordure
-            if colonne in (5, 6):
+            if colonne in numeriques:
                 cellule.number_format = '0.00'
 
-    for colonne, largeur in zip('ABCDEFGHIJ', (7, 16, 30, 12, 15, 12, 24, 24, 34, 26)):
-        feuille.column_dimensions[colonne].width = largeur
+    largeurs = ([7, 16, 30, 12] + [9] * len(codes_semestres)
+                + [15, 12, 24, 24, 34, 26])
+    for index_colonne, largeur in enumerate(largeurs, start=1):
+        feuille.column_dimensions[
+            get_column_letter(index_colonne)].width = largeur
     feuille.freeze_panes = 'A5'
 
     jury = classeur.create_sheet('Jury')
