@@ -2181,12 +2181,19 @@ def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = 
             "qu'un bilan intermédiaire."
         )
 
+    from apps.parametres.models import Year
+
     institution = deliberation.institution
     cible = annee_cible or annee_suivante(deliberation.annee_universitaire)
     # Le passage OUVRE une année : elle doit exister au registre du socle avant
     # qu'on y inscrive qui que ce soit, sans quoi la grille tarifaire ne s'y
     # accroche pas et les frais sortent à zéro.
+    #
+    # Créer l'année est un acte discret — un libellé, sans dates ni tarif — mais
+    # il ne doit pas être SILENCIEUX : c'est en la découvrant après coup qu'on
+    # se demande d'où elle sort. Le bilan le dira.
     from .socle import annee_socle
+    annee_ouverte = not Year.objects.filter(annee=cible).exists()
     annee_socle(cible)
 
     crees, deja, refuses = [], [], []
@@ -2229,6 +2236,11 @@ def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = 
                     etudiant=etudiant, classe=classe, annee_universitaire=cible,
                     statut=statut, nb_redoublements=nb,
                     montant_frais=montant,
+                    # D'où vient ce dossier : la ligne de jury qui l'a décidé.
+                    # Sans ce lien, une inscription de MP ne dit pas de quelle
+                    # décision elle procède, ni quelle décision est restée
+                    # lettre morte.
+                    issue_de=candidat['ligne'],
                 )
                 inscrire_aux_matieres(nouvelle)
             except ValidationError as exc:
@@ -2257,6 +2269,7 @@ def passer_en_annee_suivante(deliberation: Deliberation, *, niveau_cible: str = 
         'crees':         crees,
         'refuses':       refuses,
         'sans_tarif':    len(sans_tarif),
+        'annee_ouverte': annee_ouverte,
     }
 
 

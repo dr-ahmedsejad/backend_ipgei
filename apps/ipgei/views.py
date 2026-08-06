@@ -1805,6 +1805,17 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
     def perform_destroy(self, instance):
         if instance.est_verrouillee:
             raise ValidationError('Délibération validée — suppression interdite.')
+        # Les inscriptions nées d'un passage pointent la ligne qui les a
+        # décidées : effacer la délibération effacerait l'origine de dossiers
+        # bien réels. La base le refuserait de toute façon (PROTECT) — mais
+        # avec un message que personne ne comprend.
+        issues = InscriptionIPGEI.objects.filter(
+            issue_de__deliberation=instance).count()
+        if issues:
+            raise ValidationError(
+                f'{issues} inscription(s) découlent de ce jury : la supprimer '
+                "effacerait leur origine. Défaites d'abord ces inscriptions."
+            )
         instance.delete()
 
     @action(detail=True, methods=['post'], url_path='calculer')

@@ -791,6 +791,17 @@ class InscriptionIPGEI(models.Model):
     numero_ordre        = models.PositiveSmallIntegerField(
         null=True, blank=True, help_text="Rang alphabétique dans la classe (affichage listes).",
     )
+    #: Ligne de jury dont cette inscription procède, quand elle vient d'un
+    #: passage en année supérieure. Elle répond à trois questions que rien ne
+    #: permettait de poser : d'où vient ce dossier, cette décision a-t-elle été
+    #: suivie d'effet, et laquelle ne l'a pas été.
+    #:
+    #: `PROTECT` : effacer la délibération effacerait l'origine de dossiers bien
+    #: réels. Nulle sur une inscription saisie à la main — la plupart.
+    issue_de            = models.ForeignKey(
+        'ipgei.LigneDeliberation', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='inscriptions_issues',
+    )
     statut              = models.CharField(max_length=15, choices=STATUT_CHOICES, default=STATUT_ACTIF)
     nb_redoublements    = models.PositiveSmallIntegerField(
         default=0,
