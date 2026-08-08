@@ -290,6 +290,8 @@ TUTELLES_CNIM = [
      'fr': "Ministère de l'Enseignement Supérieur et de la Recherche Scientifique"},
     {'ar': 'الأركان العامة للجيوش',
      'fr': 'Etat-Major Général des Armées'},
+    {'ar': 'مجمع بوليتكنيك',
+     'fr': 'Groupe Polytechnique'},
 ]
 
 

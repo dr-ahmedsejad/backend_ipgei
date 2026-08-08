@@ -23,6 +23,14 @@ c'est lui qui autorise à concourir.
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @page { size: A4 portrait; margin: 0; }
 
+  /* ── Palette ─────────────────────────────────────────────────────────
+     Celle de l'épreuve validée, et celle du drapeau : le vert national de
+     l'institut, l'or et le rouge. Les valeurs sont écrites en clair — le
+     moteur de rendu (WebKit de wkhtmltopdf) ignore les variables CSS, une
+     couleur passée par `var()` sortirait en noir sans le dire.
+       vert    #006233   ·  or   #FFC400   ·  rouge #CD2A3E
+       vert sourd #2C5F45 pour le nom de l'institut
+     ─────────────────────────────────────────────────────────────────── */
   body { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 11pt; color: #111; }
   .page { width: 210mm; min-height: 297mm; padding: 12mm 16mm; }
 
@@ -35,19 +43,35 @@ c'est lui qui autorise à concourir.
   .fr { font-weight: 700; }
   .tutelle .bloc { margin-bottom: 5px; }
 
-  .filet-tricolore {
-    height: 3px; margin: 6px 0 0;
-    background: linear-gradient(90deg, #006233 0 33%, #ffc400 33% 66%, #cd2a3e 66% 100%);
-  }
+  /* Le filet est fait de trois cellules pleines, non d'un dégradé : ce moteur
+     ne rend pas `linear-gradient`, et la bande disparaissait en silence — le
+     document sortait sans une seule couleur. */
+  .filet-tricolore { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .filet-tricolore td { height: 3px; font-size: 0; line-height: 0; width: 33.33%; }
+  .filet-vert  { background-color: #006233; }
+  .filet-or    { background-color: #FFC400; }
+  .filet-rouge { background-color: #CD2A3E; }
 
-  .logo-inst { margin-top: 8px; text-align: center; }
-  .logo-inst img { height: 46px; object-fit: contain; }
+  /* Marque de l'institut : le sceau, et son nom en vert à côté. Le sceau seul
+     porte son nom en anneau, illisible à 12 mm — c'est le texte qui le dit. */
+  .marque { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .marque td { vertical-align: middle; }
+  .marque .sceau { width: 30mm; text-align: right; padding-right: 2mm; }
+  .marque .sceau img { height: 22mm; }
+  .marque .nom {
+    text-align: left; font-size: 7.5pt; line-height: 1.3; color: #2C5F45;
+    font-weight: 700;
+  }
+  .marque .nom .ar { font-size: 7.5pt; font-weight: 400; }
 
   /* ── Coin droit : numéro, date, mention du signataire ───────────────── */
   .champs { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10pt; }
   .champs td { padding: 2px 0; }
   .champs .lab { font-weight: 700; white-space: nowrap; }
-  .champs .val { border-bottom: 1px solid #333; min-width: 45mm; padding: 0 6px; }
+  .champs .val {
+    border-bottom: 1px solid #333; min-width: 45mm; padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
   .champs .lab-ar { text-align: right; font-family: "Segoe UI", "Cairo", Tahoma, sans-serif; }
 
   .signataire-haut { text-align: center; margin-top: 10mm; font-size: 11pt; }
@@ -58,7 +82,11 @@ c'est lui qui autorise à concourir.
     text-align: center; font-size: 14pt; font-weight: 700;
     margin: 16mm 0 12mm; text-transform: uppercase; letter-spacing: .01em;
   }
-  .texte { font-size: 11.5pt; line-height: 1.7; text-align: justify; }
+  /* Fer à gauche, et non justifié comme sur l'épreuve : la justification de ce
+     moteur écrase les espaces d'une ligne trop pleine, et « (IPGEI), autorise »
+     sortait collé. Une marge droite irrégulière se remarque à peine ; un mot
+     soudé au précédent se lit comme une faute. */
+  .texte { font-size: 11.5pt; line-height: 1.7; text-align: left; }
   .identite { margin: 8mm 0; font-size: 11.5pt; line-height: 2.1; }
   .identite .cle { font-weight: 700; }
   .signature-bas { margin-top: 18mm; text-align: right; font-weight: 700; font-size: 11.5pt; }
@@ -78,9 +106,17 @@ c'est lui qui autorise à concourir.
           <div class="fr">{{ ligne.fr }}</div>
         </div>
         {% endfor %}
-        <div class="logo-inst">
-          {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
-        </div>
+        <table class="marque">
+          <tr>
+            {% if logo_b64 %}
+            <td class="sceau"><img src="{{ logo_b64 }}" alt=""></td>
+            {% endif %}
+            <td class="nom">
+              <div class="ar">المعهد التحضيري لمدارس المهندسين الكبرى</div>
+              Institut Préparatoire aux<br>Grandes Écoles d&rsquo;Ingénieurs
+            </td>
+          </tr>
+        </table>
       </td>
 
       <td class="etat">
@@ -88,7 +124,13 @@ c'est lui qui autorise à concourir.
         <div class="ar" style="font-size:9.5pt;">شرف – إخاء – عدل</div>
         <div class="fr" style="margin-top:4px;">RÉPUBLIQUE ISLAMIQUE DE MAURITANIE</div>
         <div style="font-size:9pt;">Honneur - Fraternité - Justice</div>
-        <div class="filet-tricolore"></div>
+        <table class="filet-tricolore">
+          <tr>
+            <td class="filet-vert"></td>
+            <td class="filet-or"></td>
+            <td class="filet-rouge"></td>
+          </tr>
+        </table>
 
         {% comment %}
         Le numéro et la date sont IMPRIMÉS et non laissés en blanc : le document
