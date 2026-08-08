@@ -154,6 +154,10 @@ def _contexte_commun(doc: DocumentOfficiel, inscription: InscriptionIPGEI,
         'photo_b64':    _imagefield_b64(getattr(etudiant, 'photo', None)),
         'qr_b64':       _get_qr_base64(str(doc.token_verification), base_url, etudiant=etudiant, doc=doc),
         'verify_url':   f'{base_url}/verifier/{doc.token_verification}' if base_url else '',
+        # La signature est bilingue : la ville aussi, sans quoi un côté mêlerait
+        # un nom latin à une phrase arabe.
+        'ville':        getattr(institution, 'ville_fr', '') or 'Nouakchott',
+        'ville_ar':     getattr(institution, 'ville_ar', '') or 'نواكشوط',
         # Lu sur le document, pas sur le paramétrage courant : rééditer un
         # duplicata doit redonner la pièce telle qu'elle a été délivrée, avec
         # le nom de qui l'a signée ce jour-là.
@@ -188,10 +192,6 @@ def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
         # Libellés attendus par le gabarit repris du socle.
         'semestre_label':    f'SEMESTRE {semestre.code[1:]}',
         'semestre_label_ar': SEMESTRE_AR.get(semestre.code, semestre.code),
-        # La signature est bilingue : la ville aussi, sans quoi le côté droit
-        # mêlerait un nom latin à une phrase arabe.
-        'ville':    getattr(doc.institution, 'ville_fr', '') or 'Nouakchott',
-        'ville_ar': getattr(doc.institution, 'ville_ar', '') or 'نواكشوط',
     })
     return contexte
 
@@ -277,18 +277,64 @@ def _contexte_decision(doc, inscription, ligne: LigneDeliberation, base_url) -> 
     return contexte
 
 
+#: Tutelles imprimées en tête de l'autorisation CNIM, telles qu'elles figurent
+#: sur la pièce que l'institut délivre. Le socle ne porte qu'UN champ
+#: `ministere_fr` ; il en faut trois, et bilingues. Elles vivent donc ici, avec
+#: le document qui les porte — le jour où la hiérarchie change, c'est ce
+#: document-là qu'on rééditera.
+TUTELLES_CNIM = [
+    {'ar': 'وزارة الدفاع الوطني وشؤون المتقاعدين وأولاد الشهداء',
+     'fr': 'Ministère de la Défense, des Affaires des Retraités '
+           'et des Enfants des Martyrs'},
+    {'ar': 'وزارة التعليم العالي والبحث العلمي',
+     'fr': "Ministère de l'Enseignement Supérieur et de la Recherche Scientifique"},
+    {'ar': 'الأركان العامة للجيوش',
+     'fr': 'Etat-Major Général des Armées'},
+]
+
+
+def _session_concours(annee_universitaire: str) -> str:
+    """
+    Session du concours : l'année de FIN du libellé — « 2024-2025 » → « 2025 ».
+
+    Le CNIM se tient au terme de l'année universitaire, et c'est ce millésime
+    que porte l'attestation. Imprimer « 2024-2025 » ferait une session qui
+    n'existe pas.
+    """
+    parts = str(annee_universitaire or '').split('-')
+    return parts[-1] if parts and parts[-1].isdigit() else str(annee_universitaire or '')
+
+
 def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict:
+    """
+    Contexte de l'autorisation CNIM.
+
+    NI moyenne, NI rang, NI seuil : la pièce atteste une autorisation, pas un
+    résultat. Y inscrire une note exposerait le dossier de l'étudiant à qui lit
+    son autorisation de concours — un jury, un secrétariat de concours.
+
+    Elle est signée par le DIRECTEUR, non par le chef de service de la
+    scolarité : c'est lui qui autorise à concourir. Le signataire recopié sur
+    le document sert de repli quand le directeur n'est pas renseigné.
+    """
     deliberation = ligne.deliberation
     contexte = _contexte_commun(doc, inscription, base_url)
+    institution = doc.institution
+
+    directeur_nom   = (getattr(institution, 'directeur_nom_fr', '') or '').strip()
+    directeur_titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
+
     contexte.update({
-        'titre':        "ATTESTATION D'AUTORISATION À CONCOURIR (CNIM)",
+        'titre':        "ATTESTATION D'AUTORISATION DE PARTICIPATION AU CNIM",
         'deliberation': deliberation,
         'ligne':        ligne,
-        'moyenne':      ligne.moyenne_generale,
-        'rang':         ligne.rang,
-        'seuil':        deliberation.seuil_validation,
         'date_jury':    deliberation.date_validation or deliberation.date_creation,
-        'effectif':     deliberation.lignes.count(),
+        'tutelles':     TUTELLES_CNIM,
+        'session':      _session_concours(inscription.annee_universitaire),
+        'signataire':   {
+            'nom':   directeur_nom or contexte['signataire']['nom'],
+            'titre': directeur_titre or 'Directeur',
+        },
     })
     return contexte
 

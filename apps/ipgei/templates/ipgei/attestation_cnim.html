@@ -1,38 +1,162 @@
-{% extends "ipgei/_base_ipgei.html" %}
+{% comment %}
+Attestation d'autorisation de participation au CNIM.
 
-{% block contenu %}
-  <div class="corps-texte">
-    Je soussigné(e), {{ institution.directeur_titre_fr|default:"Directeur" }} de
-    <strong>{{ institution.nom_display }}</strong>, atteste que l'étudiant(e)
-    <strong>{{ etudiant.nom_display }}</strong>, matricule
-    <strong>{{ etudiant.matricule }}</strong>, régulièrement inscrit(e) en classe de
-    <strong>{{ classe.nom }}</strong> (2<sup>e</sup> année, MP) au titre de l'année
-    universitaire <strong>{{ annee_universitaire }}</strong>, a satisfait aux
-    conditions de la délibération de fin de cycle préparatoire.
+Reprise fidèle de la pièce que l'institut délivre : en-tête à double tutelle
+— Défense et Enseignement supérieur —, État-Major, Groupe Polytechnique, et
+l'emblème national à droite. Ce gabarit n'étend PAS `_base_ipgei.html` : la
+trame commune des documents IPGEI ne porte ni cette hiérarchie, ni le bloc
+« N° / date » du coin droit.
+
+Ce document ne dit NI moyenne, NI rang, NI seuil, à la différence du relevé.
+L'original n'en porte pas : il atteste une autorisation, pas un résultat, et y
+inscrire une note exposerait le dossier de l'étudiant à qui lit son
+autorisation de concours.
+
+Il est signé par le DIRECTEUR, non par le chef de service de la scolarité —
+c'est lui qui autorise à concourir.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 portrait; margin: 0; }
+
+  body { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 11pt; color: #111; }
+  .page { width: 210mm; min-height: 297mm; padding: 12mm 16mm; }
+
+  /* ── Bandeau : tutelles à gauche, État à droite ─────────────────────── */
+  .entete { width: 100%; border-collapse: collapse; }
+  .entete td { vertical-align: top; }
+  .tutelle { width: 46%; text-align: center; font-size: 9pt; line-height: 1.25; }
+  .etat    { width: 54%; text-align: center; font-size: 9.5pt; line-height: 1.3; }
+  .ar { font-family: "Segoe UI", "Cairo", Tahoma, sans-serif; direction: rtl; }
+  .fr { font-weight: 700; }
+  .tutelle .bloc { margin-bottom: 5px; }
+
+  .filet-tricolore {
+    height: 3px; margin: 6px 0 0;
+    background: linear-gradient(90deg, #006233 0 33%, #ffc400 33% 66%, #cd2a3e 66% 100%);
+  }
+
+  .logo-inst { margin-top: 8px; text-align: center; }
+  .logo-inst img { height: 46px; object-fit: contain; }
+
+  /* ── Coin droit : numéro, date, mention du signataire ───────────────── */
+  .champs { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10pt; }
+  .champs td { padding: 2px 0; }
+  .champs .lab { font-weight: 700; white-space: nowrap; }
+  .champs .val { border-bottom: 1px solid #333; min-width: 45mm; padding: 0 6px; }
+  .champs .lab-ar { text-align: right; font-family: "Segoe UI", "Cairo", Tahoma, sans-serif; }
+
+  .signataire-haut { text-align: center; margin-top: 10mm; font-size: 11pt; }
+  .signataire-haut .trait { border-bottom: 1px solid #333; width: 42mm; margin: 4mm auto 0; }
+
+  /* ── Corps ──────────────────────────────────────────────────────────── */
+  .titre {
+    text-align: center; font-size: 14pt; font-weight: 700;
+    margin: 16mm 0 12mm; text-transform: uppercase; letter-spacing: .01em;
+  }
+  .texte { font-size: 11.5pt; line-height: 1.7; text-align: justify; }
+  .identite { margin: 8mm 0; font-size: 11.5pt; line-height: 2.1; }
+  .identite .cle { font-weight: 700; }
+  .signature-bas { margin-top: 18mm; text-align: right; font-weight: 700; font-size: 11.5pt; }
+  .qr { margin-top: 14mm; }
+  .qr img { width: 48px; height: 48px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <table class="entete">
+    <tr>
+      <td class="tutelle">
+        {% for ligne in tutelles %}
+        <div class="bloc">
+          <div class="ar">{{ ligne.ar }}</div>
+          <div class="fr">{{ ligne.fr }}</div>
+        </div>
+        {% endfor %}
+        <div class="logo-inst">
+          {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="">{% endif %}
+        </div>
+      </td>
+
+      <td class="etat">
+        <div class="ar" style="font-weight:700;font-size:12pt;">الجمهورية الإسلامية الموريتانية</div>
+        <div class="ar" style="font-size:9.5pt;">شرف – إخاء – عدل</div>
+        <div class="fr" style="margin-top:4px;">RÉPUBLIQUE ISLAMIQUE DE MAURITANIE</div>
+        <div style="font-size:9pt;">Honneur - Fraternité - Justice</div>
+        <div class="filet-tricolore"></div>
+
+        {% comment %}
+        Le numéro et la date sont IMPRIMÉS et non laissés en blanc : le document
+        est enregistré au registre, son numéro de série existe déjà. Les écrire
+        à la main reviendrait à tenir un second registre à côté du premier.
+        {% endcomment %}
+        <table class="champs">
+          <tr>
+            <td class="lab">N° IPGEI :</td>
+            <td class="val">{{ numero_serie }}</td>
+            <td class="lab-ar">: رقم التحضيري</td>
+          </tr>
+          <tr>
+            <td class="lab">{{ ville }}, le :</td>
+            <td class="val">{{ date_edition }}</td>
+            <td class="lab-ar">: {{ ville_ar }} في</td>
+          </tr>
+        </table>
+
+        <div class="signataire-haut">
+          <div class="ar">المدير</div>
+          <div class="fr">{{ signataire.titre }}</div>
+          <div class="trait"></div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <div class="titre">Attestation d&rsquo;autorisation de participation au CNIM</div>
+
+  <div class="texte">
+    Je soussigné,
+    {% if signataire.nom %}<strong>{{ signataire.nom }}</strong>, {% endif %}
+    {{ signataire.titre }} de l&rsquo;{{ institution.nom_fr }} (IPGEI),
+    autorise par la présente l&rsquo;étudiant :
   </div>
 
-  <div class="encadre" style="text-align:center">
-    <span class="cle">Décision du jury</span><br>
-    <span class="decision-badge">Autorisé(e) à concourir — CNIM</span>
-    <div style="margin-top:10px;font-size:10pt;color:#333">
-      Moyenne générale : <strong style="color:#006633">{{ moyenne|default_if_none:"—"|floatformat:2 }} / 20</strong>
-      &nbsp;·&nbsp; Seuil requis : <strong>{{ seuil|floatformat:2 }}</strong>
-      {% if rang %}&nbsp;·&nbsp; Rang : <strong>{{ rang }}{% if effectif %} / {{ effectif }}{% endif %}</strong>{% endif %}
-    </div>
+  <div class="identite">
+    <div><span class="cle">Nom et prénom :</span> {{ etudiant.nom_display }}</div>
+    <div><span class="cle">Matricule :</span> {{ etudiant.matricule }}</div>
+    <div><span class="cle">Classe :</span> {{ classe.nom }}</div>
   </div>
 
-  <div class="corps-texte">
-    En conséquence, l'intéressé(e) est <strong>autorisé(e) à se présenter au Concours
-    National d'Ingénieurs et de Maîtrises (CNIM)</strong> au titre de la session
-    {{ annee_universitaire }}.
+  <div class="texte">
+    à participer au <strong>Concours National d&rsquo;Ingénieurs de Mauritanie
+    (CNIM) &ndash; Session {{ session }}</strong>.
   </div>
 
-  <div class="corps-texte" style="margin-top:6px">
-    La présente attestation est délivrée à l'intéressé(e) pour servir et valoir ce que de droit.
+  <div class="texte" style="margin-top:6mm;">
+    Cette autorisation est délivrée après vérification de l&rsquo;assiduité de
+    l&rsquo;étudiant et de la qualité de ses résultats académiques en deuxième année.
   </div>
 
-  <div style="font-size:9pt;color:#555;margin-top:12px">
-    {% if date_jury %}Décision prononcée en délibération le {{ date_jury|date:"d/m/Y" }}.{% endif %}
-    L'authenticité de ce document peut être vérifiée en ligne à tout moment via le QR code ci-dessous.
+  <div class="texte" style="margin-top:8mm;">
+    La présente attestation d&rsquo;autorisation est établie pour servir et valoir
+    ce que de droit.
   </div>
-{% endblock %}
+
+  <div class="signature-bas">{{ signataire.nom }}</div>
+
+  {% comment %}
+  Le QR reste, discret : c'est le dispositif de vérification commun à toutes
+  les pièces IPGEI. L'original n'en porte pas, mais lui n'est pas vérifiable.
+  {% endcomment %}
+  {% if qr_b64 %}
+  <div class="qr"><img src="{{ qr_b64 }}" alt="Vérification"></div>
+  {% endif %}
+
+</div>
+</body>
+</html>
