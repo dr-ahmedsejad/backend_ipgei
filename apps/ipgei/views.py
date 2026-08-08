@@ -3130,6 +3130,70 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         )
         return self._reponse_pdf(doc, pdf)
 
+    @action(detail=False, methods=['post'], url_path='generer-lot')
+    def generer_lot(self, request):
+        """
+        Édite un document pour toute une classe, fusionné en un seul PDF.
+
+        Corps : `{type_document, classe, semestre}` — le semestre n'étant exigé
+        que par le relevé de semestre.
+
+        Un fichier par élève obligerait à ouvrir quarante pièces puis à les
+        imprimer une par une. Chaque élève garde pourtant SON document au
+        registre : numéro de série, empreinte et QR de vérification. La fusion
+        ne concerne que le papier.
+
+        Un élève en échec est reporté dans les en-têtes de la réponse et
+        n'interrompt pas le lot : sur une promotion, un seul cas bloquant
+        empêcherait d'imprimer les trente-neuf autres.
+        """
+        import json
+
+        from django.http import HttpResponse
+
+        from . import documents as docs_ipgei
+
+        type_document = request.data.get('type_document') or ''
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise.'})
+
+        semestre = None
+        if request.data.get('semestre'):
+            semestre = SemestreIPGEI.objects.filter(
+                pk=request.data['semestre']).first()
+            if semestre is None:
+                raise ValidationError({'semestre': 'Semestre introuvable.'})
+
+        inscriptions = list(
+            InscriptionIPGEI.objects
+            .filter(classe=classe, actif=True)
+            .select_related('etudiant', 'classe__institution')
+            .order_by('numero_ordre', 'etudiant__nom')
+        )
+        if not inscriptions:
+            raise ValidationError(f"{classe.nom} n'a aucun inscrit actif.")
+
+        contenu, edites, total, erreurs = self._executer(
+            docs_ipgei.generer_lot, inscriptions, type_document,
+            semestre=semestre, utilisateur=_utilisateur(request),
+            base_url=self._base_url(),
+        )
+
+        libelle = _nom_fichier(
+            f'{type_document}_{classe.nom}'
+            + (f'_{semestre.code}' if semestre else ''))
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        reponse['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        # Le bilan voyage dans les en-têtes : le corps est le PDF lui-même, et
+        # l'écran doit pouvoir dire « 39 sur 40 » sans seconde requête.
+        reponse['X-Edites']  = str(edites)
+        reponse['X-Total']   = str(total)
+        reponse['X-Erreurs'] = json.dumps(erreurs, ensure_ascii=False)
+        reponse['Access-Control-Expose-Headers'] = 'X-Edites, X-Total, X-Erreurs'
+        return reponse
+
     @action(detail=False, methods=['post'], url_path='decisions-classe')
     def decisions_classe(self, request):
         """

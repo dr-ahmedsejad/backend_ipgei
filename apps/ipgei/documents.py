@@ -544,3 +544,84 @@ def generer_recu_paiement(inscription, *, utilisateur=None, base_url=''):
     doc = creer_document(inscription, TYPE_RECU, utilisateur=utilisateur)
     pdf = generer_pdf(doc, _contexte_recu(doc, inscription, base_url))
     return doc, pdf
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Édition par groupe
+# ═════════════════════════════════════════════════════════════════════════════
+#: Ce qui s'édite pour toute une classe d'un coup. Le reçu de paiement en est
+#: exclu : il n'existe que pour une inscription réglée, et l'éditer en lot
+#: produirait autant de refus que d'impayés.
+TYPES_EN_LOT = {
+    TYPE_RELEVE_SEMESTRE: 'Relevé de semestre',
+    TYPE_RELEVE_ANNUEL:   'Relevé annuel',
+    TYPE_ATTESTATION:     "Attestation d'inscription",
+}
+
+
+def generer_lot(inscriptions, type_document: str, *, semestre=None,
+                utilisateur=None, base_url: str = '') -> tuple:
+    """
+    Édite un document par étudiant, et les FUSIONNE en un seul PDF.
+
+    Un fichier par élève obligerait à ouvrir quarante pièces jointes puis à les
+    imprimer une par une ; un PDF unique s'imprime d'un geste et se classe
+    ensuite. C'est la façon de faire du socle, reprise telle quelle.
+
+    Chaque élève garde SON document officiel — son numéro de série, son
+    empreinte, son QR de vérification. La fusion ne concerne que le papier :
+    au registre, ce sont quarante pièces distinctes.
+
+    Un élève en échec — dossier incomplet, inscription close — est REPORTÉ et
+    n'interrompt pas le lot : sur une promotion entière, un seul cas bloquant
+    empêcherait d'imprimer les trente-neuf autres.
+
+    Renvoie `(pdf, nb_edites, nb_attendus, erreurs)`.
+    """
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+
+    if type_document not in TYPES_EN_LOT:
+        raise ValidationError(
+            f"« {type_document} » ne s'édite pas par groupe.")
+    if type_document == TYPE_RELEVE_SEMESTRE and semestre is None:
+        raise ValidationError({'semestre': 'Un relevé de semestre vise un semestre.'})
+
+    editeurs = {
+        TYPE_RELEVE_SEMESTRE: lambda i: generer_releve_semestre(
+            i, semestre, utilisateur=utilisateur, base_url=base_url),
+        TYPE_RELEVE_ANNUEL:   lambda i: generer_releve_annuel(
+            i, utilisateur=utilisateur, base_url=base_url),
+        TYPE_ATTESTATION:     lambda i: generer_attestation_inscription(
+            i, utilisateur=utilisateur, base_url=base_url),
+    }
+    editer = editeurs[type_document]
+
+    fusion = PdfWriter()
+    edites, erreurs = 0, []
+    for inscription in inscriptions:
+        try:
+            _, pdf = editer(inscription)
+            fusion.append(BytesIO(pdf))
+            edites += 1
+        except Exception as exc:                              # noqa: BLE001
+            motif = (getattr(exc, 'messages', None) or [str(exc)])[0]
+            erreurs.append({
+                'etudiant': inscription.etudiant.matricule,
+                'nom':      inscription.etudiant.nom_display,
+                'motif':    motif[:200],
+            })
+            logger.exception('Édition en lot refusée pour %s', inscription)
+
+    total = len(inscriptions) if hasattr(inscriptions, '__len__') else edites + len(erreurs)
+    if edites == 0:
+        raise ValidationError(
+            'Aucun document produit. ' +
+            ' · '.join(f"{e['etudiant']} : {e['motif']}" for e in erreurs[:3])
+        )
+
+    sortie = BytesIO()
+    fusion.write(sortie)
+    fusion.close()
+    return sortie.getvalue(), edites, total, erreurs
