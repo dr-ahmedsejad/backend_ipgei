@@ -560,7 +560,7 @@ TYPES_EN_LOT = {
 
 
 def generer_lot(inscriptions, type_document: str, *, semestre=None,
-                utilisateur=None, base_url: str = '') -> tuple:
+                utilisateur=None, base_url: str = '', signataire_id=None) -> tuple:
     """
     Édite un document par étudiant, et les FUSIONNE en un seul PDF.
 
@@ -576,6 +576,10 @@ def generer_lot(inscriptions, type_document: str, *, semestre=None,
     n'interrompt pas le lot : sur une promotion entière, un seul cas bloquant
     empêcherait d'imprimer les trente-neuf autres.
 
+    `signataire_id` vaut pour TOUTE la fournée : quarante relevés sortis d'un
+    même tirage portent une seule signature manuscrite au bas de chacun, donc un
+    seul signataire. Le laisser vide reprend celui par défaut.
+
     Renvoie `(pdf, nb_edites, nb_attendus, erreurs)`.
     """
     from io import BytesIO
@@ -588,13 +592,23 @@ def generer_lot(inscriptions, type_document: str, *, semestre=None,
     if type_document == TYPE_RELEVE_SEMESTRE and semestre is None:
         raise ValidationError({'semestre': 'Un relevé de semestre vise un semestre.'})
 
+    # Le signataire est vérifié UNE FOIS, avant la boucle : mal désigné, il
+    # ferait échouer chaque élève pour la même raison, et le bilan afficherait
+    # quarante lignes disant la même chose au lieu d'un refus net.
+    if inscriptions:
+        services.signataire_du_document(
+            inscriptions[0].classe.institution, signataire_id)
+
     editeurs = {
         TYPE_RELEVE_SEMESTRE: lambda i: generer_releve_semestre(
-            i, semestre, utilisateur=utilisateur, base_url=base_url),
+            i, semestre, utilisateur=utilisateur, base_url=base_url,
+            signataire_id=signataire_id),
         TYPE_RELEVE_ANNUEL:   lambda i: generer_releve_annuel(
-            i, utilisateur=utilisateur, base_url=base_url),
+            i, utilisateur=utilisateur, base_url=base_url,
+            signataire_id=signataire_id),
         TYPE_ATTESTATION:     lambda i: generer_attestation_inscription(
-            i, utilisateur=utilisateur, base_url=base_url),
+            i, utilisateur=utilisateur, base_url=base_url,
+            signataire_id=signataire_id),
     }
     editer = editeurs[type_document]
 

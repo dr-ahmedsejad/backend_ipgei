@@ -3178,6 +3178,9 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             docs_ipgei.generer_lot, inscriptions, type_document,
             semestre=semestre, utilisateur=_utilisateur(request),
             base_url=self._base_url(),
+            # Un seul signataire pour toute la fournée : quarante pièces d'un
+            # même tirage se signent de la même main.
+            signataire_id=self._signataire_id(request),
         )
 
         libelle = _nom_fichier(
