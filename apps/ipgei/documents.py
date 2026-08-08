@@ -440,17 +440,50 @@ def generer_decision(deliberation, inscription, *, utilisateur=None, base_url=''
     return doc, pdf
 
 
+#: Ce qu'il faut faire quand la décision du jury n'ouvre pas le concours.
+#: Un refus n'aide que s'il dit la suite : sans cela, l'agent réessaie, croit à
+#: une panne, ou cherche le document dans un autre écran.
+SUITES_SANS_CNIM = {
+    LigneDeliberation.DECISION_REDOUBLANT:
+        "Un redoublant se réinscrit en deuxième année ; il concourra au terme "
+        "de l'année suivante.",
+    LigneDeliberation.DECISION_EXCLU:
+        "Aucune suite ne lui est ouverte dans le cursus préparatoire.",
+    LigneDeliberation.DECISION_ADMIS:
+        "Cette décision fait passer en deuxième année : le concours vient au "
+        "terme de celle-ci, pas avant.",
+    LigneDeliberation.DECISION_REORIENTE:
+        "Un étudiant réorienté quitte le cursus préparatoire.",
+}
+
+
 def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, base_url=''):
     """
     L'attestation CNIM ne s'émet que pour un étudiant effectivement autorisé à
     concourir : c'est le document qui ouvre l'accès au concours.
+
+    Le refus NOMME l'étudiant et dit la suite. « Décision actuelle :
+    Redoublant » laissait l'agent devant un écran de trente-sept lignes sans
+    savoir laquelle avait déclenché le refus, ni s'il fallait corriger le jury
+    ou changer de document.
     """
     ligne = _ligne_validee(deliberation, inscription)
     if ligne.decision != LigneDeliberation.DECISION_CNIM:
-        raise ValidationError(
-            "L'attestation CNIM ne concerne que les étudiants autorisés à concourir "
-            f"(décision actuelle : {ligne.get_decision_display() or 'aucune'})."
-        )
+        etudiant = inscription.etudiant
+        qui = f'{etudiant.nom_display} ({etudiant.matricule})'
+        if not ligne.decision:
+            raise ValidationError(
+                f"{qui} n'a pas encore de décision de jury : l'autorisation de "
+                'concourir ne peut être attestée avant que le jury ne se soit '
+                'prononcé.'
+            )
+        morceaux = [
+            f"{qui} n'est pas autorisé à concourir : le jury a prononcé "
+            f'« {ligne.get_decision_display()} ».',
+            SUITES_SANS_CNIM.get(ligne.decision, ''),
+            'Pour attester cette décision-là, éditez la décision de délibération.',
+        ]
+        raise ValidationError(' '.join(m for m in morceaux if m))
     doc = creer_document(inscription, TYPE_CNIM, utilisateur=utilisateur)
     pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url))
     return doc, pdf
