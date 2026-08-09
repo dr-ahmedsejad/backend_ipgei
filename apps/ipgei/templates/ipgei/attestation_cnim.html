@@ -47,12 +47,16 @@ c'est lui qui autorise à concourir.
      se lisaient comme un seul bloc de texte. Une gouttière les sépare, et les
      corps sont remontés — l'en-tête d'un document officiel se lit à bout de
      bras, pas à la loupe. */
+  /* MÊME corps des deux côtés : « Ministère de la Défense » et « RÉPUBLIQUE
+     ISLAMIQUE DE MAURITANIE » sont de même rang, une taille plus petite à
+     gauche donnait à lire une hiérarchie qui n'existe pas. Les deux colonnes
+     partagent donc 11 pt, et les devises 10 pt de part et d'autre. */
   .tutelle {
-    width: 49%; text-align: center; font-size: 10pt; line-height: 1.3;
+    width: 49%; text-align: center; font-size: 11pt; line-height: 1.3;
     padding-right: 5mm;
   }
   .etat {
-    width: 51%; text-align: center; font-size: 11pt; line-height: 1.35;
+    width: 51%; text-align: center; font-size: 11pt; line-height: 1.3;
     padding-left: 5mm;
   }
   .ar { font-family: "Segoe UI", "Cairo", Tahoma, sans-serif; direction: rtl; }
@@ -146,8 +150,8 @@ c'est lui qui autorise à concourir.
       </td>
 
       <td class="etat">
-        <div class="ar" style="font-weight:700;font-size:14pt;">الجمهورية الإسلامية الموريتانية</div>
-        <div class="ar" style="font-size:11pt;">شرف – إخاء – عدل</div>
+        <div class="ar" style="font-weight:700;font-size:13pt;">الجمهورية الإسلامية الموريتانية</div>
+        <div class="ar" style="font-size:10pt;">شرف – إخاء – عدل</div>
         <div class="fr" style="margin-top:4px;">RÉPUBLIQUE ISLAMIQUE DE MAURITANIE</div>
         <div style="font-size:10pt;">Honneur - Fraternité - Justice</div>
         <table class="filet-tricolore">

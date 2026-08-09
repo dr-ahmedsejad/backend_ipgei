@@ -346,25 +346,30 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url,
     directeur_nom   = (getattr(institution, 'directeur_nom_fr', '') or '').strip()
     directeur_titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
 
-    if signataire_impose:
-        # Recopié sur le document à sa création : c'est la main qui signe, avec
-        # SON titre. Le mot « Directeur » ne se recopie pas sur un adjoint.
-        signataire = dict(contexte['signataire'])
-        signataire['est_directeur'] = False
-    else:
-        # Le titre vient de l'institution : « Directeur », « Directeur général »
-        # ou ce que porte l'établissement. L'écrire en dur ici le ferait mentir
-        # le jour où l'institut change d'intitulé.
+    # Le nom et le titre viennent TOUJOURS de la même personne. Les prendre
+    # séparément — le nom du signataire enregistré, le titre du directeur —
+    # composait un signataire qui n'existe pas : « Mohamed Beyatt, Directeur »,
+    # alors qu'il est chef du service de la scolarité. Un document officiel ne
+    # peut pas attribuer à quelqu'un une fonction qui n'est pas la sienne.
+    #
+    # Le bandeau arabe dit « المدير » — le directeur, et rien d'autre. Il ne
+    # s'affiche donc que si c'est bien lui qui signe : traduire un titre
+    # quelconque en arabe n'est pas à la portée d'un gabarit.
+    if not signataire_impose and directeur_nom:
+        # Le directeur signe. Son titre vient de l'institution — « Directeur »,
+        # « Directeur général », ce que porte l'établissement — et n'est écrit
+        # en dur que faute de mieux.
         signataire = {
-            'nom':   directeur_nom or contexte['signataire']['nom'],
-            'titre': directeur_titre or 'Directeur',
-            # Le bandeau arabe dit « المدير » — le directeur, et rien d'autre.
-            # On ne l'affiche donc que si c'est bien lui : traduire un titre
-            # quelconque en arabe n'est pas à la portée d'un gabarit, et laisser
-            # « المدير » au-dessus d'un adjoint ferait dire au document qu'il est
-            # signé par quelqu'un qui ne l'a pas signé.
+            'nom':           directeur_nom,
+            'titre':         directeur_titre or 'Directeur',
             'est_directeur': True,
         }
+    else:
+        # Quelqu'un d'autre : soit l'agent l'a désigné, soit le directeur n'est
+        # pas renseigné et la pièce sort au nom du signataire du registre. Dans
+        # les deux cas, SON titre.
+        signataire = dict(contexte['signataire'])
+        signataire['est_directeur'] = False
 
     contexte.update({
         'titre':        "ATTESTATION D'AUTORISATION DE PARTICIPATION AU CNIM",
