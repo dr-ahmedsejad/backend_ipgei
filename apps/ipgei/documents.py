@@ -307,7 +307,8 @@ def _session_concours(annee_universitaire: str) -> str:
     return parts[-1] if parts and parts[-1].isdigit() else str(annee_universitaire or '')
 
 
-def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict:
+def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url,
+                   *, signataire_impose: bool = False) -> dict:
     """
     Contexte de l'autorisation CNIM.
 
@@ -315,9 +316,13 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict
     résultat. Y inscrire une note exposerait le dossier de l'étudiant à qui lit
     son autorisation de concours — un jury, un secrétariat de concours.
 
-    Elle est signée par le DIRECTEUR, non par le chef de service de la
-    scolarité : c'est lui qui autorise à concourir. Le signataire recopié sur
-    le document sert de repli quand le directeur n'est pas renseigné.
+    Elle est signée par le DIRECTEUR : c'est lui qui autorise à concourir. Le
+    directeur de l'institution s'impose donc d'office… SAUF si l'agent a
+    désigné quelqu'un — le directeur absent, un adjoint signe par ordre. Ce
+    choix-là prime, sans quoi le sélecteur serait sans effet dès que le
+    directeur est renseigné : on choisirait un nom, un autre s'imprimerait.
+
+    À défaut de l'un et de l'autre, le signataire par défaut de l'institution.
     """
     deliberation = ligne.deliberation
     contexte = _contexte_commun(doc, inscription, base_url)
@@ -326,6 +331,15 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict
     directeur_nom   = (getattr(institution, 'directeur_nom_fr', '') or '').strip()
     directeur_titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
 
+    if signataire_impose:
+        # Recopié sur le document à sa création : c'est la main qui signe.
+        signataire = dict(contexte['signataire'])
+    else:
+        signataire = {
+            'nom':   directeur_nom or contexte['signataire']['nom'],
+            'titre': directeur_titre or 'Directeur',
+        }
+
     contexte.update({
         'titre':        "ATTESTATION D'AUTORISATION DE PARTICIPATION AU CNIM",
         'deliberation': deliberation,
@@ -333,10 +347,7 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url) -> dict
         'date_jury':    deliberation.date_validation or deliberation.date_creation,
         'tutelles':     TUTELLES_CNIM,
         'session':      _session_concours(inscription.annee_universitaire),
-        'signataire':   {
-            'nom':   directeur_nom or contexte['signataire']['nom'],
-            'titre': directeur_titre or 'Directeur',
-        },
+        'signataire':   signataire,
     })
     return contexte
 
@@ -459,7 +470,8 @@ SUITES_SANS_CNIM = {
 }
 
 
-def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, base_url=''):
+def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, base_url='',
+                             signataire_id=None):
     """
     L'attestation CNIM ne s'émet que pour un étudiant effectivement autorisé à
     concourir : c'est le document qui ouvre l'accès au concours.
@@ -486,8 +498,10 @@ def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, bas
             'Pour attester cette décision-là, éditez la décision de délibération.',
         ]
         raise ValidationError(' '.join(m for m in morceaux if m))
-    doc = creer_document(inscription, TYPE_CNIM, utilisateur=utilisateur)
-    pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url))
+    doc = creer_document(inscription, TYPE_CNIM, utilisateur=utilisateur,
+                         signataire_id=signataire_id)
+    pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url,
+                                          signataire_impose=bool(signataire_id)))
     return doc, pdf
 
 
@@ -637,11 +651,13 @@ TYPES_EN_LOT = {
     TYPE_RELEVE_SEMESTRE: 'Relevé de semestre',
     TYPE_RELEVE_ANNUEL:   'Relevé annuel',
     TYPE_ATTESTATION:     "Attestation d'inscription",
+    TYPE_CNIM:            'Attestation CNIM',
 }
 
 
 def generer_lot(inscriptions, type_document: str, *, semestre=None,
-                utilisateur=None, base_url: str = '', signataire_id=None) -> tuple:
+                deliberation=None, utilisateur=None, base_url: str = '',
+                signataire_id=None) -> tuple:
     """
     Édite un document par étudiant, et les FUSIONNE en un seul PDF.
 
@@ -672,6 +688,9 @@ def generer_lot(inscriptions, type_document: str, *, semestre=None,
             f"« {type_document} » ne s'édite pas par groupe.")
     if type_document == TYPE_RELEVE_SEMESTRE and semestre is None:
         raise ValidationError({'semestre': 'Un relevé de semestre vise un semestre.'})
+    if type_document == TYPE_CNIM and deliberation is None:
+        raise ValidationError({'deliberation':
+                               'Une autorisation de concourir découle d\'un jury.'})
 
     # Le signataire est vérifié UNE FOIS, avant la boucle : mal désigné, il
     # ferait échouer chaque élève pour la même raison, et le bilan afficherait
@@ -689,6 +708,9 @@ def generer_lot(inscriptions, type_document: str, *, semestre=None,
             signataire_id=signataire_id),
         TYPE_ATTESTATION:     lambda i: generer_attestation_inscription(
             i, utilisateur=utilisateur, base_url=base_url,
+            signataire_id=signataire_id),
+        TYPE_CNIM:            lambda i: generer_attestation_cnim(
+            deliberation, i, utilisateur=utilisateur, base_url=base_url,
             signataire_id=signataire_id),
     }
     editer = editeurs[type_document]

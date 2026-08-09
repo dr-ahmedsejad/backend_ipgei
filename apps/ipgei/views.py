@@ -3127,8 +3127,64 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             docs_ipgei.generer_attestation_cnim,
             self._deliberation(request), self._inscription(request),
             utilisateur=_utilisateur(request), base_url=self._base_url(),
+            signataire_id=self._signataire_id(request),
         )
         return self._reponse_pdf(doc, pdf)
+
+    def _jury_et_autorises(self, request, classe):
+        """
+        Le jury de cette classe, et les seuls étudiants qu'il autorise à concourir.
+
+        Le jury est celui que l'agent a désigné, ou — le cas courant, puisqu'une
+        délibération porte sur une classe — le dernier jury ANNUEL validé de la
+        classe. Le déduire évite de faire choisir deux fois la même chose.
+        """
+        identifiant = request.data.get('deliberation')
+        if identifiant:
+            deliberation = Deliberation.objects.filter(pk=identifiant).first()
+            if deliberation is None:
+                raise ValidationError({'deliberation': 'Délibération introuvable.'})
+        else:
+            deliberation = (
+                Deliberation.objects
+                .filter(classe=classe, portee=Deliberation.PORTEE_ANNUELLE,
+                        statut=Deliberation.STATUT_VALIDEE)
+                .order_by('-date_validation', '-id').first()
+            )
+        if deliberation is None:
+            raise ValidationError(
+                f"{classe.nom} n'a pas de jury annuel validé : l'autorisation de "
+                'concourir atteste une décision, elle ne peut la précéder.'
+            )
+
+        autorisees = set(
+            deliberation.lignes
+            .filter(decision=LigneDeliberation.DECISION_CNIM)
+            .values_list('inscription_id', flat=True)
+        )
+        retenues = [i for i in
+                    InscriptionIPGEI.objects
+                    .filter(classe=classe, actif=True)
+                    .select_related('etudiant', 'classe__institution')
+                    .order_by('numero_ordre', 'etudiant__nom')
+                    if i.pk in autorisees]
+        if not retenues:
+            # Dire ce que le jury A prononcé : sur une classe de première année,
+            # « aucun autorisé » est la règle et non un incident, et l'agent doit
+            # comprendre qu'il n'y a rien à corriger.
+            from collections import Counter
+            comptes = Counter(
+                l.get_decision_display() or 'sans décision'
+                for l in deliberation.lignes.all()
+            )
+            detail = ', '.join(f'{n} × « {d} »' for d, n in comptes.most_common(3))
+            raise ValidationError(
+                f"Aucun étudiant de {classe.nom} n'est autorisé à concourir. "
+                f'Le jury a prononcé {detail}. '
+                "L'autorisation CNIM est une décision de DEUXIÈME année : une "
+                'classe de première année ne peut pas en produire.'
+            )
+        return deliberation, retenues
 
     @action(detail=False, methods=['post'], url_path='generer-lot')
     def generer_lot(self, request):
@@ -3174,10 +3230,19 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         if not inscriptions:
             raise ValidationError(f"{classe.nom} n'a aucun inscrit actif.")
 
+        # L'autorisation de concourir découle d'un jury, et ne concerne QUE les
+        # étudiants qu'il a autorisés. On restreint donc la fournée à ceux-là :
+        # partir de la classe entière ferait sortir un refus par redoublant, et
+        # un lot de quarante afficherait trente-deux lignes d'échec pour huit
+        # pièces — le bilan dirait l'inverse de ce qui s'est passé.
+        deliberation = None
+        if type_document == docs_ipgei.TYPE_CNIM:
+            deliberation, inscriptions = self._jury_et_autorises(request, classe)
+
         contenu, edites, total, erreurs = self._executer(
             docs_ipgei.generer_lot, inscriptions, type_document,
-            semestre=semestre, utilisateur=_utilisateur(request),
-            base_url=self._base_url(),
+            semestre=semestre, deliberation=deliberation,
+            utilisateur=_utilisateur(request), base_url=self._base_url(),
             # Un seul signataire pour toute la fournée : quarante pièces d'un
             # même tirage se signent de la même main.
             signataire_id=self._signataire_id(request),
