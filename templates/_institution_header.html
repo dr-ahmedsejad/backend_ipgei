@@ -3,8 +3,19 @@
         <td style="text-align: left; border: none; width: 45%; font-size: 15px; font-weight: bold; line-height: 1.3;">
             {% if inst_groupe_fr %}{{ inst_groupe_fr }}<br>{% endif %}{{ inst_nom_fr|default:"Institut Supérieur de la Statistique" }}
         </td>
-        <td style="text-align: center; border: none; width: 10%;">
-            <img src="{{ inst_logo_url|default:image_url }}" alt="Logo" width="70" height="70">
+        {% comment %}
+        Hauteur imposée, largeur LIBRE : fixer les deux écrasait le logo dans un
+        carré. Le sceau de l'IPGEI est rond, son fichier ne l'est pas — il
+        sortait en ovale de 34 × 48. La hauteur seule le laisse garder sa forme,
+        quel que soit le logo téléversé ensuite.
+
+        80 px et non 70 : les marges vides du fichier sont désormais rognées à
+        l'embarquement, la boîte est donc entièrement occupée par le dessin.
+        À 150 dpi, 80 px HTML font 125 px imprimés — un sceau de 250 px de côté
+        les couvre encore au double.
+        {% endcomment %}
+        <td style="text-align: center; border: none; width: 12%;">
+            <img src="{{ inst_logo_url|default:image_url }}" alt="Logo" height="80">
         </td>
         <td style="text-align: right; border: none; width: 45%; font-size: 18px; font-weight: bold; line-height: 1.3;">
             {% if inst_groupe_ar %}{{ inst_groupe_ar }}<br>{% endif %}{{ inst_nom_ar|default:"المعهد العالي للإحصاء" }}

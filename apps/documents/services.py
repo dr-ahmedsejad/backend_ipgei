@@ -343,17 +343,76 @@ def _get_photo_b64(etudiant) -> str | None:
     return None
 
 
+#: Logos déjà rognés, par (chemin, date de modification). Le rognage coûte un
+#: décodage PNG complet, et l'en-tête est rendu sur CHAQUE page d'un document.
+_CACHE_LOGO: dict = {}
+
+
+def _rogner_marges(chemin: str) -> bytes | None:
+    """
+    Retire les marges vides autour d'un logo, et renvoie le PNG rogné.
+
+    Un logo exporté d'un outil de dessin arrive presque toujours centré dans un
+    canevas plus grand que lui. Celui de l'IPGEI mesure 512 × 362 px pour un
+    sceau de 250 × 250 : les deux tiers de l'image sont vides. Rendu dans une
+    boîte de 70 × 70, le sceau tombait à 34 px de large et 48 de haut — réduit
+    de moitié, et ovalisé parce que le canevas n'est pas carré alors que le
+    sceau l'est.
+
+    Le rognage rend au sceau toute la boîte qui lui est réservée et lui rend sa
+    forme. Il est SANS PERTE : on ne retire que des pixels vides.
+
+    Les marges se lisent sur la couche alpha si elle existe, sinon sur le blanc
+    — un logo aplati sur fond blanc est aussi courant qu'un PNG transparent.
+    Renvoie None si rien n'est à rogner, pour laisser passer le fichier tel quel.
+    """
+    from io import BytesIO
+
+    from PIL import Image, ImageChops
+
+    image = Image.open(chemin)
+    if 'A' in image.getbands():
+        boite = image.getchannel('A').getbbox()
+    else:
+        blanc = Image.new(image.mode, image.size, 'white')
+        boite = ImageChops.difference(image.convert('RGB'),
+                                      blanc.convert('RGB')).getbbox()
+    if boite is None or boite == (0, 0, *image.size):
+        return None
+
+    tampon = BytesIO()
+    image.crop(boite).save(tampon, format='PNG', optimize=True)
+    return tampon.getvalue()
+
+
 def _get_logo_b64(institution) -> str | None:
-    """Retourne le logo de l'institution encodé en data URI base64, ou None."""
+    """
+    Logo de l'institution en data URI base64, marges vides rognées.
+
+    Le rognage n'est pas cosmétique : il double la taille utile du sceau dans
+    les en-têtes partagés, à emplacement inchangé.
+    """
     try:
         if institution and institution.logo:
             import os
             logo_path = institution.logo.path
             if os.path.exists(logo_path):
-                ext  = logo_path.rsplit('.', 1)[-1].lower()
-                mime = 'image/png' if ext == 'png' else ('image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}')
-                with open(logo_path, 'rb') as f:
-                    return f'data:{mime};base64,' + base64.b64encode(f.read()).decode()
+                cle = (logo_path, os.path.getmtime(logo_path))
+                if cle not in _CACHE_LOGO:
+                    try:
+                        rogne = _rogner_marges(logo_path)
+                    except Exception:      # noqa: BLE001 — Pillow absent, format exotique
+                        rogne = None
+                    if rogne is not None:
+                        _CACHE_LOGO[cle] = 'data:image/png;base64,' +                             base64.b64encode(rogne).decode()
+                    else:
+                        ext  = logo_path.rsplit('.', 1)[-1].lower()
+                        mime = ('image/png' if ext == 'png'
+                                else 'image/jpeg' if ext in ('jpg', 'jpeg')
+                                else f'image/{ext}')
+                        with open(logo_path, 'rb') as f:
+                            _CACHE_LOGO[cle] = f'data:{mime};base64,' +                                 base64.b64encode(f.read()).decode()
+                return _CACHE_LOGO[cle]
     except Exception:
         pass
     return None

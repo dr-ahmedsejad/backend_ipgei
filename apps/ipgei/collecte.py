@@ -300,6 +300,12 @@ def _logo_reduit(donnees: dict) -> bytes:
 
         with ImagePIL.open(chemin) as image:
             image = image.convert('RGBA')
+            # Les marges vides d'abord : le fichier de l'institut mesure
+            # 512 × 362 pour un sceau de 250 × 250, et réduire sans rogner
+            # aurait ramené le dessin à la moitié de la place qui lui est faite.
+            boite = image.getchannel('A').getbbox()
+            if boite:
+                image = image.crop(boite)
             # Deux fois la taille d'affichage : net à l'impression, léger.
             image.thumbnail((_COTE_LOGO * 2, _COTE_LOGO * 2))
             tampon = io.BytesIO()
