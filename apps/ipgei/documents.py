@@ -322,6 +322,36 @@ def _session_concours(annee_universitaire: str) -> str:
     return parts[-1] if parts and parts[-1].isdigit() else str(annee_universitaire or '')
 
 
+def qui_signe_cnim(institution, repli: dict, *, impose: bool) -> dict:
+    """
+    Qui signe l'autorisation de concourir — nom, titre, et s'il est le directeur.
+
+    Le nom et le titre viennent TOUJOURS de la même personne. Les prendre
+    séparément — le nom du signataire du registre, le titre du directeur —
+    composait un signataire qui n'existe pas : « Mohamed Beyatt, Directeur »,
+    alors qu'il est chef du service de la scolarité. Un document officiel ne
+    peut pas prêter à quelqu'un une fonction qui n'est pas la sienne.
+
+    Trois cas, et un seul gagnant à la fois :
+      · l'agent a désigné quelqu'un — le directeur absent, un adjoint signe par
+        ordre : ce choix prime, sans quoi le sélecteur serait sans effet dès que
+        le directeur est renseigné ;
+      · sinon le directeur de l'institution, avec le poste que porte
+        l'établissement ;
+      · sinon le signataire du registre, avec SON titre.
+
+    `est_directeur` commande le bandeau arabe « المدير », qui ne veut dire que
+    « le directeur » : traduire un titre quelconque en arabe n'est pas à la
+    portée d'un gabarit, et le laisser au-dessus d'un chef de service ferait
+    dire au document qu'il est signé par quelqu'un d'autre.
+    """
+    nom   = (getattr(institution, 'directeur_nom_fr', '') or '').strip()
+    titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
+    if not impose and nom:
+        return {'nom': nom, 'titre': titre or 'Directeur', 'est_directeur': True}
+    return {**repli, 'est_directeur': False}
+
+
 def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url,
                    *, signataire_impose: bool = False) -> dict:
     """
@@ -341,35 +371,8 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url,
     """
     deliberation = ligne.deliberation
     contexte = _contexte_commun(doc, inscription, base_url)
-    institution = doc.institution
-
-    directeur_nom   = (getattr(institution, 'directeur_nom_fr', '') or '').strip()
-    directeur_titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
-
-    # Le nom et le titre viennent TOUJOURS de la même personne. Les prendre
-    # séparément — le nom du signataire enregistré, le titre du directeur —
-    # composait un signataire qui n'existe pas : « Mohamed Beyatt, Directeur »,
-    # alors qu'il est chef du service de la scolarité. Un document officiel ne
-    # peut pas attribuer à quelqu'un une fonction qui n'est pas la sienne.
-    #
-    # Le bandeau arabe dit « المدير » — le directeur, et rien d'autre. Il ne
-    # s'affiche donc que si c'est bien lui qui signe : traduire un titre
-    # quelconque en arabe n'est pas à la portée d'un gabarit.
-    if not signataire_impose and directeur_nom:
-        # Le directeur signe. Son titre vient de l'institution — « Directeur »,
-        # « Directeur général », ce que porte l'établissement — et n'est écrit
-        # en dur que faute de mieux.
-        signataire = {
-            'nom':           directeur_nom,
-            'titre':         directeur_titre or 'Directeur',
-            'est_directeur': True,
-        }
-    else:
-        # Quelqu'un d'autre : soit l'agent l'a désigné, soit le directeur n'est
-        # pas renseigné et la pièce sort au nom du signataire du registre. Dans
-        # les deux cas, SON titre.
-        signataire = dict(contexte['signataire'])
-        signataire['est_directeur'] = False
+    signataire = qui_signe_cnim(doc.institution, contexte['signataire'],
+                                impose=signataire_impose)
 
     contexte.update({
         'titre':        "ATTESTATION D'AUTORISATION DE PARTICIPATION AU CNIM",
@@ -533,6 +536,20 @@ def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, bas
         raise ValidationError(' '.join(m for m in morceaux if m))
     doc = creer_document(inscription, TYPE_CNIM, utilisateur=utilisateur,
                          signataire_id=signataire_id)
+
+    # Le registre doit nommer celui qui signe RÉELLEMENT. `creer_document` y
+    # recopie le signataire par défaut de l'institution ; sur cette pièce-ci
+    # c'est le directeur qui signe, et le registre disait donc le contraire du
+    # papier — « Chef service de la Scolarité » d'un côté, « Directeur » de
+    # l'autre. C'est le registre que consulte la page de vérification.
+    signataire = qui_signe_cnim(
+        doc.institution, {'nom': doc.signataire_nom, 'titre': doc.signataire_titre},
+        impose=bool(signataire_id))
+    if (signataire['nom'], signataire['titre']) != (doc.signataire_nom, doc.signataire_titre):
+        doc.signataire_nom   = signataire['nom']
+        doc.signataire_titre = signataire['titre']
+        doc.save(update_fields=['signataire_nom', 'signataire_titre'])
+
     pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url,
                                           signataire_impose=bool(signataire_id)))
     return doc, pdf
