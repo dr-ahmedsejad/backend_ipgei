@@ -169,13 +169,18 @@ def _index_anonymats(session) -> dict:
 
 
 def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int = 1,
-                      utilisateur=None) -> dict:
+                      matiere=None, utilisateur=None) -> dict:
     """
     Verse les notes d'un classeur de collecte.
 
     `type_note` et `numero` disent QUELLE épreuve on remplit : ils viennent de
     l'écran, pas du fichier. Une fiche de devoir surveillé rouverte pour saisir
     l'examen resterait sinon versée dans le devoir, sans que rien ne l'annonce.
+
+    `matiere` restreint la fournée à un seul onglet. Laissée vide — le cas
+    courant —, toutes les fiches du classeur sont versées : c'est ainsi qu'on
+    reporte un semestre entier d'un fichier. La renseigner sert à ne verser
+    qu'une matière d'un classeur qui en porte six, sans le découper.
 
     Renvoie un bilan : `{matieres, saisies, ignorees, erreurs}`. `ignorees`
     compte les cases laissées vides — c'est le compte qui dit à l'agent qu'une
@@ -228,11 +233,20 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
                 'motif': f'Trop de lignes (maximum {LIGNES_MAX}).'})
             continue
 
-        matiere = Matiere.objects.filter(
+        trouvee = Matiere.objects.filter(
             intitule=plan['intitule'], code_semestre=semestre.code,
             niveau_ref__code=classe.niveau_code, actif=True,
         ).first()
-        if matiere is None:
+        # Matière imposée : les autres onglets du classeur ne sont pas des
+        # erreurs, ils ne sont simplement pas demandés. Les signaler noierait
+        # le bilan sous cinq lignes pour un import qui s'est bien passé.
+        #
+        # `trouvee` et non `matiere` dans tout ce qui suit : écraser le
+        # paramètre revenait à imposer, dès le deuxième onglet, la matière du
+        # premier — un classeur de six matières n'en versait qu'une.
+        if matiere is not None and (trouvee is None or trouvee.pk != matiere.pk):
+            continue
+        if trouvee is None:
             bilan['erreurs'].append({
                 'feuille': feuille.title, 'ligne': plan['ligne_entete'],
                 'motif': (f'Matière « {plan["intitule"] or "?"} » introuvable au '
@@ -288,7 +302,7 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
                     continue
 
                 note, _ = Note.objects.get_or_create(
-                    inscription=inscription, matiere=matiere, semestre=semestre)
+                    inscription=inscription, matiere=trouvee, semestre=semestre)
                 if note.verrouillee:
                     bilan['erreurs'].append({
                         'feuille': feuille.title, 'ligne': numero_ligne,
@@ -308,14 +322,19 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
 
         bilan['matieres'].append({
             'feuille':  feuille.title,
-            'matiere':  matiere.intitule,
+            'matiere':  trouvee.intitule,
             'saisies':  saisies,
             'ignorees': ignorees,
         })
         bilan['saisies']  += saisies
         bilan['ignorees'] += ignorees
-        touchees.append(matiere.intitule)
+        touchees.append(trouvee.intitule)
 
+    if not bilan['matieres'] and not bilan['erreurs'] and matiere is not None:
+        raise ValidationError(
+            {'fichier': f'Ce classeur ne porte aucune fiche de « {matiere.intitule} ». '
+                        'Vérifiez la matière choisie, ou laissez « Toutes les '
+                        'matières » pour verser le classeur entier.'})
     if not bilan['matieres'] and not bilan['erreurs']:
         raise ValidationError(
             {'fichier': 'Aucune fiche de collecte reconnue dans ce classeur. '

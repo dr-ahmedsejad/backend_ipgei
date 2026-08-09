@@ -1384,9 +1384,22 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         except (TypeError, ValueError):
             raise ValidationError({'numero': 'Numéro d\'épreuve invalide.'})
 
+        # Matière facultative : sans elle, tout le classeur est versé — c'est
+        # le cas courant, un semestre entier en un fichier. Avec elle, on ne
+        # verse qu'un onglet d'un classeur qui en porte six.
+        matiere = None
+        if request.data.get('matiere'):
+            matiere = Matiere.objects.filter(pk=request.data['matiere']).first()
+            if matiere is None:
+                raise ValidationError({'matiere': 'Matière introuvable.'})
+            if matiere.code_semestre != semestre.code:
+                raise ValidationError(
+                    {'matiere': f'{matiere.intitule} relève du semestre '
+                                f'{matiere.code_semestre}, pas de {semestre.code}.'})
+
         bilan = self._executer(
             import_notes.importer_classeur, fichier,
-            semestre=semestre, classe=classe,
+            semestre=semestre, classe=classe, matiere=matiere,
             type_note=(request.data.get('type_note') or 'EXAM').upper(),
             numero=numero, utilisateur=_utilisateur(request),
         )
