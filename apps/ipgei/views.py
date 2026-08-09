@@ -1345,6 +1345,53 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
                 f'attachment; filename="collecte_{libelle}.pdf"'
         return reponse
 
+    @action(detail=False, methods=['post'], url_path='importer',
+            parser_classes=[MultiPartParser, FormParser])
+    def importer(self, request):
+        """
+        Verse les notes d'un classeur de collecte rempli.
+
+        C'est le RETOUR de `fiche-collecte` en Excel : l'enseignant remplit la
+        colonne « Note /20 » de la fiche qu'il a téléchargée et renvoie le
+        fichier. Aucun format à documenter, aucun gabarit à tenir à jour — la
+        feuille qu'on lit est celle qu'on écrit.
+
+        La matière n'est PAS demandée : elle se lit dans chaque onglet. Un
+        classeur porte les six matières du semestre, et les faire désigner une
+        à une inviterait à verser des notes dans la mauvaise.
+
+        L'épreuve, elle, vient de l'écran : une fiche de devoir surveillé
+        rouverte pour saisir l'examen se verserait sinon dans le devoir.
+
+        Corps : `fichier` (xlsx), `semestre`, `classe`, `type_note`, `numero`.
+        """
+        from . import import_notes
+
+        fichier = request.FILES.get('fichier')
+        if fichier is None:
+            raise ValidationError({'fichier': 'Fichier requis.'})
+
+        semestre = SemestreIPGEI.objects.filter(
+            pk=request.data.get('semestre')).first()
+        if semestre is None:
+            raise ValidationError({'semestre': 'Semestre requis et valide.'})
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise et valide.'})
+
+        try:
+            numero = int(request.data.get('numero') or 1)
+        except (TypeError, ValueError):
+            raise ValidationError({'numero': 'Numéro d\'épreuve invalide.'})
+
+        bilan = self._executer(
+            import_notes.importer_classeur, fichier,
+            semestre=semestre, classe=classe,
+            type_note=(request.data.get('type_note') or 'EXAM').upper(),
+            numero=numero, utilisateur=_utilisateur(request),
+        )
+        return Response(bilan)
+
     @action(detail=False, methods=['get'], url_path='mes-feuilles')
     def mes_feuilles(self, request):
         """
