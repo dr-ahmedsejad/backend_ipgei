@@ -332,12 +332,23 @@ def _contexte_cnim(doc, inscription, ligne: LigneDeliberation, base_url,
     directeur_titre = (getattr(institution, 'directeur_titre_fr', '') or '').strip()
 
     if signataire_impose:
-        # Recopié sur le document à sa création : c'est la main qui signe.
+        # Recopié sur le document à sa création : c'est la main qui signe, avec
+        # SON titre. Le mot « Directeur » ne se recopie pas sur un adjoint.
         signataire = dict(contexte['signataire'])
+        signataire['est_directeur'] = False
     else:
+        # Le titre vient de l'institution : « Directeur », « Directeur général »
+        # ou ce que porte l'établissement. L'écrire en dur ici le ferait mentir
+        # le jour où l'institut change d'intitulé.
         signataire = {
             'nom':   directeur_nom or contexte['signataire']['nom'],
             'titre': directeur_titre or 'Directeur',
+            # Le bandeau arabe dit « المدير » — le directeur, et rien d'autre.
+            # On ne l'affiche donc que si c'est bien lui : traduire un titre
+            # quelconque en arabe n'est pas à la portée d'un gabarit, et laisser
+            # « المدير » au-dessus d'un adjoint ferait dire au document qu'il est
+            # signé par quelqu'un qui ne l'a pas signé.
+            'est_directeur': True,
         }
 
     contexte.update({
