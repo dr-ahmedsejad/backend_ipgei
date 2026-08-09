@@ -85,6 +85,21 @@ OPTIONS_PDF = {
     'enable-local-file-access': None,
 }
 
+#: L'attestation CNIM tient ses marges ICI, et son gabarit n'en pose aucune.
+#:
+#: Les poser des deux côtés les additionnait — 12 mm ici, 22 mm dans le CSS —
+#: ET faisait déborder le bloc `.page` large de 210 mm d'une zone imprimable de
+#: 186 mm : wkhtmltopdf réduit alors la page entière, sans rien signaler. Le
+#: document sortait rétréci, décalé, avec un blanc plus large à droite qu'à
+#: gauche. Un seul endroit commande la marge, et c'est celui-ci.
+OPTIONS_PDF_CNIM = {
+    **OPTIONS_PDF,
+    'margin-top':    '13mm',
+    'margin-bottom': '13mm',
+    'margin-left':   '14mm',
+    'margin-right':  '14mm',
+}
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Création du document
@@ -380,6 +395,8 @@ def _rendre(type_document: str, contexte: dict) -> bytes:
         TYPE_ATTESTATION:     'ipgei/_attestation_footer.html',
         TYPE_RELEVE_SEMESTRE: 'ipgei/_releve_footer.html',
     }
+    if type_document == TYPE_CNIM:
+        return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF_CNIM)
     if type_document not in PIEDS:
         return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF)
 
