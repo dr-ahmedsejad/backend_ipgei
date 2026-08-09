@@ -317,8 +317,15 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
                         note=note, type_evaluation=type_evaluation, numero=numero,
                         defaults={'valeur': valeur, 'saisie_par': utilisateur},
                     )
-                services.calculer_note(note, plafond_rattrapage=plafond)
                 saisies += 1
+
+        # Recalcul de TOUTE la classe pour cette matière, après la feuille :
+        # une épreuve manquée comptant zéro, verser le deuxième devoir fait
+        # passer la classe de un à deux devoirs tenus, et le diviseur change
+        # pour tout le monde — y compris pour les lignes que ce classeur ne
+        # touche pas.
+        services.recalculer_groupe(trouvee.pk, semestre.pk, classe.pk,
+                                   plafond_rattrapage=plafond)
 
         bilan['matieres'].append({
             'feuille':  feuille.title,

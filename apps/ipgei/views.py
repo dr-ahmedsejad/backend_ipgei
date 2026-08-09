@@ -1535,6 +1535,7 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         utilisateur = _utilisateur(request)
         plafond     = services.plafond_effectif(semestre)
         traitees    = 0
+        classes     = set()
 
         with transaction.atomic():
             for ligne in lignes:
@@ -1563,8 +1564,17 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
                             **cle, defaults={'valeur': ev['valeur'], 'saisie_par': utilisateur},
                         )
 
-                self._executer(services.calculer_note, note, plafond_rattrapage=plafond)
                 traitees += 1
+                classes.add(note.inscription.classe_id)
+
+            # Le recalcul vient APRÈS la boucle, et porte sur toute la classe :
+            # une épreuve manquée comptant zéro, saisir le deuxième devoir d'un
+            # seul étudiant fait passer la classe de un à deux devoirs tenus et
+            # change le diviseur de TOUT LE MONDE. Recalculer ligne à ligne
+            # laisserait les premières sur l'ancien diviseur.
+            for classe_id in classes:
+                self._executer(services.recalculer_groupe, matiere.pk, semestre.pk,
+                               classe_id, plafond_rattrapage=plafond)
 
         return Response({'lignes_traitees': traitees})
 
@@ -1823,8 +1833,12 @@ class EvaluationViewSet(ModelViewSet):
 
     @staticmethod
     def _recalculer(note):
-        services.calculer_note(
-            note, plafond_rattrapage=services.plafond_effectif(note.semestre),
+        # Toute la classe, pas la seule ligne : le diviseur des moyennes est le
+        # nombre d'épreuves tenues par la classe, et une évaluation ajoutée ou
+        # retirée le déplace pour tous.
+        services.recalculer_groupe(
+            note.matiere_id, note.semestre_id, note.inscription.classe_id,
+            plafond_rattrapage=services.plafond_effectif(note.semestre),
         )
 
 

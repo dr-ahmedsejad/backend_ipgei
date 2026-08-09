@@ -9,7 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Count, Prefetch
 from django.utils import timezone
 
 from .models import (
@@ -33,12 +33,49 @@ def _arrondi(valeur):
     return Decimal(valeur).quantize(DEUX_DECIMALES, rounding=ROUND_HALF_UP)
 
 
-def _moyenne_arithmetique(valeurs):
-    """Moyenne arithmétique simple ; None si aucune valeur (plan §4.3)."""
+def _moyenne_arithmetique(valeurs, tenues: int = 0):
+    """
+    Moyenne arithmétique des épreuves, l'épreuve manquée comptant ZÉRO.
+
+    `tenues` est le nombre d'épreuves que la CLASSE a passées dans cette
+    matière — le dénominateur. Sans lui, la moyenne se ferait sur les seules
+    copies rendues, et manquer une épreuve deviendrait un avantage : deux
+    devoirs à 13 et 12 donnaient 12,50, un seul devoir à 15 donnait 15.
+
+    Le dénominateur ne peut pas descendre sous le nombre de notes présentes :
+    un étudiant ne saurait avoir plus d'épreuves que sa classe, mais si cela
+    arrivait, diviser par moins fausserait la note à la hausse.
+
+    Renvoie None si aucune épreuve n'a été tenue — un semestre qui commence
+    n'a pas de moyenne, il n'a pas zéro.
+    """
     valeurs = [Decimal(v) for v in valeurs if v is not None]
-    if not valeurs:
+    diviseur = max(tenues, len(valeurs))
+    if not diviseur:
         return None
-    return _arrondi(sum(valeurs) / Decimal(len(valeurs)))
+    return _arrondi(sum(valeurs) / Decimal(diviseur))
+
+
+def epreuves_tenues(matiere_id, semestre_id, classe_id) -> dict:
+    """
+    Combien d'épreuves de chaque type la CLASSE a passées dans cette matière.
+
+    Une épreuve est réputée tenue dès qu'un seul étudiant en porte la note :
+    c'est le seul signal disponible, et il est juste — on ne saisit pas la note
+    d'un devoir qui n'a pas eu lieu.
+
+    Conséquence à connaître : saisir le deuxième devoir d'UN étudiant change le
+    dénominateur de TOUTE la classe. C'est pourquoi une saisie ne recalcule
+    jamais une ligne seule, mais le groupe entier (`recalculer_groupe`).
+    """
+    lignes = (
+        Evaluation.objects
+        .filter(note__matiere_id=matiere_id, note__semestre_id=semestre_id,
+                note__inscription__classe_id=classe_id)
+        .values('type_evaluation')
+        .annotate(n=Count('numero', distinct=True))
+    )
+    return {l['type_evaluation']: l['n'] for l in lignes}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -226,13 +263,18 @@ def _tracer_session(session: SessionEvaluationIPGEI, acte: str, utilisateur) -> 
 # ═════════════════════════════════════════════════════════════════════════════
 # Calcul d'une note de matière
 # ═════════════════════════════════════════════════════════════════════════════
-def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True) -> Note:
+def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
+                  epreuves: dict = None) -> Note:
     """
     Recalcule une ligne de note et **fige la pondération** de la matière dedans.
 
-    moy_DS   = moyenne arithmétique des DS
-    moy_exam = moyenne arithmétique des examens
+    moy_DS   = moyenne arithmétique des DS, l'épreuve manquée comptant ZÉRO
+    moy_exam = idem pour les examens
     moyenne  = pct_ds·moy_DS + pct_tp·TP + pct_exam·moy_exam
+
+    Le diviseur est le nombre d'épreuves que la CLASSE a passées, non celui des
+    copies rendues par l'étudiant : sans quoi manquer un devoir serait un
+    avantage — 13 et 12 donnaient 12,50, un seul 15 donnait 15.
 
     Une composante sans note (aucun DS saisi, pas de TP…) est neutralisée : sa
     part est redistribuée sur les composantes présentes, faute de quoi un
@@ -245,11 +287,19 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True) -> N
         raise ValidationError('Note verrouillée par une délibération validée — recalcul refusé.')
 
     evaluations = list(note.evaluations.all())
+    # Le dénominateur est celui de la CLASSE : une épreuve manquée compte zéro.
+    # Fourni par l'appelant quand il recalcule tout un groupe — sinon une
+    # requête par ligne, ce qui se paie sur une classe de quarante.
+    if epreuves is None:
+        epreuves = epreuves_tenues(note.matiere_id, note.semestre_id,
+                                   note.inscription.classe_id)
     moy_ds   = _moyenne_arithmetique(
-        [e.valeur for e in evaluations if e.type_evaluation == Evaluation.TYPE_DS]
+        [e.valeur for e in evaluations if e.type_evaluation == Evaluation.TYPE_DS],
+        epreuves.get(Evaluation.TYPE_DS, 0),
     )
     moy_exam = _moyenne_arithmetique(
-        [e.valeur for e in evaluations if e.type_evaluation == Evaluation.TYPE_EXAM]
+        [e.valeur for e in evaluations if e.type_evaluation == Evaluation.TYPE_EXAM],
+        epreuves.get(Evaluation.TYPE_EXAM, 0),
     )
 
     matiere = note.matiere
@@ -310,13 +360,42 @@ def _appliquer_rattrapage(moyenne, rattrapage, plafond):
 
 
 def recalculer_notes(queryset, *, plafond_rattrapage=None) -> int:
-    """Recalcule un lot de notes ; renvoie le nombre de lignes traitées."""
+    """
+    Recalcule un lot de notes ; renvoie le nombre de lignes traitées.
+
+    Le nombre d'épreuves tenues est calculé UNE fois par groupe
+    (matière × semestre × classe) et non par ligne : sur une classe de
+    quarante, ce serait quarante requêtes identiques.
+    """
     total = 0
-    qs = queryset.filter(verrouillee=False).select_related('matiere').prefetch_related('evaluations')
+    qs = (queryset.filter(verrouillee=False)
+          .select_related('matiere', 'inscription')
+          .prefetch_related('evaluations'))
+    cache = {}
     for note in qs:
-        calculer_note(note, plafond_rattrapage=plafond_rattrapage)
+        cle = (note.matiere_id, note.semestre_id, note.inscription.classe_id)
+        if cle not in cache:
+            cache[cle] = epreuves_tenues(*cle)
+        calculer_note(note, plafond_rattrapage=plafond_rattrapage, epreuves=cache[cle])
         total += 1
     return total
+
+
+def recalculer_groupe(matiere_id, semestre_id, classe_id, *, plafond_rattrapage=None) -> int:
+    """
+    Recalcule TOUTES les notes d'une matière pour une classe.
+
+    Indispensable depuis que l'épreuve manquée compte zéro : saisir le deuxième
+    devoir d'un seul étudiant fait passer la classe de un à deux devoirs tenus,
+    et change donc le diviseur de tout le monde. Ne recalculer que la ligne
+    saisie laisserait les trente-neuf autres sur l'ancien diviseur, sans que
+    rien ne le signale.
+    """
+    return recalculer_notes(
+        Note.objects.filter(matiere_id=matiere_id, semestre_id=semestre_id,
+                            inscription__classe_id=classe_id),
+        plafond_rattrapage=plafond_rattrapage,
+    )
 
 
 @transaction.atomic
