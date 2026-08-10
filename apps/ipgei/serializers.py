@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from rest_framework import serializers
+from django.db import models
 
 from .models import (
     AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, EmploiArchive,
@@ -196,17 +197,30 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
     niveaux       = serializers.ListField(read_only=True, child=serializers.CharField())
     type_semestre = serializers.CharField(read_only=True)
     nb_semaines_generees = serializers.SerializerMethodField()
+    # Ce que le calendrier CONSTATE, et non ce qu'on lui prête : la premiere et
+    # la derniere semaine reprises. La derniere n'est pas une fin — on peut en
+    # ajouter d'autres apres les seize, et c'est le cas quand un rattrapage
+    # s'intercale. L'ecran l'affiche comme un constat, pas comme un terme.
+    calendrier = serializers.SerializerMethodField()
 
     class Meta:
         model  = SemestreIPGEI
         fields = [
             'id', 'institution', 'code', 'annee_universitaire', 'date_debut', 'date_fin',
             'nb_semaines', 'est_cloture', 'rang', 'libelle_annee', 'niveaux',
-            'type_semestre', 'nb_semaines_generees',
+            'type_semestre', 'nb_semaines_generees', 'calendrier',
         ]
 
     def get_nb_semaines_generees(self, obj) -> int:
         return obj.semaines.count()
+
+    def get_calendrier(self, obj) -> dict:
+        bornes = obj.semaines.aggregate(
+            premiere=models.Min('date_debut'), derniere=models.Max('date_fin'))
+        return {
+            'premiere_semaine': bornes['premiere'],
+            'derniere_semaine': bornes['derniere'],
+        }
 
     def validate(self, attrs):
         debut = attrs.get('date_debut', getattr(self.instance, 'date_debut', None))

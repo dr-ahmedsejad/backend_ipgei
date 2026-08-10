@@ -1245,9 +1245,14 @@ _TYPE_SEMAINE_SOCLE = {
 
 
 @transaction.atomic
-def generer_semaines(semestre: SemestreIPGEI, *, nb=None, remplacer=False) -> int:
+def synchroniser_calendrier(semestre: SemestreIPGEI, *, remplacer=False) -> dict:
     """
-    Reprend le calendrier du socle pour ce semestre.
+    Aligne le calendrier du semestre sur celui du socle : crée, corrige, retire.
+
+    Trois mouvements, parce que le calendrier vit : on le génère d'un coup, on
+    y ajoute une semaine en cours d'année, et l'on en retire une posée par
+    erreur. Ne traiter que le premier laissait le reflet dériver dès la
+    première correction.
 
     **Il n'y a qu'un seul calendrier**, celui de « Paramètres → Semaines »
     (`parametres.Semaine`), et c'est lui qui fait foi. IPGEI n'en tient pas un
@@ -1264,6 +1269,11 @@ def generer_semaines(semestre: SemestreIPGEI, *, nb=None, remplacer=False) -> in
 
     `remplacer=True` repart de zéro, en ne supprimant que les semaines sans
     séance — un emploi du temps déjà posé n'est jamais détruit.
+
+    On reprend TOUT ce que le socle porte, et non un nombre choisi : l'écran
+    offrait un compteur « semaines à reprendre au maximum » que ce service
+    n'a jamais lu. Reprendre la moitié d'un calendrier qui fait foi ne veut
+    rien dire — le compteur a été retiré plutôt qu'implémenté.
     """
     from django.db.models import Max, Min
 
@@ -1282,11 +1292,14 @@ def generer_semaines(semestre: SemestreIPGEI, *, nb=None, remplacer=False) -> in
         .order_by('numero_semaine')
     )
 
-    connues = set(semestre.semaines.values_list('numero', flat=True))
+    au_socle = {g['numero_semaine']: g for g in groupes}
+    existantes = {s.numero: s for s in semestre.semaines.all()}
+
+    # ── Ce que le socle porte et que le semestre n'a pas encore ─────────────
     creees = [
         SemaineIPGEI(
             semestre=semestre,
-            numero=g['numero_semaine'],
+            numero=numero,
             date_debut=g['debut'],
             date_fin=g['fin'],
             # Le socle connaît les mêmes qualifications, à « férié » près, qui
@@ -1295,10 +1308,92 @@ def generer_semaines(semestre: SemestreIPGEI, *, nb=None, remplacer=False) -> in
             type_semaine=_TYPE_SEMAINE_SOCLE.get(
                 g['type_semaine'], SemaineIPGEI.TYPE_COURS),
         )
-        for g in groupes if g['numero_semaine'] not in connues
+        for numero, g in au_socle.items() if numero not in existantes
     ]
     SemaineIPGEI.objects.bulk_create(creees)
-    return len(creees)
+
+    # ── Ce qui a changé de dates ou de qualification ────────────────────────
+    # Une semaine décalée d'un jour au socle doit l'être ici aussi : sans cela
+    # les deux calendriers repartent en silence, ce que ce reflet existe
+    # précisément pour empêcher.
+    modifiees = []
+    for numero, semaine in existantes.items():
+        g = au_socle.get(numero)
+        if g is None:
+            continue
+        type_attendu = _TYPE_SEMAINE_SOCLE.get(
+            g['type_semaine'], SemaineIPGEI.TYPE_COURS)
+        if (semaine.date_debut, semaine.date_fin, semaine.type_semaine) ==            (g['debut'], g['fin'], type_attendu):
+            continue
+        semaine.date_debut, semaine.date_fin = g['debut'], g['fin']
+        semaine.type_semaine = type_attendu
+        modifiees.append(semaine)
+    if modifiees:
+        SemaineIPGEI.objects.bulk_update(
+            modifiees, ['date_debut', 'date_fin', 'type_semaine'])
+
+    # ── Ce que le socle ne porte plus ───────────────────────────────────────
+    # Une semaine ajoutée par erreur puis retirée du calendrier doit
+    # disparaître ici aussi, SAUF si des séances s'y sont accrochées : on ne
+    # fait pas disparaître un emploi du temps par ricochet. La semaine reste
+    # alors, et le bilan la signale — à l'agent de vider la semaine d'abord.
+    orphelines = [s for numero, s in existantes.items() if numero not in au_socle]
+    a_retirer  = [s.pk for s in orphelines
+                  if not s.seances.exists() and not s.archives.exists()]
+    retenues   = [s.numero for s in orphelines if s.pk not in a_retirer]
+    supprimees = 0
+    if a_retirer:
+        supprimees = SemaineIPGEI.objects.filter(pk__in=a_retirer).delete()[0]
+
+    aligner_debut(semestre)
+    return {
+        'creees':     len(creees),
+        'modifiees':  len(modifiees),
+        'supprimees': supprimees,
+        'retenues':   retenues,
+        'total':      semestre.semaines.count(),
+    }
+
+
+def generer_semaines(semestre: SemestreIPGEI, *, remplacer=False) -> int:
+    """
+    Nombre de semaines CRÉÉES par la synchronisation — vue simplifiée.
+
+    Conservée pour les appelants qui ne veulent qu'un compte : la commande
+    d'initialisation et la synchronisation du miroir.
+    """
+    return synchroniser_calendrier(semestre, remplacer=remplacer)['creees']
+
+
+def aligner_debut(semestre: SemestreIPGEI) -> bool:
+    """
+    Recale la date de debut du semestre sur sa premiere semaine.
+
+    Elle se DEDUIT du calendrier, elle ne le decide pas : le champ s'annonce
+    lui-meme comme « la date de la premiere semaine », mais restait saisi a la
+    main et pouvait donc dementir ce qu'il decrivait. S3 2026-2027 affichait le
+    15/09 quand ses semaines commencaient le 05/10 — trois semaines d'ecart
+    entre la date lue a l'ecran et le jour ou les cours commencent.
+
+    Consequence a connaitre : S1 et S3 porteront la MEME date, puisque la
+    reprise puise dans les memes semaines du socle — un seul calendrier pour
+    les deux promotions. C'est la realite du calendrier, rendue visible.
+
+    La date de FIN n'est jamais ecrite. On ne sait pas quand un semestre
+    s'acheve : apres seize semaines on peut en ajouter d'autres, et une fin
+    inscrite d'avance serait dementie par la premiere semaine de rattrapage.
+    L'ecran constate la derniere semaine existante ; il n'annonce pas de terme.
+
+    Sans semaine reprise, rien ne bouge : la date de convention tient lieu de
+    repere, un semestre sans calendrier devant tout de meme se situer.
+    """
+    premiere = semestre.semaines.order_by('date_debut').values_list(
+        'date_debut', flat=True).first()
+    if premiere is None or premiere == semestre.date_debut:
+        return False
+    semestre.date_debut = premiere
+    semestre.save(update_fields=['date_debut'])
+    return True
 
 
 # ═════════════════════════════════════════════════════════════════════════════

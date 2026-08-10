@@ -176,26 +176,24 @@ class SemestreIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin,
     @action(detail=True, methods=['post'], url_path='generer-semaines')
     def generer_semaines(self, request, pk=None):
         """
-        Ajoute des semaines à la suite de celles déjà générées.
+        Reprend du calendrier du socle les semaines qui manquent au semestre.
 
-        `nb_semaines` : combien en ajouter (défaut : celui du semestre).
         `remplacer=true` repart de zéro — seules les semaines sans séance sont
         supprimées, on ne détruit jamais un emploi du temps déjà posé.
+
+        Le corps n'accepte plus de `nb_semaines` : il était validé ici puis
+        ignoré par le service. Un paramètre qu'on vérifie sans s'en servir
+        promet un réglage qui n'existe pas.
         """
         semestre  = self.get_object()
         remplacer = bool(request.data.get('remplacer', False))
-        nb        = request.data.get('nb_semaines')
-        try:
-            nb = int(nb) if nb not in (None, '') else None
-        except (TypeError, ValueError):
-            raise ValidationError({'nb_semaines': 'Nombre de semaines invalide.'})
-        if nb is not None and not 1 <= nb <= 40:
-            raise ValidationError({'nb_semaines': 'Attendu entre 1 et 40.'})
 
-        creees = self._executer(
-            services.generer_semaines, semestre, nb=nb, remplacer=remplacer,
+        bilan = self._executer(
+            services.synchroniser_calendrier, semestre, remplacer=remplacer,
         )
-        return Response({'semaines_creees': creees, 'total': semestre.semaines.count()})
+        # `semaines_creees` reste, pour ne pas casser un client déjà en place ;
+        # le reste dit ce que la synchronisation a corrigé ou retiré.
+        return Response({'semaines_creees': bilan['creees'], **bilan})
 
     @action(detail=True, methods=['get'], url_path='semaines')
     def semaines(self, request, pk=None):
