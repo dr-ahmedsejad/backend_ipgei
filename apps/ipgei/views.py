@@ -1152,6 +1152,10 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
                 'etudiant_nom':       ligne.inscription.etudiant.nom_display,
                 'etudiant_matricule': ligne.inscription.etudiant.matricule,
                 'classe':             ligne.inscription.classe.nom,
+                # Le niveau, et pas seulement le nom de la classe : l'écran de
+                # répartition compte les copies d'un niveau pour empêcher d'en
+                # demander plus qu'il n'en existe, et le nom ne le dit pas.
+                'niveau':             ligne.inscription.classe.niveau_code,
             }
             for ligne in lignes
         ])
