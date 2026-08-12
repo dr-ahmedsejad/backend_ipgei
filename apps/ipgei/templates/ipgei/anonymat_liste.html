@@ -40,6 +40,10 @@ rendre la copie.
   .repere td { padding: 1px 0; }
   .repere .cle { font-weight: 700; width: 26mm; }
 
+  /* Le tableau ne s'étire plus sur toute la largeur : trois colonnes courtes
+     laissaient la classe absorber le reste de la page, soit huit centimètres
+     pour écrire « MPSI A ». Largeur ajustée au contenu, table centrée. */
+  .copies { width: auto; margin: 0 auto; }
   .copies th {
     background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
     border: 1px solid #999; padding: 4px; text-align: center;
@@ -47,7 +51,9 @@ rendre la copie.
   .copies td {
     border: 1px solid #999; padding: 3px 5px; font-size: 10pt;
   }
-  .num, .mat { text-align: center; }
+  /* Les trois colonnes se lisent en colonne, d'un coup d'œil : un matricule
+     collé à gauche et une classe collée à l'autre bout obligeaient à zigzaguer. */
+  .num, .mat, .classe { text-align: center; }
   .num { font-weight: 700; }
 </style>
 </head>
@@ -78,9 +84,9 @@ rendre la copie.
 <table class="copies">
   <thead>
     <tr>
-      <th style="width: 22mm;">N° anonymat</th>
-      <th style="width: 32mm;">Matricule</th>
-      <th>Classe</th>
+      <th style="width: 26mm;">N° anonymat</th>
+      <th style="width: 30mm;">Matricule</th>
+      <th style="width: 26mm;">Classe</th>
     </tr>
   </thead>
   <tbody>
@@ -88,7 +94,7 @@ rendre la copie.
     <tr>
       <td class="num">{{ copie.numero }}</td>
       <td class="mat">{{ copie.matricule }}</td>
-      <td>{{ copie.classe }}</td>
+      <td class="classe">{{ copie.classe }}</td>
     </tr>
     {% endfor %}
   </tbody>
