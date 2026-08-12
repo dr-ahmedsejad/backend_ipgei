@@ -2097,8 +2097,17 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         deliberation = self.get_object()
         # `tri` commande l'ordre des blocs : par classement pour délibérer du
         # haut vers le bas, par matricule pour retrouver un dossier qu'on
-        # presente au jury, par moyenne pour examiner les cas limites.
+        # présente au jury, par moyenne pour examiner les cas limites, par
+        # numéro d'anonymat pour suivre l'ordre des copies encore anonymes.
+        #
+        # Une valeur inconnue est REFUSÉE et non ramenée au classement : rendre
+        # silencieusement un autre ordre que celui demandé se lit comme un tri
+        # qui ne marche pas.
         tri = request.query_params.get('tri') or detail_notes.TRI_RANG
+        if tri not in detail_notes.TRIS:
+            raise ValidationError(
+                {'tri': f'Tri inconnu : « {tri} ». Attendu : '
+                        + ', '.join(detail_notes.TRIS) + '.'})
         contenu = self._executer(detail_notes.generer_pdf, deliberation, tri)
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = (

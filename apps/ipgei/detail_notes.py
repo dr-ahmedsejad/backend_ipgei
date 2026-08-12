@@ -88,12 +88,18 @@ def _anonymats(deliberation: Deliberation) -> dict:
 TRI_RANG      = 'rang'
 TRI_MATRICULE = 'matricule'
 TRI_MOYENNE   = 'moyenne'
-TRIS = (TRI_RANG, TRI_MATRICULE, TRI_MOYENNE)
+#: Par NUMÉRO D'ANONYMAT : c'est l'ordre des copies sur la table du jury quand
+#: elles viennent d'être corrigées. Retrouver la fiche d'une copie obligeait
+#: sinon à lever l'anonymat d'abord, ce qui est justement ce qu'on veut éviter
+#: tant que la correction n'est pas close.
+TRI_ANONYMAT  = 'anonymat'
+TRIS = (TRI_RANG, TRI_MATRICULE, TRI_MOYENNE, TRI_ANONYMAT)
 
 LIBELLES_TRI = {
     TRI_RANG:      'classement',
     TRI_MATRICULE: 'matricule',
     TRI_MOYENNE:   'moyenne décroissante',
+    TRI_ANONYMAT:  "numéro d'anonymat",
 }
 
 
@@ -106,6 +112,11 @@ def _clef_tri(tri: str):
     """
     if tri == TRI_MATRICULE:
         return lambda bloc: str(bloc['matricule'] or '')
+    if tri == TRI_ANONYMAT:
+        # Les élèves sans numéro passent en fin : la campagne n'a pas tiré pour
+        # eux, ou le tirage n'a pas eu lieu. Le numéro est trié en ENTIER — en
+        # texte, la copie 10 précéderait la 2.
+        return lambda bloc: (bloc['anonymat'] is None, bloc['anonymat'] or 0)
     if tri == TRI_MOYENNE:
         return lambda bloc: (bloc['moyenne'] is None,
                              -(bloc['moyenne'] or 0))
