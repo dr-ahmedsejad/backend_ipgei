@@ -11,8 +11,15 @@ page 1 et les trois autres page 2, sans son en-tête.
 {% endcomment %}
 <style>
   @page { size: A4 portrait; }
+  /* Calibri comme sur le PV de délibération : les deux pièces sortent du même
+     jury et se lisent l'une à côté de l'autre.
+
+     L'ARABE N'EST PAS DANS CALIBRI — cette police n'en porte aucun glyphe, et
+     la substitution de secours du moteur ne joue pas au niveau du `body`.
+     Chaque élément arabe doit donc nommer sa propre pile ; c'est ce qui a fait
+     disparaître l'arabe du PV deux fois de suite. */
   body {
-    font-family: "DejaVu Sans", Arial, sans-serif;
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
     font-size: 8.5pt; color: #1a1a1a; margin: 0;
   }
   table { border-collapse: collapse; width: 100%; }
@@ -20,7 +27,10 @@ page 1 et les trois autres page 2, sans son en-tête.
   /* ── En-tête institutionnel ─────────────────────────────────────────── */
   .entete td { border: none; vertical-align: top; padding: 0; }
   .entete-fr { font-size: 9pt; line-height: 1.35; font-weight: 600; }
-  .entete-ar { font-size: 9pt; line-height: 1.5; font-weight: 600; text-align: right; }
+  .entete-ar {
+    font-size: 9pt; line-height: 1.5; font-weight: 600; text-align: right;
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
   .entete-logo { width: 26mm; text-align: center; }
   .entete-logo img { width: 22mm; }
   .date-edition { text-align: right; font-size: 8pt; color: #444; padding-top: 2px; }

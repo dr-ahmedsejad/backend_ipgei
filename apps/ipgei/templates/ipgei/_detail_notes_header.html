@@ -10,7 +10,13 @@ quel semestre il s'agit.
 <head>
 <meta charset="UTF-8">
 <style>
-  body { font-family: "DejaVu Sans", Arial, sans-serif; margin: 0; }
+  body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; margin: 0; }
+  /* L'en-tête partagé ne pose aucune classe sur ses cellules : la colonne
+     arabe est la DERNIÈRE. Sans cette règle, elle hérite de Calibri, qui ne
+     porte pas l'arabe — et la ligne sort vide. */
+  .institution td:last-child, .institution .ar {
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
   /* L'en-tête partagé est dimensionné pour un corps de document ; répété en
      tête de chaque page, il doit tenir dans la marge réservée. */
   .institution { font-size: 8pt; }
