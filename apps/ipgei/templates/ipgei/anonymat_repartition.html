@@ -54,7 +54,6 @@ coup d'œil avant de commencer.
   }
   .collecte .num { text-align: center; font-weight: 700; width: 24mm; }
   .collecte .note { width: 26mm; }
-  .consigne { font-size: 9pt; color: #555; margin-top: 10px; line-height: 1.5; }
   .signature { margin-top: 16mm; font-size: 10pt; }
   .signature .trait {
     border-bottom: 1px solid #333; width: 60mm; display: inline-block;
@@ -105,18 +104,8 @@ coup d'œil avant de commencer.
     </tbody>
   </table>
 
-  {% comment %}
-  Le rappel n'est pas décoratif : c'est au moment de rendre les copies qu'on
-  est tenté de demander « c'est qui, le 14 ? ».
-  {% endcomment %}
-  <p class="consigne">
-    Les copies sont identifiées par leur seul numéro. La correspondance avec les
-    étudiants est tenue par le secrétariat et ne sera levée qu'après la saisie
-    des notes.
-  </p>
-
   <div class="signature">
-    Reçu le <span class="trait"></span> &nbsp;&nbsp; Signature <span class="trait"></span>
+    Date <span class="trait"></span> &nbsp;&nbsp; Signature <span class="trait"></span>
   </div>
 
   {% if forloop.last and restantes %}
