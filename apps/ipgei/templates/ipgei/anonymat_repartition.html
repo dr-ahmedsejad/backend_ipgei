@@ -1,14 +1,17 @@
 {% comment %}
-Répartition des copies entre correcteurs — une page par correcteur.
+Fiche de collecte des copies anonymes — une par correcteur.
 
-Cette feuille NE PORTE AUCUN MATRICULE, et c'est tout son objet : elle
-accompagne un paquet de copies pendant la correction, moment précis où
-l'anonymat sert. La table de correspondance, elle, reste au secrétariat
-(« anonymat_liste.html »).
+Ce n'est pas une liste à cocher : c'est la feuille sur laquelle le correcteur
+ÉCRIT ses notes en corrigeant, puis qu'il signe et rend. D'où deux colonnes,
+« N° anonymat » et « Note /20 », une ligne par copie, et de la place pour
+écrire.
 
-Les numéros sont donnés en intervalle — « de 1 à 20 » — puis énumérés : le
-premier chiffre sert à vérifier le paquet d'un coup d'œil, la liste à cocher
-copie par copie.
+Elle NE PORTE AUCUN MATRICULE, et c'est tout son objet : elle accompagne le
+paquet pendant la correction, moment précis où l'anonymat sert. La table de
+correspondance, elle, reste au secrétariat (« anonymat_liste.html »).
+
+L'intervalle en tête — « du n° 1 au n° 20 » — sert à vérifier le paquet d'un
+coup d'œil avant de commencer.
 {% endcomment %}
 <!DOCTYPE html>
 <html lang="fr">
@@ -39,10 +42,18 @@ copie par copie.
   .correcteur .nom { font-size: 13pt; font-weight: 700; }
   .correcteur .lot { font-size: 10pt; color: #333; margin-top: 2px; }
 
-  .numeros td {
-    border: 1px solid #999; padding: 4px 2px; text-align: center;
-    font-size: 10.5pt; font-weight: 700; width: 10%;
+  /* Une FICHE DE COLLECTE : le correcteur écrit ses notes dessus. D'où une
+     ligne par copie et une colonne vide, plutôt qu'une grille de numéros à
+     cocher — on ne note pas dans une case de 8 mm. */
+  .collecte th {
+    background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
+    border: 1px solid #999; padding: 4px; text-align: center;
   }
+  .collecte td {
+    border: 1px solid #999; padding: 5px; font-size: 10.5pt; height: 8mm;
+  }
+  .collecte .num { text-align: center; font-weight: 700; width: 24mm; }
+  .collecte .note { width: 26mm; }
   .consigne { font-size: 9pt; color: #555; margin-top: 10px; line-height: 1.5; }
   .signature { margin-top: 16mm; font-size: 10pt; }
   .signature .trait {
@@ -61,9 +72,10 @@ copie par copie.
 <div class="page-correcteur">
   <div class="institution">{% include '_institution_header.html' %}</div>
 
-  <div class="titre">Copies à corriger</div>
+  <div class="titre">Fiche de collecte — copies anonymes</div>
   <div class="sous-titre">
-    {{ semestre.code }} · {{ campagne }} · {{ niveau }} · {{ annee_universitaire }}
+    {% if matiere %}{{ matiere.intitule }} · {% endif %}{{ semestre.code }} ·
+    {{ campagne }} · {{ niveau }} · {{ annee_universitaire }}
   </div>
 
   <div class="correcteur">
@@ -74,14 +86,22 @@ copie par copie.
     </div>
   </div>
 
-  <table class="numeros">
-    <tbody>
+  <table class="collecte">
+    <thead>
       <tr>
-      {% for numero in paquet.numeros %}
-        <td>{{ numero }}</td>
-        {% if forloop.counter|divisibleby:10 and not forloop.last %}</tr><tr>{% endif %}
-      {% endfor %}
+        <th class="num">N° anonymat</th>
+        <th class="note">Note /20</th>
+        <th>Observations</th>
       </tr>
+    </thead>
+    <tbody>
+      {% for numero in paquet.numeros %}
+      <tr>
+        <td class="num">{{ numero }}</td>
+        <td class="note"></td>
+        <td></td>
+      </tr>
+      {% endfor %}
     </tbody>
   </table>
 

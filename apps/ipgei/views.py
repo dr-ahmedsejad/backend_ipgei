@@ -1202,13 +1202,19 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
         """
         Partage les copies entre correcteurs et rend leurs feuilles.
 
-        Corps : `{lots: [{correcteur, nb}, …], niveau, apercu}`. Les paquets
-        suivent l'ordre des numéros — c'est ainsi qu'on distribue une pile.
+        Corps : `{lots: [{correcteur, nb}, …], niveau, matiere, sortie, apercu}`.
+        Les paquets suivent l'ordre des numéros — c'est ainsi qu'on distribue
+        une pile.
 
         `apercu=true` rend le bilan en JSON, pour que l'écran montre ce qui sera
-        produit avant de l'imprimer. Sinon, un PDF d'une page par correcteur,
-        SANS aucun matricule : la feuille accompagne les copies pendant la
-        correction, moment où l'anonymat sert.
+        produit avant de l'imprimer. Sinon une FICHE DE COLLECTE par correcteur,
+        deux colonnes — numéro d'anonymat et note — et aucun matricule : la
+        feuille accompagne les copies pendant la correction, moment où
+        l'anonymat sert.
+
+        `sortie=excel` rend le même partage en classeur, au format de la fiche
+        de collecte : rempli, il se reverse par Notes → Import Excel. La matière
+        est alors exigée, l'import la lisant pour savoir où verser les notes.
         """
         from django.http import HttpResponse
 
@@ -1223,10 +1229,29 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
         if str(request.data.get('apercu', '')).lower() in ('1', 'true', 'on'):
             return Response(self._executer(secretariat.repartir, session, lots, niveau))
 
-        contenu = self._executer(
-            secretariat.generer_repartition_pdf, session, lots, niveau)
+        matiere = None
+        if request.data.get('matiere'):
+            matiere = Matiere.objects.filter(pk=request.data['matiere']).first()
+            if matiere is None:
+                raise ValidationError({'matiere': 'Matière introuvable.'})
+
         libelle = _nom_fichier(
-            f'repartition_{session.semestre.code}_{niveau or "tous"}')
+            f'collecte_{session.semestre.code}_{niveau or "tous"}'
+            + (f'_{matiere.code}' if matiere else ''))
+        # Le classeur se REVERSE par Notes → Import Excel : c'est le même
+        # format que la fiche de collecte, et c'est ce qui ferme la boucle.
+        if (request.data.get('sortie') or 'pdf').lower() == 'excel':
+            contenu = self._executer(
+                secretariat.generer_repartition_excel, session, lots, niveau, matiere)
+            reponse = HttpResponse(
+                contenu,
+                content_type='application/vnd.openxmlformats-officedocument.'
+                             'spreadsheetml.sheet')
+            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.xlsx"'
+            return reponse
+
+        contenu = self._executer(
+            secretariat.generer_repartition_pdf, session, lots, niveau, matiere)
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
         return reponse

@@ -240,9 +240,128 @@ def repartir(session, lots: list, niveau: str = '') -> dict:
     }
 
 
-def generer_repartition_pdf(session, lots: list, niveau: str = '') -> bytes:
-    """Une page par correcteur — numéros seuls, aucun matricule."""
+def generer_repartition_pdf(session, lots: list, niveau: str = '',
+                            matiere=None) -> bytes:
+    """
+    Une FICHE DE COLLECTE par correcteur : deux colonnes, numéro et note.
+
+    Ce n'est pas une liste à cocher mais la feuille sur laquelle il écrit ses
+    notes en corrigeant, puis qu'il signe et rend. D'où la colonne vide, et une
+    ligne par copie plutôt qu'une grille de numéros.
+
+    Aucun matricule n'y figure — c'est la règle de tout ce module.
+    """
     bilan = repartir(session, lots, niveau)
     donnees = _contexte(session, niveau, [])
     donnees.update(bilan)
+    donnees['matiere'] = matiere
     return render_pdf_bytes(TEMPLATE_REPARTITION, donnees, OPTIONS_PDF)
+
+
+def generer_repartition_excel(session, lots: list, niveau: str = '',
+                              matiere=None) -> bytes:
+    """
+    Le même partage en classeur — un onglet par correcteur.
+
+    Le format est CELUI de la fiche de collecte anonyme : mêmes en-têtes de
+    colonnes, même bloc d'identification. Ce n'est pas une coïncidence — la
+    feuille remplie se REVERSE par Notes → Import Excel, sans format de plus à
+    documenter. C'est ce qui ferme la boucle : on répartit, on corrige, on
+    reverse.
+
+    La matière est donc EXIGÉE ici, alors qu'elle reste facultative sur le PDF :
+    l'import la lit dans le bloc d'identification, et sans elle le classeur
+    reviendrait illisible.
+    """
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    if matiere is None:
+        raise ValidationError(
+            {'matiere': "La matière est requise pour le classeur : c'est elle "
+                        "que l'import lit pour savoir où verser les notes. Le "
+                        "PDF, lui, s'édite sans."})
+
+    bilan = repartir(session, lots, niveau)
+    donnees = _contexte(session, niveau, [])
+    VERT = '006633'
+    trait = Side(border_style='thin', color='999999')
+    bordure = Border(left=trait, right=trait, top=trait, bottom=trait)
+    centre = Alignment(horizontal='center', vertical='center')
+    logo = _logo_reduit(donnees)
+
+    classeur = openpyxl.Workbook()
+    classeur.remove(classeur.active)
+    entetes = ['N° anonymat', 'Note /20', 'Observations']
+
+    for paquet in bilan['paquets']:
+        feuille = classeur.create_sheet(_onglet(paquet['correcteur'], classeur))
+        for index, largeur in enumerate((16, 12, 34), 1):
+            feuille.column_dimensions[get_column_letter(index)].width = largeur
+
+        rang = _entete_excel(feuille, donnees, len(entetes), logo)
+        titre = feuille.cell(rang, 1, 'Fiche de collecte — copies anonymes')
+        titre.font = Font(bold=True, size=12, color=VERT)
+        titre.alignment = Alignment(horizontal='center')
+        feuille.merge_cells(start_row=rang, start_column=1,
+                            end_row=rang, end_column=len(entetes))
+        rang += 2
+
+        # « Matière » n'est pas décoratif : c'est la ligne que relit l'import.
+        for etiquette, valeur in (
+            ('Correcteur',     paquet['correcteur']),
+            ('Matière',        matiere.intitule),
+            ('Semestre',       donnees['semestre'].code),
+            ('Campagne',       donnees['campagne']),
+            ('Copies',         f"{paquet['nb']} — du n° {paquet['premier']} "
+                               f"au n° {paquet['dernier']}"),
+            ('Année',          donnees['annee_universitaire']),
+            ("Date d'édition", donnees['date_edition']),
+        ):
+            feuille.cell(rang, 1, f'{etiquette} :').font = Font(bold=True)
+            feuille.cell(rang, 2, valeur)
+            feuille.merge_cells(start_row=rang, start_column=2,
+                                end_row=rang, end_column=len(entetes))
+            rang += 1
+
+        ligne_entete = rang + 1
+        for colonne, entete in enumerate(entetes, 1):
+            cellule = feuille.cell(ligne_entete, colonne, entete)
+            cellule.font = Font(bold=True, color='FFFFFF')
+            cellule.fill = PatternFill('solid', fgColor=VERT)
+            cellule.alignment = centre
+            cellule.border = bordure
+
+        rang = ligne_entete + 1
+        for numero in paquet['numeros']:
+            for colonne, valeur in enumerate((numero, None, None), 1):
+                cellule = feuille.cell(rang, colonne, valeur)
+                cellule.border = bordure
+                if colonne < 3:
+                    cellule.alignment = centre
+            rang += 1
+
+        rang += 2
+        feuille.cell(rang, 1, "Signature du correcteur").font =             Font(bold=True, size=9, color='555555')
+        feuille.freeze_panes = feuille.cell(ligne_entete + 1, 1)
+
+    if not classeur.sheetnames:
+        classeur.create_sheet('Vide')
+    tampon = io.BytesIO()
+    classeur.save(tampon)
+    return tampon.getvalue()
+
+
+def _onglet(correcteur: str, classeur) -> str:
+    """
+    Nom d'onglet tiré du correcteur — Excel refuse `: \ / ? * [ ]` et plus de
+    31 caractères, et deux homonymes ne peuvent pas partager un nom.
+    """
+    propre = ''.join(c for c in correcteur if c not in ':\/?*[]')[:28].strip()
+    base = propre or 'Correcteur'
+    nom, suite = base, 1
+    while nom in classeur.sheetnames:
+        suite += 1
+        nom = f'{base}_{suite}'
+    return nom

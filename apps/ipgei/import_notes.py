@@ -262,6 +262,7 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
             continue
 
         saisies = ignorees = 0
+        classes_touchees = set()
         with transaction.atomic():
             for numero_ligne, ligne in enumerate(
                 feuille.iter_rows(min_row=plan['ligne_entete'] + 1, values_only=True),
@@ -318,14 +319,20 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
                         defaults={'valeur': valeur, 'saisie_par': utilisateur},
                     )
                 saisies += 1
+                classes_touchees.add(inscription.classe_id)
 
-        # Recalcul de TOUTE la classe pour cette matière, après la feuille :
-        # une épreuve manquée comptant zéro, verser le deuxième devoir fait
-        # passer la classe de un à deux devoirs tenus, et le diviseur change
-        # pour tout le monde — y compris pour les lignes que ce classeur ne
-        # touche pas.
-        services.recalculer_groupe(trouvee.pk, semestre.pk, classe.pk,
-                                   plafond_rattrapage=plafond)
+        # Recalcul par CLASSE TOUCHÉE, et non pour la seule classe demandée.
+        #
+        # Deux raisons. Le diviseur des moyennes est le nombre d'épreuves tenues
+        # par la classe : verser une épreuve le déplace pour tout le monde, y
+        # compris pour les lignes que ce classeur n'a pas touchées. Et une fiche
+        # ANONYME ne connaît pas les classes — ses numéros couvrent toute la
+        # campagne, donc plusieurs classes à la fois. Ne recalculer que celle
+        # passée en paramètre laissait les autres sur l'ancien diviseur, sans
+        # que rien ne le signale.
+        for classe_id in (classes_touchees or {classe.pk}):
+            services.recalculer_groupe(trouvee.pk, semestre.pk, classe_id,
+                                       plafond_rattrapage=plafond)
 
         bilan['matieres'].append({
             'feuille':  feuille.title,
