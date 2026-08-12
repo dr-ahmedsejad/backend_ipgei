@@ -18,7 +18,7 @@ rendre la copie.
   @page { size: A4 portrait; }
   body {
     font-family: Calibri, 'Segoe UI', Arial, sans-serif;
-    font-size: 10pt; color: #1a1a1a;
+    font-size: 11pt; color: #1a1a1a;
   }
   table { border-collapse: collapse; width: 100%; }
 
@@ -28,28 +28,31 @@ rendre la copie.
   .institution td:last-child { font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif; }
 
   .titre {
-    text-align: center; font-size: 14pt; font-weight: 700;
+    text-align: center; font-size: 15pt; font-weight: 700;
     color: #006633; margin: 10px 0 4px;
   }
   .confidentiel {
-    text-align: center; font-size: 9pt; font-weight: 700; color: #b45309;
+    text-align: center; font-size: 10pt; font-weight: 700; color: #b45309;
     border: 1px solid #f59e0b; background: #fffbeb;
     padding: 4px; margin-bottom: 10px;
   }
-  .repere { width: 100%; margin-bottom: 8px; font-size: 9.5pt; }
+  .repere { width: 100%; margin-bottom: 8px; font-size: 10.5pt; }
   .repere td { padding: 1px 0; }
   .repere .cle { font-weight: 700; width: 26mm; }
 
-  /* Le tableau ne s'étire plus sur toute la largeur : trois colonnes courtes
+  /* Le tableau ne s'étire pas sur toute la largeur : trois colonnes courtes
      laissaient la classe absorber le reste de la page, soit huit centimètres
-     pour écrire « MPSI A ». Largeur ajustée au contenu, table centrée. */
-  .copies { width: auto; margin: 0 auto; }
+     pour écrire « MPSI A ». Largeur ajustée au contenu, et calé à GAUCHE —
+     une liste se lit depuis la marge, pas depuis le milieu de la page. */
+  .copies { width: auto; margin: 0; }
   .copies th {
-    background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
-    border: 1px solid #999; padding: 4px; text-align: center;
+    background: #006633; color: #fff; font-size: 11pt; font-weight: 700;
+    border: 1px solid #999; padding: 5px 6px; text-align: center;
   }
+  /* Corps relevé : c'est une liste qu'on lit numéro par numéro, souvent en
+     tenant une copie de l'autre main. */
   .copies td {
-    border: 1px solid #999; padding: 3px 5px; font-size: 10pt;
+    border: 1px solid #999; padding: 4px 6px; font-size: 12pt;
   }
   /* Les trois colonnes se lisent en colonne, d'un coup d'œil : un matricule
      collé à gauche et une classe collée à l'autre bout obligeaient à zigzaguer. */
@@ -84,9 +87,9 @@ rendre la copie.
 <table class="copies">
   <thead>
     <tr>
-      <th style="width: 26mm;">N° anonymat</th>
-      <th style="width: 30mm;">Matricule</th>
-      <th style="width: 26mm;">Classe</th>
+      <th style="width: 30mm;">N° anonymat</th>
+      <th style="width: 34mm;">Matricule</th>
+      <th style="width: 30mm;">Classe</th>
     </tr>
   </thead>
   <tbody>
