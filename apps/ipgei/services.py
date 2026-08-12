@@ -1130,7 +1130,16 @@ def generer_anonymats(session: SessionEvaluationIPGEI, *, regenerer: bool = Fals
 
     inscriptions = inscrits_du_semestre(session.semestre)
     if not inscriptions:
-        return 0
+        # Un « succès » qui ne produit rien se lit comme une panne : l'agent
+        # clique, l'écran annonce 0 numéro, et rien ne dit que la faute est
+        # à l'absence d'inscrits. On le REFUSE en le disant, et l'on nomme
+        # l'écran où inscrire.
+        raise ValidationError(
+            f'Aucun inscrit actif en {session.semestre.annee_universitaire} '
+            f'pour les classes de {session.semestre.code} : aucune copie '
+            'à numéroter. Inscrivez les étudiants depuis '
+            'Inscriptions → Nouvelle inscription, puis relancez le tirage.'
+        )
 
     numeros = list(range(1, len(inscriptions) + 1))
     random.shuffle(numeros)
