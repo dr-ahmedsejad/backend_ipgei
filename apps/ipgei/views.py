@@ -2104,6 +2104,9 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         # silencieusement un autre ordre que celui demandé se lit comme un tri
         # qui ne marche pas.
         tri = request.query_params.get('tri') or detail_notes.TRI_RANG
+        # Les anciens noms restent acceptés : « moyenne » désignait un ordre
+        # identique au classement, un lien mis en favori ne doit pas se briser.
+        tri = detail_notes.ALIAS_TRI.get(tri, tri)
         if tri not in detail_notes.TRIS:
             raise ValidationError(
                 {'tri': f'Tri inconnu : « {tri} ». Attendu : '

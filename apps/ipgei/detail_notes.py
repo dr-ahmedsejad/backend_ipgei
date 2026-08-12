@@ -87,18 +87,24 @@ def _anonymats(deliberation: Deliberation) -> dict:
 #: ordre imposé obligeait à feuilleter.
 TRI_RANG      = 'rang'
 TRI_MATRICULE = 'matricule'
+#: « Par moyenne » a existé, et faisait doublon : le rang EST calculé depuis la
+#: moyenne décroissante, les deux ordres ne pouvaient que coïncider — vérifié
+#: sur toutes les délibérations. Le nom reste accepté en entrée, comme ALIAS de
+#: `rang`, pour qu'un lien mis en favori continue de fonctionner ; il ne figure
+#: plus dans les choix proposés.
 TRI_MOYENNE   = 'moyenne'
 #: Par NUMÉRO D'ANONYMAT : c'est l'ordre des copies sur la table du jury quand
 #: elles viennent d'être corrigées. Retrouver la fiche d'une copie obligeait
 #: sinon à lever l'anonymat d'abord, ce qui est justement ce qu'on veut éviter
 #: tant que la correction n'est pas close.
 TRI_ANONYMAT  = 'anonymat'
-TRIS = (TRI_RANG, TRI_MATRICULE, TRI_MOYENNE, TRI_ANONYMAT)
+TRIS = (TRI_RANG, TRI_MATRICULE, TRI_ANONYMAT)
+#: Anciens noms encore acceptés, et ce qu'ils désignent aujourd'hui.
+ALIAS_TRI = {TRI_MOYENNE: TRI_RANG}
 
 LIBELLES_TRI = {
     TRI_RANG:      'classement',
     TRI_MATRICULE: 'matricule',
-    TRI_MOYENNE:   'moyenne décroissante',
     TRI_ANONYMAT:  "numéro d'anonymat",
 }
 
@@ -117,9 +123,6 @@ def _clef_tri(tri: str):
         # eux, ou le tirage n'a pas eu lieu. Le numéro est trié en ENTIER — en
         # texte, la copie 10 précéderait la 2.
         return lambda bloc: (bloc['anonymat'] is None, bloc['anonymat'] or 0)
-    if tri == TRI_MOYENNE:
-        return lambda bloc: (bloc['moyenne'] is None,
-                             -(bloc['moyenne'] or 0))
     return lambda bloc: (bloc['rang'] is None, bloc['rang'] or 0)
 
 
@@ -131,6 +134,9 @@ def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
     redistribuées en mémoire : une requête par élève et par matière aurait
     coûté plusieurs centaines d'allers-retours sur une promotion de trente-sept.
     """
+    # Un ancien nom de tri est traduit ici, une fois, plutôt que dans chaque
+    # comparaison : le reste de la fonction ne connaît que les tris courants.
+    tri = ALIAS_TRI.get(tri, tri)
     semestre = deliberation.semestre
     lignes = list(
         deliberation.lignes
