@@ -1,0 +1,98 @@
+{% comment %}
+Correspondance anonymat ↔ matricule — la table de levée d'anonymat.
+
+Cette feuille NE SORT PAS du secrétariat : elle dit qui se cache derrière chaque
+numéro. Le correcteur, lui, reçoit « anonymat_repartition.html », qui ne porte
+que des numéros.
+
+Trois colonnes plutôt que deux : la classe suit le matricule. Elle ne lève pas
+l'anonymat davantage, et évite de croiser une seconde liste pour savoir où
+rendre la copie.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 portrait; }
+  body {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 10pt; color: #1a1a1a;
+  }
+  table { border-collapse: collapse; width: 100%; }
+
+  /* L'arabe du bandeau partagé n'est pas dans Calibri, qui n'en porte aucun
+     glyphe. Ses cellules ne portent pas de classe : la colonne arabe est la
+     dernière. */
+  .institution td:last-child { font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif; }
+
+  .titre {
+    text-align: center; font-size: 14pt; font-weight: 700;
+    color: #006633; margin: 10px 0 4px;
+  }
+  .confidentiel {
+    text-align: center; font-size: 9pt; font-weight: 700; color: #b45309;
+    border: 1px solid #f59e0b; background: #fffbeb;
+    padding: 4px; margin-bottom: 10px;
+  }
+  .repere { width: 100%; margin-bottom: 8px; font-size: 9.5pt; }
+  .repere td { padding: 1px 0; }
+  .repere .cle { font-weight: 700; width: 26mm; }
+
+  .copies th {
+    background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
+    border: 1px solid #999; padding: 4px; text-align: center;
+  }
+  .copies td {
+    border: 1px solid #999; padding: 3px 5px; font-size: 10pt;
+  }
+  .num, .mat { text-align: center; }
+  .num { font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="institution">{% include '_institution_header.html' %}</div>
+
+<div class="titre">Correspondance anonymat — matricule</div>
+<div class="confidentiel">
+  Document de secrétariat — ne pas remettre aux correcteurs
+</div>
+
+<table class="repere">
+  <tr>
+    <td class="cle">Semestre :</td><td>{{ semestre.code }}</td>
+    <td class="cle">Campagne :</td><td>{{ campagne }}</td>
+  </tr>
+  <tr>
+    <td class="cle">Niveau :</td><td>{{ niveau }}</td>
+    <td class="cle">Année :</td><td>{{ annee_universitaire }}</td>
+  </tr>
+  <tr>
+    <td class="cle">Copies :</td><td>{{ effectif }}</td>
+    <td class="cle">Édité le :</td><td>{{ date_edition }}</td>
+  </tr>
+</table>
+
+<table class="copies">
+  <thead>
+    <tr>
+      <th style="width: 22mm;">N° anonymat</th>
+      <th style="width: 32mm;">Matricule</th>
+      <th>Classe</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for copie in copies %}
+    <tr>
+      <td class="num">{{ copie.numero }}</td>
+      <td class="mat">{{ copie.matricule }}</td>
+      <td>{{ copie.classe }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+</body>
+</html>

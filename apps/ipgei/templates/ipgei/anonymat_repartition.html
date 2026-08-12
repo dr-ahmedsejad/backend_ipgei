@@ -1,0 +1,112 @@
+{% comment %}
+Répartition des copies entre correcteurs — une page par correcteur.
+
+Cette feuille NE PORTE AUCUN MATRICULE, et c'est tout son objet : elle
+accompagne un paquet de copies pendant la correction, moment précis où
+l'anonymat sert. La table de correspondance, elle, reste au secrétariat
+(« anonymat_liste.html »).
+
+Les numéros sont donnés en intervalle — « de 1 à 20 » — puis énumérés : le
+premier chiffre sert à vérifier le paquet d'un coup d'œil, la liste à cocher
+copie par copie.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 portrait; }
+  body {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 10pt; color: #1a1a1a;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  .institution td:last-child { font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif; }
+
+  .page-correcteur { page-break-after: always; }
+  .page-correcteur:last-child { page-break-after: auto; }
+
+  .titre {
+    text-align: center; font-size: 14pt; font-weight: 700;
+    color: #006633; margin: 10px 0 2px;
+  }
+  .sous-titre { text-align: center; font-size: 10pt; color: #555; margin-bottom: 10px; }
+
+  .correcteur {
+    border: 1px solid #006633; padding: 6px 10px; margin-bottom: 10px;
+  }
+  .correcteur .nom { font-size: 13pt; font-weight: 700; }
+  .correcteur .lot { font-size: 10pt; color: #333; margin-top: 2px; }
+
+  .numeros td {
+    border: 1px solid #999; padding: 4px 2px; text-align: center;
+    font-size: 10.5pt; font-weight: 700; width: 10%;
+  }
+  .consigne { font-size: 9pt; color: #555; margin-top: 10px; line-height: 1.5; }
+  .signature { margin-top: 16mm; font-size: 10pt; }
+  .signature .trait {
+    border-bottom: 1px solid #333; width: 60mm; display: inline-block;
+    margin-left: 4mm;
+  }
+  .reste {
+    border: 1px solid #f59e0b; background: #fffbeb; padding: 6px 10px;
+    font-size: 9.5pt; color: #b45309; margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+{% for paquet in paquets %}
+<div class="page-correcteur">
+  <div class="institution">{% include '_institution_header.html' %}</div>
+
+  <div class="titre">Copies à corriger</div>
+  <div class="sous-titre">
+    {{ semestre.code }} · {{ campagne }} · {{ niveau }} · {{ annee_universitaire }}
+  </div>
+
+  <div class="correcteur">
+    <div class="nom">{{ paquet.correcteur }}</div>
+    <div class="lot">
+      {{ paquet.nb }} copie{{ paquet.nb|pluralize }} —
+      du n° <strong>{{ paquet.premier }}</strong> au n° <strong>{{ paquet.dernier }}</strong>
+    </div>
+  </div>
+
+  <table class="numeros">
+    <tbody>
+      <tr>
+      {% for numero in paquet.numeros %}
+        <td>{{ numero }}</td>
+        {% if forloop.counter|divisibleby:10 and not forloop.last %}</tr><tr>{% endif %}
+      {% endfor %}
+      </tr>
+    </tbody>
+  </table>
+
+  {% comment %}
+  Le rappel n'est pas décoratif : c'est au moment de rendre les copies qu'on
+  est tenté de demander « c'est qui, le 14 ? ».
+  {% endcomment %}
+  <p class="consigne">
+    Les copies sont identifiées par leur seul numéro. La correspondance avec les
+    étudiants est tenue par le secrétariat et ne sera levée qu'après la saisie
+    des notes.
+  </p>
+
+  <div class="signature">
+    Reçu le <span class="trait"></span> &nbsp;&nbsp; Signature <span class="trait"></span>
+  </div>
+
+  {% if forloop.last and restantes %}
+  <div class="reste">
+    {{ restantes|length }} copie{{ restantes|length|pluralize }} non attribuée{{ restantes|length|pluralize }} :
+    n° {{ restantes|join:", " }}.
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+</body>
+</html>

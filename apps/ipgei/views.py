@@ -1156,6 +1156,81 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
             for ligne in lignes
         ])
 
+    @action(detail=True, methods=['get'], url_path='export-secretariat')
+    def export_secretariat(self, request, pk=None):
+        """
+        Liste du secrétariat : numéro d'anonymat ↔ matricule.
+
+        Toutes les classes du niveau confondues — un correcteur reçoit un
+        paquet de copies, pas une classe, et les numéros valent pour la session
+        entière.
+
+        `niveau` restreint quand deux niveaux partagent le semestre (MPSI et
+        MPI en première année) ; `sortie` vaut `excel` ou `pdf`.
+
+        Cette liste NE SE REMET PAS aux correcteurs : c'est la table de levée
+        d'anonymat. Ceux-ci reçoivent la répartition, qui ne porte que des
+        numéros.
+        """
+        from django.http import HttpResponse
+
+        from . import secretariat
+
+        session = self.get_object()
+        niveau  = (request.query_params.get('niveau') or '').strip()
+        # `sortie` et non `format` : DRF réserve `format` à la négociation de
+        # contenu et répond 404 pour un suffixe qu'aucun renderer ne connaît.
+        excel = (request.query_params.get('sortie') or 'excel').lower() == 'excel'
+
+        libelle = _nom_fichier(
+            f'anonymat_{session.semestre.code}_{niveau or "tous"}')
+        if excel:
+            contenu = self._executer(secretariat.generer_excel, session, niveau)
+            reponse = HttpResponse(
+                contenu,
+                content_type='application/vnd.openxmlformats-officedocument.'
+                             'spreadsheetml.sheet')
+            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.xlsx"'
+        else:
+            contenu = self._executer(secretariat.generer_pdf, session, niveau)
+            reponse = HttpResponse(contenu, content_type='application/pdf')
+            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.pdf"'
+        return reponse
+
+    @action(detail=True, methods=['post'], url_path='repartir-copies')
+    def repartir_copies(self, request, pk=None):
+        """
+        Partage les copies entre correcteurs et rend leurs feuilles.
+
+        Corps : `{lots: [{correcteur, nb}, …], niveau, apercu}`. Les paquets
+        suivent l'ordre des numéros — c'est ainsi qu'on distribue une pile.
+
+        `apercu=true` rend le bilan en JSON, pour que l'écran montre ce qui sera
+        produit avant de l'imprimer. Sinon, un PDF d'une page par correcteur,
+        SANS aucun matricule : la feuille accompagne les copies pendant la
+        correction, moment où l'anonymat sert.
+        """
+        from django.http import HttpResponse
+
+        from . import secretariat
+
+        session = self.get_object()
+        lots    = request.data.get('lots') or []
+        niveau  = (request.data.get('niveau') or '').strip()
+        if not isinstance(lots, list):
+            raise ValidationError({'lots': 'Liste de lots attendue.'})
+
+        if str(request.data.get('apercu', '')).lower() in ('1', 'true', 'on'):
+            return Response(self._executer(secretariat.repartir, session, lots, niveau))
+
+        contenu = self._executer(
+            secretariat.generer_repartition_pdf, session, lots, niveau)
+        libelle = _nom_fichier(
+            f'repartition_{session.semestre.code}_{niveau or "tous"}')
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        return reponse
+
     @action(detail=True, methods=['post'], url_path='plafond')
     def plafond(self, request, pk=None):
         """
