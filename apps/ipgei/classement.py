@@ -196,6 +196,8 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
+    from .collecte import _entete_excel, _logo_reduit
+
     donnees = _contexte(annee_universitaire, niveau, institution, classe)
 
     classeur = Workbook()
@@ -206,22 +208,36 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
     trait = Side(style='thin', color='D5D5D5')
     bordure = Border(trait, trait, trait, trait)
 
-    feuille['A1'] = (f'Classement {CODE_SEMESTRE} — {donnees["niveau"]} — '
-                     f'{annee_universitaire}')
-    feuille['A1'].font = Font(bold=True, size=13, color=VERT)
-    feuille['A2'] = (f'{donnees["effectif"]} étudiant(s) · édité le '
-                     f'{donnees["date_edition"]} · décision et affectation à compléter')
-    feuille['A2'].font = Font(size=9, italic=True, color='555555')
+    # Les largeurs AVANT le bandeau : il s'en sert pour centrer le logo entre le
+    # bloc français et le bloc arabe, et les poser après le laisserait de biais.
+    for colonne, largeur in enumerate((16, 20, 14, 26, 30), start=1):
+        feuille.column_dimensions[get_column_letter(colonne)].width = largeur
 
+    # Le même bandeau d'institution que le classeur de collecte : ces feuilles
+    # circulent par courriel, et sans en-tête on ne sait plus de quel
+    # établissement vient le fichier reçu. Le helper rend la première ligne
+    # libre — tout ce qui suit s'y accroche plutôt qu'à des numéros en dur.
+    depart = _entete_excel(feuille, donnees, len(EN_TETES),
+                           _logo_reduit(donnees))
+
+    feuille.cell(depart, 1, f'Classement {CODE_SEMESTRE} — {donnees["niveau"]} — '
+                            f'{annee_universitaire}')
+    feuille.cell(depart, 1).font = Font(bold=True, size=13, color=VERT)
+    feuille.cell(depart + 1, 1,
+                 f'{donnees["effectif"]} étudiant(s) · édité le '
+                 f'{donnees["date_edition"]} · décision et affectation à compléter')
+    feuille.cell(depart + 1, 1).font = Font(size=9, italic=True, color='555555')
+
+    ligne_entetes = depart + 3
     for colonne, libelle in enumerate(EN_TETES, start=1):
-        cellule = feuille.cell(row=4, column=colonne, value=libelle)
+        cellule = feuille.cell(row=ligne_entetes, column=colonne, value=libelle)
         cellule.font = Font(color='FFFFFF', bold=True, size=10)
         cellule.fill = PatternFill('solid', fgColor=VERT)
         cellule.border = bordure
         cellule.alignment = Alignment(horizontal='center', vertical='center',
                                       wrap_text=True)
 
-    for index, ligne in enumerate(donnees['lignes'], start=5):
+    for index, ligne in enumerate(donnees['lignes'], start=ligne_entetes + 1):
         valeurs = [
             ligne['matricule'],
             float(ligne['moyenne_annee1']) if ligne['moyenne_annee1'] is not None else None,
@@ -238,9 +254,8 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
             elif colonne == 1:
                 cellule.alignment = Alignment(horizontal='center')
 
-    for colonne, largeur in enumerate((16, 20, 14, 26, 30), start=1):
-        feuille.column_dimensions[get_column_letter(colonne)].width = largeur
-    feuille.freeze_panes = 'A5'
+    # Le volet figé suit la ligne d'en-têtes, qui a glissé sous le bandeau.
+    feuille.freeze_panes = f'A{ligne_entetes + 1}'
 
     tampon = io.BytesIO()
     classeur.save(tampon)
