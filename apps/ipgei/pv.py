@@ -232,6 +232,8 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
+    from .collecte import _entete_excel, _logo_reduit
+
     classeur = Workbook()
     feuille  = classeur.active
     feuille.title = 'Résultats'
@@ -239,18 +241,9 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     vert    = PatternFill('solid', fgColor='006633')
     blanc   = Font(color='FFFFFF', bold=True, size=10)
     bordure = Border(*[Side(style='thin', color='D5D5D5')] * 4)
-
-    feuille['A1'] = (f'{services.libelle_pv(deliberation)} — '
-                     f'{deliberation.annee_universitaire}')
-    feuille['A1'].font = Font(bold=True, size=13, color='006633')
     # Le seuil ne sert qu'à proposer une décision : un PV de semestre n'en
     # prononce aucune, l'annoncer laisserait croire à une validation.
     semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
-    feuille['A2'] = (f'{"Semestre " + deliberation.semestre.code if deliberation.semestre_id else "Année complète"}'
-                     + ('' if semestrielle else f' · Seuil {deliberation.seuil_validation}')
-                     + f' · {deliberation.get_statut_display()}'
-                     f'{" — PROJET, non validé" if deliberation.statut != Deliberation.STATUT_VALIDEE else ""}')
-    feuille['A2'].font = Font(size=9, italic=True, color='555555')
 
     # Mêmes colonnes que le PDF, semestres compris : le classeur sert à
     # retrier et à recompter, il ne doit pas montrer moins que la feuille
@@ -274,8 +267,37 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     # semestres, et le poids permet de la refaire.
     milieu = EN_TETES[4:5] if semestrielle else EN_TETES[4:6]
     entetes = tete + list(codes_semestres) + milieu + queue
+
+    # Les largeurs AVANT le bandeau : il s'en sert pour centrer le logo entre le
+    # bloc français et le bloc arabe.
+    largeurs = (([16, 30, 12] if semestrielle else [7, 16, 30, 12])
+                + [9] * len(codes_semestres)
+                + ([15] if semestrielle else [15, 12])
+                + ([14, 16, 26] if semestrielle else [24, 34, 26]))
+    for index_colonne, largeur in enumerate(largeurs, start=1):
+        feuille.column_dimensions[get_column_letter(index_colonne)].width = largeur
+
+    # Le même bandeau d'institution que les fiches de collecte et le classement :
+    # un PV circule par courriel, et sans en-tête on ne sait plus de quel
+    # établissement vient le fichier reçu. Il rend la première ligne libre — tout
+    # ce qui suit s'y accroche plutôt qu'à des numéros en dur.
+    donnees = contexte(deliberation)
+    depart = _entete_excel(feuille, donnees, len(entetes), _logo_reduit(donnees))
+
+    feuille.cell(depart, 1, f'{services.libelle_pv(deliberation)} — '
+                            f'{deliberation.annee_universitaire}')
+    feuille.cell(depart, 1).font = Font(bold=True, size=13, color='006633')
+    feuille.cell(depart + 1, 1,
+                 f'{"Semestre " + deliberation.semestre.code if deliberation.semestre_id else "Année complète"}'
+                 + ('' if semestrielle else f' · Seuil {deliberation.seuil_validation}')
+                 + f' · {deliberation.get_statut_display()}'
+                 + (' — PROJET, non validé'
+                    if deliberation.statut != Deliberation.STATUT_VALIDEE else ''))
+    feuille.cell(depart + 1, 1).font = Font(size=9, italic=True, color='555555')
+
+    ligne_entetes = depart + 3
     for colonne, libelle in enumerate(entetes, start=1):
-        cellule = feuille.cell(row=4, column=colonne, value=libelle)
+        cellule = feuille.cell(row=ligne_entetes, column=colonne, value=libelle)
         cellule.fill, cellule.font, cellule.border = vert, blanc, bordure
         cellule.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
@@ -285,7 +307,7 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     if semestrielle:
         _poser_rangs(deliberation, lignes)
 
-    for index, ligne in enumerate(lignes, start=5):
+    for index, ligne in enumerate(lignes, start=ligne_entetes + 1):
         etudiant = ligne.inscription.etudiant
         valeurs = [
             *([] if semestrielle else [ligne.rang]),
@@ -319,14 +341,8 @@ def generer_excel(deliberation: Deliberation) -> bytes:
             if colonne in numeriques:
                 cellule.number_format = '0.00'
 
-    largeurs = (([16, 30, 12] if semestrielle else [7, 16, 30, 12])
-                + [9] * len(codes_semestres)
-                + ([15] if semestrielle else [15, 12])
-                + ([14, 16, 26] if semestrielle else [24, 34, 26]))
-    for index_colonne, largeur in enumerate(largeurs, start=1):
-        feuille.column_dimensions[
-            get_column_letter(index_colonne)].width = largeur
-    feuille.freeze_panes = 'A5'
+    # Le volet figé suit la ligne d'en-têtes, qui a glissé sous le bandeau.
+    feuille.freeze_panes = f'A{ligne_entetes + 1}'
 
     jury = classeur.create_sheet('Jury')
     for colonne, libelle in enumerate(['Rôle', 'Membre', 'Signature'], start=1):

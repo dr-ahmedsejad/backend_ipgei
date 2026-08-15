@@ -20,7 +20,11 @@ quel semestre il s'agit.
   /* L'en-tête partagé est dimensionné pour un corps de document ; répété en
      tête de chaque page, il doit tenir dans la marge réservée. */
   .institution { font-size: 8pt; }
-  .institution img { width: 46px !important; height: 46px !important; }
+  /* Hauteur imposée, largeur LIBRE. Forcer les deux écrasait le sceau — rond,
+     dans un fichier qui ne l'est pas — en ovale : c'est le défaut qu'on voyait.
+     70 px au lieu de 46 : la marge haute réservée au bandeau fait 30 mm, de
+     quoi le loger sans chevaucher la première fiche. */
+  .institution img { height: 70px !important; width: auto !important; }
   .institution td { font-size: 9pt !important; padding: 0 !important; }
   table { width: 100%; border-collapse: collapse; }
   td {
