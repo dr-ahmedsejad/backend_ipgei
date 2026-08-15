@@ -115,7 +115,10 @@
 
   <div class="doc-date">Nouakchott, le {{ today }}</div>
   <div class="doc-title">Attestation d'inscription</div>
-  <div class="intro-text">Le Directeur de l'{{ institution.nom_fr }} atteste que :</div>
+  {# L'élision ne vaut que devant une voyelle : « l'Institut » se dit, « l'Groupe »
+     ne se dit pas. Le nom de l'établissement étant paramétrable, l'apostrophe ne
+     peut pas être écrite en dur — elle se décide sur la première lettre. #}
+  <div class="intro-text">Le Directeur de {% if institution.nom_fr|slice:":1"|lower in "aeiouyàâäéèêëîïôöùûü" %}l'{% endif %}{{ institution.nom_fr }} atteste que :</div>
 
   <table style="width: 100%; border-collapse: collapse; margin-top: 5px;">
     <tr>

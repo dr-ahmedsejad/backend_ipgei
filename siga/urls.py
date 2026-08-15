@@ -9,6 +9,8 @@ from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 from core.media_auth import MediaAuthView
+from core.mirror import instance_info
+from core.sync import SyncHistoryView, SyncPushView
 
 urlpatterns = [
     # Admin Django
@@ -17,7 +19,16 @@ urlpatterns = [
     # Contrôle d'accès aux fichiers /media/ (sous-requête Nginx auth_request).
     path('internal/media-auth/', MediaAuthView.as_view(), name='media-auth'),
 
+    # ── Rôle de l'instance et publication vers le miroir ─────────────────────
+    # `instance` est PUBLIC : le frontend le lit avant même la connexion, pour
+    # savoir s'il parle à l'autorité ou à son reflet.
+    path('api/v1/instance/',     instance_info,             name='instance-info'),
+    path('api/v1/sync/push/',    SyncPushView.as_view(),    name='sync-push'),
+    path('api/v1/sync/history/', SyncHistoryView.as_view(), name='sync-history'),
+
     # ── API v1 ───────────────────────────────────────────────────────────────
+    path('api/v1/saisie-en-ligne/', include('apps.reclamations.urls_saisie')),
+    path('api/v1/cours/',           include('apps.cours.urls')),
     path('api/v1/auth/',        include('apps.authentication.urls')),
     path('api/v1/parametres/',  include('apps.parametres.urls')),
     path('api/v1/banques/',     include('apps.banque.urls')),

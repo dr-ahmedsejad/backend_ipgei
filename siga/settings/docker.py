@@ -48,5 +48,18 @@ REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = [
     'rest_framework.renderers.JSONRenderer',
 ]
 
+# ── IP réelle du client derrière Nginx (un seul proxy) ────────────────────────
+# Sans cela, axes ET le throttle DRF comptent par l'IP du conteneur Nginx — la
+# MÊME pour tous les clients. Le verrou devient GLOBAL au lieu d'être par
+# personne : cinq échecs d'un étudiant bloquent aussi l'administrateur, qui ne
+# peut alors plus se connecter pour débloquer.
+#
+# `django-ipware` n'étant pas installé, axes ignore les réglages AXES_IPWARE_* et
+# retombe sur REMOTE_ADDR. On lui donne donc un callable qui lit X-Real-IP, posé
+# par Nginx. Fiable ici, et seulement ici : le backend n'est joignable que par le
+# proxy — c'est pourquoi ce réglage reste cantonné aux settings docker.
+AXES_CLIENT_IP_CALLABLE = 'core.axes_utils.axes_client_ip'
+REST_FRAMEWORK['NUM_PROXIES'] = 1
+
 # CORS — origines autorisees passees via env var (CORS_ALLOWED_ORIGINS dans le compose).
 # La conf de base.py utilise deja decouple, on n'a rien a redefinir ici.

@@ -1,4 +1,7 @@
 from django.urls import path
+
+from apps.reclamations.views_seance import ReclamerSeanceView
+
 from .views import (
     MonProfilView, MonEmploiView, MesAbsencesView,
     MesNotesView, MesResultatsView,
@@ -9,6 +12,10 @@ from .views import (
 )
 
 urlpatterns = [
+    # Boîte de réception : l'enseignant conteste EN LIGNE une séance « Non
+    # fait ». Écrit dans une table exclue de la synchronisation, donc
+    # préservée au push suivant — d'où son chemin dans MIRROR_WRITE_ALLOWLIST.
+    path('reclamer-seance/',                ReclamerSeanceView.as_view(),     name='portail-reclamer-seance'),
     path('semaines/',                        SemaniesEtudiantView.as_view(),   name='portail-semaines'),
     path('profil/',                         MonProfilView.as_view(),          name='portail-profil'),
     path('emploi-du-temps/',                MonEmploiView.as_view(),          name='portail-emploi'),

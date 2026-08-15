@@ -154,3 +154,137 @@ class PeriodeReclamation(models.Model):
         if now > self.date_fermeture:
             return 'fermee'
         return 'en_cours'
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# BOÎTE DE RÉCEPTION — ce qui s'écrit EN LIGNE, sur le miroir
+# ═════════════════════════════════════════════════════════════════════════════
+# Ces deux tables sont exclues EN ENTIER du dump de synchronisation
+# (settings.SYNC_EXCLUDE_TABLE) : la restauration ne les touche pas, donc ce
+# qu'un enseignant y dépose survit au push suivant.
+#
+# D'où la règle qui gouverne leur dessin : AUCUNE ForeignKey vers une table
+# miroir. Le dump restaure avec DROP ... CASCADE ; une clé étrangère entrante
+# ferait échouer le DROP de la table visée, et la restauration entière avec elle.
+# On stocke donc des identifiants nus (*_id) et un INSTANTANÉ des libellés — qui
+# a en outre le mérite de survivre à la disparition de ce qu'il désigne.
+
+STATUT_SEANCE_CHOICES = [
+    ('en_attente', 'En attente'),
+    ('acceptee',   'Acceptée'),
+    ('rejetee',    'Rejetée'),
+]
+
+
+class ReclamationSeance(models.Model):
+    """
+    Un enseignant conteste EN LIGNE une séance portée « Non fait ».
+
+    La séance n'est pas référencée par sa clé primaire — elle vivrait dans une
+    table miroir — mais par sa CLÉ NATURELLE : année, période, semaine, matière,
+    jour et créneau. C'est ce qui permet au local de la retrouver au moment de
+    traiter, même si les identifiants ont bougé entre-temps.
+    """
+    # ── Auteur ───────────────────────────────────────────────────────────────
+    prof_id  = models.IntegerField(db_index=True)
+    prof_nom = models.CharField(max_length=200, blank=True, default='')
+    user_id  = models.IntegerField(null=True, blank=True)
+
+    # ── Clé naturelle de la séance ───────────────────────────────────────────
+    annee_universitaire = models.CharField(max_length=20, blank=True, db_index=True)
+    type_semestre       = models.CharField(max_length=10, blank=True, default='')
+    numero_semaine      = models.IntegerField(default=0)
+    em_id               = models.IntegerField(null=True, blank=True)
+    jour                = models.CharField(max_length=20, blank=True, default='')
+    creneau             = models.CharField(max_length=50, blank=True, default='')
+    #: Indicatif seulement : l'identifiant du pointage au moment de la
+    #: réclamation. Le rattachement se fait sur la clé naturelle, pas sur lui.
+    pointage_id         = models.IntegerField(null=True, blank=True)
+    institution_id      = models.IntegerField(null=True, blank=True, db_index=True)
+
+    # ── Instantané d'affichage ───────────────────────────────────────────────
+    em_code             = models.CharField(max_length=50,  blank=True, default='')
+    em_intitule         = models.CharField(max_length=255, blank=True, default='')
+    date_seance         = models.DateField(null=True, blank=True)
+    commentaire_origine = models.CharField(max_length=100, blank=True,
+                                           default='Non fait')
+
+    # ── La réclamation elle-même ─────────────────────────────────────────────
+    motif           = models.TextField()
+    statut          = models.CharField(max_length=20, choices=STATUT_SEANCE_CHOICES,
+                                       default='en_attente')
+    reponse         = models.TextField(blank=True, default='')
+    traite_par_id   = models.IntegerField(null=True, blank=True)
+    traite_par_nom  = models.CharField(max_length=200, blank=True, default='')
+    date_soumission = models.DateTimeField(auto_now_add=True)
+    date_traitement = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'reclamations_reclamation_seance'
+        ordering = ['-date_soumission']
+        indexes = [
+            models.Index(fields=['prof_id', 'annee_universitaire', 'statut']),
+        ]
+
+    def __str__(self):
+        return (f'{self.prof_nom} — {self.em_code} '
+                f'semaine {self.numero_semaine} ({self.statut})')
+
+
+STATUT_SAISIE_CHOICES = [
+    ('brouillon', 'Brouillon'),
+    ('exporte',   'Exporté'),
+]
+
+
+class SaisieNoteEnLigne(models.Model):
+    """
+    Une note saisie EN LIGNE par un enseignant — un brouillon, rien de plus.
+
+    Ce n'est PAS une note officielle : la direction exporte le classeur, puis
+    saisit en local, où seule la note fait foi. On n'écrit jamais dans
+    `evaluations_note` depuis ici — le miroir n'a pas autorité sur les résultats.
+
+    La cible reprend l'identité d'une note — inscription à l'élément, session,
+    type — mais en identifiants nus, avec l'instantané qu'il faut pour afficher
+    et exporter sans rien interroger d'autre.
+    """
+    prof_id  = models.IntegerField(db_index=True)
+    prof_nom = models.CharField(max_length=200, blank=True, default='')
+    user_id  = models.IntegerField(null=True, blank=True)
+
+    inscription_element_id = models.IntegerField(db_index=True)
+    session_id             = models.IntegerField(db_index=True)
+    type_note              = models.CharField(max_length=10)
+    em_id                  = models.IntegerField(null=True, blank=True, db_index=True)
+    institution_id         = models.IntegerField(null=True, blank=True, db_index=True)
+
+    etudiant_matricule = models.CharField(max_length=50,  blank=True, default='')
+    etudiant_nom       = models.CharField(max_length=255, blank=True, default='')
+    em_code            = models.CharField(max_length=50,  blank=True, default='')
+    em_intitule        = models.CharField(max_length=255, blank=True, default='')
+    session_code       = models.CharField(max_length=50,  blank=True, default='')
+
+    valeur = models.DecimalField(max_digits=5, decimal_places=2,
+                                 null=True, blank=True)
+
+    statut            = models.CharField(max_length=20, choices=STATUT_SAISIE_CHOICES,
+                                         default='brouillon')
+    date_saisie       = models.DateTimeField(auto_now_add=True)
+    date_modification = models.DateTimeField(auto_now=True)
+    exporte_le        = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'saisie_note_en_ligne'
+        ordering = ['-date_modification']
+        #: Un seul brouillon par case : la saisie se rejoue autant qu'on veut,
+        #: elle écrase la précédente au lieu d'empiler des doublons.
+        unique_together = ('prof_id', 'inscription_element_id', 'session_id',
+                           'type_note')
+        indexes = [
+            models.Index(fields=['prof_id', 'session_id', 'statut']),
+        ]
+
+    def __str__(self):
+        return (f'{self.prof_nom} — {self.etudiant_matricule} '
+                f'{self.type_note}={self.valeur} ({self.statut})')

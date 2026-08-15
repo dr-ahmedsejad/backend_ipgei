@@ -57,6 +57,11 @@ INSTALLED_APPS = [
     'apps.audit',
     # Sauvegardes BD (matrice + telechargement)
     'apps.backup',
+    # Module « Cours » — fil pédagogique par élément de module. EN LIGNE
+    # UNIQUEMENT : ses tables sont exclues de la synchronisation, si bien
+    # qu'un cours publié depuis le portail n'est jamais écrasé par un push.
+    'apps.cours',
+
     # IPGEI — moteur academique classes preparatoires (MPSI/MP).
     # Remplace la couche academique LMD ; n'altere aucun modele du socle.
     'apps.ipgei',
@@ -71,11 +76,72 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'axes.middleware.AxesMiddleware',                          # après AuthenticationMiddleware
+    # Rôle d'instance : sur le VPS, refuse les écritures hors boîte de réception.
+    # Après l'authentification — le refus doit pouvoir nommer l'utilisateur dans
+    # les journaux — et avant l'audit, qui n'a pas à tracer une écriture rejetée.
+    'core.mirror.MirrorReadOnlyMiddleware',
     'core.middleware.AuditMiddleware',                          # après auth + axes
     'core.cache_middleware.cache_control_lookup_middleware',    # F-5 : Cache-Control sur lookups
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# ── Rôle de l'instance : autorité locale ou miroir en ligne ───────────────────
+# LOCAL (autorité) : MIRROR_MODE=False, la valeur par défaut. VPS (miroir en
+# lecture seule) : True. Voir core/mirror.py — un seul code, deux rôles.
+MIRROR_MODE = config('MIRROR_MODE', default=False, cast=bool)
+
+# Chemins où l'écriture EN LIGNE reste permise malgré le miroir. Toute nouvelle
+# fonction « boîte de réception » doit ajouter le sien ici, faute de quoi elle
+# répondra 403 sur le VPS — et seulement là, ce qui est le plus mauvais des
+# défauts : invisible en développement.
+MIRROR_WRITE_ALLOWLIST = (
+    '/api/v1/auth/',                       # connexion, déconnexion, rafraîchissement
+    '/admin/login',                        # connexion à l'admin Django
+    '/api/v1/portail/reclamer-seance/',    # réclamation de séance (enseignant)
+    '/api/v1/saisie-en-ligne/',            # saisie de notes en ligne (brouillon)
+    '/api/v1/cours/',                      # fil pédagogique publié en ligne
+)
+
+# ── Synchronisation LOCAL → VPS (miroir) — voir core/sync.py ──────────────────
+PG_DUMP_BIN  = config('PG_DUMP_BIN',  default='pg_dump')   # binaire ≥ version serveur
+SYNC_WORKDIR = config('SYNC_WORKDIR', default='') or None  # défaut : dossier temporaire
+
+# Tables dont seules les DONNÉES sont écartées : le schéma part, la table est
+# recréée vide à la restauration. Journaux et jetons — leur contenu est propre à
+# chaque instance, et l'écraser ne coûte rien.
+SYNC_EXCLUDE_TABLE_DATA = [
+    'core_audit_log', 'django_session', 'axes_accesslog',
+    'token_blacklist_outstandingtoken', 'token_blacklist_blacklistedtoken',
+]
+
+# Tables ENTIÈREMENT écartées du dump — ni schéma, ni DROP, ni données : la
+# BOÎTE DE RÉCEPTION. La restauration ne les touche pas, si bien que ce qui a été
+# écrit en ligne y survit au push suivant.
+#
+# IMPÉRATIF : aucune de ces tables ne doit porter de ForeignKey vers une table
+# miroir. Le dump restaure avec DROP ... CASCADE ; une FK entrante ferait échouer
+# le DROP de la table visée, et la restauration entière avec lui. D'où le dessin
+# « FK-free » : des *_id en IntegerField et un instantané du libellé.
+SYNC_EXCLUDE_TABLE = [
+    'reclamations_reclamation_seance',
+    'saisie_note_en_ligne',
+    # Le fil pédagogique vit EN LIGNE et nulle part ailleurs : il n'a pas
+    # d'équivalent local à refléter. Les pièces jointes et les réponses portent
+    # une FK vers `cours` — inbox vers inbox, ce que l'invariant autorise, la
+    # table visée n'étant elle-même jamais droppée.
+    'cours', 'cours_piece_jointe', 'cours_reponse',
+]
+
+# Cible SSH du VPS. Vide = mode local, la synchronisation s'arrête après le dump
+# et se contente de le décrire — utile pour éprouver la chaîne sans VPS.
+SYNC_SSH_HOST     = config('SYNC_SSH_HOST',     default='')
+SYNC_SSH_USER     = config('SYNC_SSH_USER',     default='ipgei-deploy')
+SYNC_SSH_KEY      = config('SYNC_SSH_KEY',      default='')
+SYNC_RECEIVER_CMD = config('SYNC_RECEIVER_CMD', default='sync')
+# Où atterrissent les fichiers /media sur le portail. La base ne porte que
+# leurs chemins : sans ce transfert, le portail affiche des liens morts.
+SYNC_MEDIA_DEST  = config('SYNC_MEDIA_DEST', default='/opt/ipgei/media/')
 
 # Configuration de la rétention des logs d'audit (Option C : 90j HOT + 365j ARCHIVE)
 AUDIT_RETENTION = {

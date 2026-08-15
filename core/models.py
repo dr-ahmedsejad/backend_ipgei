@@ -132,3 +132,41 @@ class AuditLogArchive(AuditLogBase):
             models.Index(fields=['institution', 'timestamp'],
                          name='idx_auditarc_inst_ts'),
         ]
+
+
+class SyncLog(models.Model):
+    """
+    Historique des publications LOCAL → VPS : une entrée par appui sur
+    « Publier », qu'elle aboutisse ou non.
+
+    Écrit sur le serveur LOCAL, seul autorisé à pousser. Le VPS le reçoit à la
+    synchronisation suivante — il y lit donc l'histoire jusqu'à l'avant-dernier
+    push, ce qui suffit à répondre à la seule question qui compte en ligne :
+    « de quand date ce que je consulte ? »
+
+    L'auteur est un INSTANTANÉ de son nom, pas une clé étrangère : un compte
+    supprimé ne doit pas emporter la trace de ce qu'il a publié.
+    """
+    STATUT_CHOICES = [
+        ('synced',     'Synchronisé'),
+        ('dump_ready', 'Dump prêt (local)'),
+        ('error',      'Échec'),
+    ]
+
+    cree_le     = models.DateTimeField(auto_now_add=True, db_index=True)
+    par         = models.CharField(max_length=150, blank=True, default='')
+    statut      = models.CharField(max_length=20, choices=STATUT_CHOICES,
+                                   default='synced')
+    transferred = models.BooleanField(default=False)
+    size        = models.BigIntegerField(default=0)
+    sha256      = models.CharField(max_length=64, blank=True, default='')
+    duree_s     = models.FloatField(default=0)
+    vps         = models.TextField(blank=True, default='')
+    erreur      = models.TextField(blank=True, default='')
+
+    class Meta:
+        db_table = 'core_sync_log'
+        ordering = ['-cree_le']
+
+    def __str__(self):
+        return f'{self.cree_le:%Y-%m-%d %H:%M} — {self.statut} ({self.par})'

@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from .models import Reclamation, PeriodeReclamation
+from .models import (
+    PeriodeReclamation, Reclamation, ReclamationSeance, SaisieNoteEnLigne,
+)
 
 
 class ReclamationSerializer(serializers.ModelSerializer):
@@ -90,3 +92,55 @@ class PeriodeReclamationSerializer(serializers.ModelSerializer):
                 'date_fermeture': 'La date de fermeture doit etre posterieure a la date d ouverture.',
             })
         return attrs
+
+
+class ReclamationSeanceSerializer(serializers.ModelSerializer):
+    """
+    Une réclamation de séance, telle que les deux écrans la lisent.
+
+    Tout est déjà dans la ligne — libellés compris, puisqu'ils y ont été
+    recopiés à la création. Aucun `select_related` n'est donc nécessaire, et
+    surtout aucune jointure vers une table miroir : c'est ce qui permet à la
+    boîte de réception de rester lisible sur une instance où le suivi vient
+    d'être remplacé par un dump.
+    """
+    statut_display = serializers.CharField(source='get_statut_display',
+                                           read_only=True)
+
+    class Meta:
+        model  = ReclamationSeance
+        fields = [
+            'id', 'prof_id', 'prof_nom',
+            'annee_universitaire', 'type_semestre', 'numero_semaine',
+            'em_id', 'em_code', 'em_intitule', 'jour', 'creneau',
+            'date_seance', 'commentaire_origine', 'pointage_id',
+            'motif', 'statut', 'statut_display', 'reponse',
+            'traite_par_nom', 'date_soumission', 'date_traitement',
+        ]
+        read_only_fields = ['prof_id', 'prof_nom', 'statut', 'reponse',
+                            'traite_par_nom', 'date_soumission',
+                            'date_traitement']
+
+
+class SaisieNoteEnLigneSerializer(serializers.ModelSerializer):
+    """
+    Un brouillon de note, tel que la direction le voit.
+
+    Aucune jointure : les libellés ont été recopiés à la saisie. C'est ce qui
+    permet à cet écran de rester lisible sur une instance dont les tables
+    d'évaluation viennent d'être remplacées par un dump.
+    """
+    statut_display = serializers.CharField(source='get_statut_display',
+                                           read_only=True)
+
+    class Meta:
+        model  = SaisieNoteEnLigne
+        fields = [
+            'id', 'prof_id', 'prof_nom',
+            'inscription_element_id', 'session_id', 'type_note', 'em_id',
+            'etudiant_matricule', 'etudiant_nom', 'em_code', 'em_intitule',
+            'session_code', 'valeur',
+            'statut', 'statut_display', 'date_saisie', 'date_modification',
+            'exporte_le',
+        ]
+        read_only_fields = fields
