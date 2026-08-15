@@ -33,7 +33,12 @@ de documents se ressemblent.
   /* Le bandeau partagé est calibré pour un corps de document : ramené à la
      largeur d'un PV paysage, son texte pèserait trop. */
   .entete td { font-size: 12pt !important; }
-  .entete img { height: 52px !important; width: auto !important; }
+  /* Le texte du bandeau est ramené à 12pt pour un PV paysage, mais le SCEAU
+     n'a pas à suivre : rapetissé avec lui, il devenait un timbre illisible en
+     tête d'une feuille de 297 mm. Il retrouve les 80 px du bandeau partagé —
+     hauteur imposée, largeur libre, faute de quoi le sceau rond de l'IPGEI
+     sortirait en ovale. */
+  .entete img { height: 80px !important; width: auto !important; }
   /* L'arabe du bandeau partagé : Calibri n'a pas ces glyphes, et le repli
      déclaré plus haut ne joue pas dans ce moteur — le nom arabe disparaissait
      du PDF sans erreur. Le bandeau n'ayant pas de classe sur ses cellules,
@@ -156,7 +161,21 @@ de documents se ressemblent.
   <table class="cartouche">
     <tr>
       <td class="lab">Effectif délibéré</td><td class="val">{{ effectif }}</td>
+      {% comment %}
+      Le seuil ne sert qu'à PROPOSER une décision. Un jury de semestre n'en
+      prononce aucune — c'est un bilan intermédiaire —, et l'annoncer laissait
+      croire à une validation qui n'a pas lieu. À sa place, ce sur quoi les
+      rangs se lisent : on ne comprend pas « 17ᵉ » sans savoir sur combien.
+      {% endcomment %}
+      {% if semestrielle %}
+      <td class="lab">Classés</td>
+      <td class="val">
+        {% if effectif_classe %}{{ effectif_classe }} en classe · {% endif %}
+        {{ effectif_promotion }} en promotion
+      </td>
+      {% else %}
       <td class="lab">Seuil de validation</td><td class="val">{{ deliberation.seuil_validation|floatformat:2 }} / 20</td>
+      {% endif %}
       <td class="lab">Date de validation</td>
       <td class="val">{% if deliberation.date_validation %}{{ deliberation.date_validation|date:"d/m/Y" }}{% else %}—{% endif %}</td>
     </tr>
@@ -165,7 +184,12 @@ de documents se ressemblent.
   <table class="pv">
     <thead>
       <tr>
-        <th style="width:12mm">Rang</th>
+        {% comment %}
+        La colonne « Rang » du PV annuel est celle du jury. Sur un PV de
+        semestre, elle répéterait mot pour mot l'une des deux colonnes de
+        rang — la même valeur deux fois sur chaque ligne d'une pièce signée.
+        {% endcomment %}
+        {% if not semestrielle %}<th style="width:12mm">Rang</th>{% endif %}
         <th style="width:24mm">Matricule</th>
         <th class="gauche">Nom et prénom</th>
         {% if not deliberation.classe %}<th style="width:20mm">Classe</th>{% endif %}
@@ -176,15 +200,26 @@ de documents se ressemblent.
         {% endcomment %}
         {% for code in codes_semestres %}<th style="width:16mm">{{ code }}</th>{% endfor %}
         <th style="width:18mm">Moyenne</th>
-        <th style="width:42mm">Décision proposée</th>
-        <th style="width:42mm">Décision du jury</th>
-        <th class="gauche" style="width:32mm">Motif de l'écart</th>
+        {% if semestrielle %}
+        <th style="width:30mm">Rang sur la classe</th>
+        <th style="width:34mm">Rang sur la promotion</th>
+        {% else %}
+        {% comment %}
+        Plus de « Décision proposée » : le procès-verbal rend ce que le jury a
+        prononcé, non ce que le calcul suggérait. La proposition reste à
+        l'écran, où elle sert à délibérer ; sur la pièce signée, deux colonnes
+        de décision laissaient croire à deux décisions concurrentes. La largeur
+        libérée va au motif, jusque-là le plus à l'étroit.
+        {% endcomment %}
+        <th style="width:48mm">Décision du jury</th>
+        <th class="gauche" style="width:60mm">Motif de l'écart</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
       {% for ligne in lignes %}
       <tr>
-        <td>{{ ligne.rang|default_if_none:"—" }}</td>
+        {% if not semestrielle %}<td>{{ ligne.rang|default_if_none:"—" }}</td>{% endif %}
         <td>{{ ligne.inscription.etudiant.matricule }}</td>
         <td class="gauche">{{ ligne.inscription.etudiant.nom_display }}</td>
         {% if not deliberation.classe %}<td>{{ ligne.inscription.classe.nom }}</td>{% endif %}
@@ -192,19 +227,23 @@ de documents se ressemblent.
           <td>{{ moyenne|default_if_none:"—"|floatformat:2 }}</td>
         {% endfor %}
         <td class="moy">{{ ligne.moyenne_generale|default_if_none:"—"|floatformat:2 }}</td>
-        <td>{{ ligne.get_decision_auto_display|default:"—" }}</td>
+        {% if semestrielle %}
+        <td>{{ ligne.rang_classe|default_if_none:"—" }}{% if ligne.rang_classe and effectif_classe %} / {{ effectif_classe }}{% endif %}</td>
+        <td>{{ ligne.rang_promotion|default_if_none:"—" }}{% if ligne.rang_promotion and effectif_promotion %} / {{ effectif_promotion }}{% endif %}</td>
+        {% else %}
         <td class="{% if ligne.est_ajustee %}ajustee{% endif %}">
           {{ ligne.get_decision_display|default:"—" }}
         </td>
         <td class="gauche {% if ligne.est_ajustee %}ajustee{% endif %}">{{ ligne.motif_ajustement }}</td>
+        {% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="{{ codes_semestres|length|add:8 }}">Aucun étudiant délibéré.</td></tr>
+      <tr><td colspan="{% if semestrielle %}{{ codes_semestres|length|add:6 }}{% else %}{{ codes_semestres|length|add:7 }}{% endif %}">Aucun étudiant délibéré.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 
-  {% if repartition %}
+  {% if repartition and not semestrielle %}
   <div class="synthese">
     <b>Répartition des décisions :</b>
     {% for item in repartition %}<span>{{ item.libelle }} : <b>{{ item.nombre }}</b></span>{% endfor %}

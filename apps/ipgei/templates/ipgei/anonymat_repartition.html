@@ -1,5 +1,10 @@
 {% comment %}
-Fiche de collecte des copies anonymes — une par correcteur.
+Fiche de collecte — une par correcteur.
+
+Deux formes, selon l'épreuve : sous ANONYMAT pour l'examen final et le
+rattrapage, NOMINATIVE pour le devoir surveillé. Ce dernier se tient en classe,
+l'enseignant corrige ses propres élèves et rend les copies au cours suivant :
+masquer les noms n'y protège personne.
 
 Ce n'est pas une liste à cocher : c'est la feuille sur laquelle le correcteur
 ÉCRIT ses notes en corrigeant, puis qu'il signe et rend. D'où deux colonnes,
@@ -34,29 +39,53 @@ coup d'œil avant de commencer.
     text-align: center; font-size: 14pt; font-weight: 700;
     color: #006633; margin: 10px 0 2px;
   }
-  .sous-titre { text-align: center; font-size: 10pt; color: #555; margin-bottom: 10px; }
+  /* Le gris pâlissait à l'impression : ces deux lignes portent l'identité de
+     la fiche — matière, semestre, correcteur — et doivent se lire aussi bien
+     que le tableau. Elles reprennent donc l'encre du corps de texte. */
+  .sous-titre { text-align: center; font-size: 10pt; margin-bottom: 4px; }
+  /* L'épreuve se lit d'un coup d'œil : c'est ce qui distingue cette fiche des
+     autres fiches de la même matière. */
+  .epreuve {
+    text-align: center; font-size: 11.5pt; font-weight: 700; color: #006633;
+    margin-bottom: 10px;
+  }
 
   .correcteur {
     border: 1px solid #006633; padding: 6px 10px; margin-bottom: 10px;
   }
   .correcteur .nom { font-size: 13pt; font-weight: 700; }
-  .correcteur .lot { font-size: 10pt; color: #333; margin-top: 2px; }
+  /* L'étiquette annonce sans voler la vedette au nom : elle se distingue par
+     la taille et la graisse, non par une encre plus claire. */
+  .correcteur .etiquette { font-size: 10pt; font-weight: 400; }
+  .correcteur .lot { font-size: 10pt; margin-top: 2px; }
 
   /* Une FICHE DE COLLECTE : le correcteur écrit ses notes dessus. D'où une
      ligne par copie et une colonne vide, plutôt qu'une grille de numéros à
-     cocher — on ne note pas dans une case de 8 mm. */
+     cocher — on ne note pas dans une case de 8 mm.
+
+     Une seule encre dans tout le document — celle du nom du correcteur et des
+     matricules. Les filets gris pâlissaient à l'impression et sur les
+     photocopies que le correcteur reçoit en pratique. */
   .collecte th {
     background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
-    border: 1px solid #999; padding: 4px; text-align: center;
+    border: 1px solid #1a1a1a; padding: 4px; text-align: center;
   }
   .collecte td {
-    border: 1px solid #999; padding: 5px; font-size: 10.5pt; height: 8mm;
+    border: 1px solid #1a1a1a; padding: 5px; font-size: 10.5pt; height: 8mm;
   }
   .collecte .num { text-align: center; font-weight: 700; width: 24mm; }
+  .collecte .mat { text-align: center; font-weight: 700; width: 22mm; }
+  /* Le nom se lit depuis la marge : c'est lui qu'on cherche des yeux en
+     posant une copie sur la pile. */
+  .collecte .nom { width: 62mm; }
+  .collecte .cls { text-align: center; width: 20mm; }
   .collecte .note { width: 26mm; }
+  .collecte .abs {
+    text-align: center; font-weight: 700; color: #b45309; background: #fffbeb;
+  }
   .signature { margin-top: 16mm; font-size: 10pt; }
   .signature .trait {
-    border-bottom: 1px solid #333; width: 60mm; display: inline-block;
+    border-bottom: 1px solid #1a1a1a; width: 60mm; display: inline-block;
     margin-left: 4mm;
   }
   .reste {
@@ -71,33 +100,80 @@ coup d'œil avant de commencer.
 <div class="page-correcteur">
   <div class="institution">{% include '_institution_header.html' %}</div>
 
-  <div class="titre">Fiche de collecte — copies anonymes</div>
+  <div class="titre">
+    Fiche de collecte — {% if anonyme %}copies anonymes{% else %}devoir surveillé{% endif %}
+  </div>
+  {% comment %}
+  L'épreuve est NOMMÉE. Sans elle, deux fiches de devoir surveillé sont des
+  documents identiques : posées côte à côte sur un bureau, rien ne dit laquelle
+  va avec quel paquet de copies.
+  {% endcomment %}
   <div class="sous-titre">
     {% if matiere %}{{ matiere.intitule }} · {% endif %}{{ semestre.code }} ·
     {{ campagne }} · {{ niveau }} · {{ annee_universitaire }}
   </div>
+  {% if epreuve %}<div class="epreuve">{{ epreuve }}</div>{% endif %}
 
   <div class="correcteur">
-    <div class="nom">{{ paquet.correcteur }}</div>
+    {% comment %}
+    Le nom est ANNONCÉ. Seul dans son cadre, il pouvait se lire comme
+    l'intitulé de l'épreuve ou le nom d'une classe ; la feuille circule entre
+    plusieurs mains et doit dire d'un coup d'œil à qui elle appartient.
+    {% endcomment %}
+    <div class="nom"><span class="etiquette">Correcteur :</span> {{ paquet.correcteur }}</div>
     <div class="lot">
       {{ paquet.nb }} copie{{ paquet.nb|pluralize }} —
-      du n° <strong>{{ paquet.premier }}</strong> au n° <strong>{{ paquet.dernier }}</strong>
+      {% if anonyme %}
+        du n° <strong>{{ paquet.premier }}</strong> au n° <strong>{{ paquet.dernier }}</strong>
+      {% else %}
+        du matricule <strong>{{ paquet.premier }}</strong>
+        au <strong>{{ paquet.dernier }}</strong>
+      {% endif %}
+      {% if paquet.absents %}
+      · dont <strong>{{ paquet.absents }}</strong> absent{{ paquet.absents|pluralize }},
+      soit <strong>{{ paquet.a_corriger }}</strong> copie{{ paquet.a_corriger|pluralize }} à corriger
+      {% endif %}
     </div>
   </div>
 
   <table class="collecte">
     <thead>
       <tr>
+        {% comment %}
+        Le devoir surveillé ne se corrige PAS sous anonymat : il se tient en
+        classe, l'enseignant corrige ses propres élèves et rend les copies au
+        cours suivant. Masquer les noms n'y protège personne et obligerait à
+        une levée d'anonymat pour rien.
+        {% endcomment %}
+        {% if anonyme %}
         <th class="num">N° anonymat</th>
+        {% else %}
+        <th class="mat">Matricule</th>
+        <th class="nom">Nom et prénom</th>
+        <th class="cls">Classe</th>
+        {% endif %}
         <th class="note">Note /20</th>
         <th>Observations</th>
       </tr>
     </thead>
     <tbody>
-      {% for numero in paquet.numeros %}
+      {% for ligne in paquet.lignes %}
       <tr>
-        <td class="num">{{ numero }}</td>
-        <td class="note"></td>
+        {% if anonyme %}
+        <td class="num">{{ ligne.numero }}</td>
+        {% else %}
+        <td class="mat">{{ ligne.matricule }}</td>
+        <td class="nom">{{ ligne.nom }}</td>
+        <td class="cls">{{ ligne.classe }}</td>
+        {% endif %}
+        {% comment %}
+        « ABS » vient de l'émargement de l'épreuve, pointée le jour même : le
+        correcteur sait qu'il ne cherchera pas cette copie dans son paquet, et
+        ne prendra pas son absence pour un oubli de sa part.
+        {% endcomment %}
+        <td class="note{% if ligne.absent %} abs{% endif %}">
+          {% if ligne.absent %}ABS{% endif %}
+        </td>
         <td></td>
       </tr>
       {% endfor %}
@@ -111,7 +187,7 @@ coup d'œil avant de commencer.
   {% if forloop.last and restantes %}
   <div class="reste">
     {{ restantes|length }} copie{{ restantes|length|pluralize }} non attribuée{{ restantes|length|pluralize }} :
-    n° {{ restantes|join:", " }}.
+    {% if anonyme %}n° {% endif %}{{ restantes|join:", " }}.
   </div>
   {% endif %}
 </div>

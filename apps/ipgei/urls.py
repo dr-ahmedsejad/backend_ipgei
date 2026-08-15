@@ -1,7 +1,9 @@
 from rest_framework.routers import DefaultRouter
 
 from .views import (
-    AbsenceSeanceViewSet, ClasseViewSet, DeliberationViewSet, DocumentIPGEIViewSet,
+    AbsenceSeanceViewSet, ClassementS3ViewSet, ClasseViewSet, ConcoursCNIMViewSet,
+    DeliberationViewSet,
+    DocumentIPGEIViewSet,
     EmploiArchiveViewSet, EvaluationViewSet,
     GrilleTypeViewSet, HistoriqueClasseViewSet, InscriptionIPGEIViewSet,
     LigneDeliberationViewSet, MatiereViewSet, MembreJuryIPGEIViewSet,
@@ -32,6 +34,10 @@ router.register(r'evaluations',     EvaluationViewSet,           basename='ipgei
 router.register(r'deliberations',   DeliberationViewSet,         basename='ipgei-deliberation')
 router.register(r'lignes-deliberation', LigneDeliberationViewSet, basename='ipgei-ligne-deliberation')
 router.register(r'membres-jury',    MembreJuryIPGEIViewSet,      basename='ipgei-membre-jury')
+# Concours CNIM : résultat externe, constaté puis appliqué — pas un jury.
+router.register(r'concours',        ConcoursCNIMViewSet,         basename='ipgei-concours')
+# Classement de S3 : feuille de travail de l'affectation, hors registre.
+router.register(r'classement',      ClassementS3ViewSet,         basename='ipgei-classement')
 # EDT & permutations
 router.register(r'grilles',         GrilleTypeViewSet,           basename='ipgei-grille')
 router.register(r'seances-type',    SeanceTypeViewSet,           basename='ipgei-seance-type')

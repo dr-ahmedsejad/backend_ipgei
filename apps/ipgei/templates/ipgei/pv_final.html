@@ -1,0 +1,276 @@
+{% comment %}
+Procès-verbal FINAL de deuxième année — l'acte de clôture du cycle.
+
+Il reprend la trame du PV de délibération, et c'est voulu : posés côte à côte,
+les feuillets d'une même promotion doivent se ressembler. Ce qui change est ce
+qu'il porte — non plus un moment du parcours, mais TOUT le parcours : la session
+normale, le rattrapage, le concours, et la situation qui en résulte.
+
+Il ne prononce rien. Tout y a été décidé ailleurs, par un jury ou par le
+concours ; ce document constate. D'où l'absence de colonne « proposition » et de
+mention « projet » : il n'y a rien à arbitrer, seulement à signer.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 landscape; margin: 0; }
+
+  /* Calibri, comme les PV que l'institut édite depuis toujours. Les polices
+     qui suivent ne sont pas décoratives : Calibri ne couvre pas l'arabe, et
+     sans repli le nom arabe de l'institution sortirait en carrés. */
+  body {
+    font-family: Calibri, 'Cairo', 'Segoe UI', Arial, sans-serif;
+    font-size: 12pt; color: #1a1a1a;
+  }
+  /* Pas de largeur fixe : la page était bâtie sur 297 mm — la feuille ENTIÈRE —
+     puis glissée dans les 277 mm qui restent une fois les marges du PDF ôtées.
+     wkhtmltopdf réduisait donc tout d'un vingtième, ce qui rapetissait le texte
+     et empêchait le tableau d'atteindre les bords. En laissant la largeur
+     libre, le contenu occupe exactement la zone imprimable, à l'échelle 1. */
+  .page { width: auto; padding: 0; position: relative; }
+
+  .entete { width: 100%; border-bottom: 3px solid #006633; padding-bottom: 4px; }
+  .entete td { vertical-align: middle; }
+  /* Le bandeau partagé est calibré pour un corps de document : ramené à la
+     largeur d'un PV paysage, son texte pèserait trop. */
+  .entete td { font-size: 12pt !important; }
+  .entete img { height: 52px !important; width: auto !important; }
+  /* L'arabe du bandeau partagé : Calibri n'a pas ces glyphes, et le repli
+     déclaré plus haut ne joue pas dans ce moteur — le nom arabe disparaissait
+     du PDF sans erreur. Le bandeau n'ayant pas de classe sur ses cellules,
+     c'est la dernière qui le porte. */
+  .entete td:last-child {
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
+  .entete hr { display: none; }
+  .ministere { width: 100%; margin-top: 2px; }
+  .ministere td { font-size: 12pt !important; color: #444; width: 50%; }
+  .ministere td:last-child {
+    text-align: right; font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
+  .entete-fr, .entete-ar { font-size: 12pt; color: #444; line-height: 1.4; width: 36%; }
+  /* L'arabe garde sa propre pile de polices : Calibri n'a pas ces glyphes, et
+     le repli au niveau du `body` n'a pas suffi — seul Calibri s'embarquait
+     dans le PDF, et le nom arabe de l'institution disparaissait. */
+  .entete-ar {
+    direction: rtl; text-align: center;
+    font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif;
+  }
+  .entete-fr { text-align: center; }
+  .entete-logo { text-align: center; width: 28%; }
+  .entete-logo img { height: 48px; object-fit: contain; }
+  .inst-nom { font-size: 12pt; font-weight: 700; color: #006633; display: block; margin-top: 2px; }
+
+  .titre-zone { text-align: center; margin: 10px 0 6px; }
+  .titre {
+    display: inline-block; background: #006633; color: #fff; font-size: 15pt;
+    font-weight: 700; padding: 5px 24px; border-radius: 5px; text-transform: uppercase;
+  }
+  .sous-titre { display: block; margin-top: 4px; font-size: 12pt; color: #555; }
+
+  /* Une édition non validée doit se reconnaître au premier coup d'œil. */
+  .projet {
+    display: inline-block; margin-top: 5px; padding: 3px 14px; border-radius: 4px;
+    background: #fff4e5; border: 1px solid #f0b429; color: #8a5a00;
+    font-size: 12pt; font-weight: 700; text-transform: uppercase;
+  }
+
+  /* Largeur AUTOMATIQUE : à 100 %, les six cellules s'étiraient sur toute la
+     page et chaque valeur se retrouvait loin de son intitulé — « Effectif
+     délibéré » d'un côté, « 21 » de l'autre. Le cartouche se lit par paires,
+     il doit donc se serrer sur son contenu ; ce sont les groupes qu'on sépare,
+     pas les mots d'un même groupe. */
+  .cartouche { width: auto; margin: 8px 0 10px; border-collapse: collapse; }
+  .cartouche td { font-size: 12pt; padding: 4px 0; white-space: nowrap; }
+  .cartouche .lab { color: #666; padding-right: 8px; }
+  .cartouche .val { font-weight: 700; padding-right: 26px; }
+  .cartouche tr td:last-child { padding-right: 0; }
+
+  table.pv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table.pv th {
+    background: #006633; color: #fff; font-size: 12pt; font-weight: 700;
+    padding: 7px 4px; border: 1px solid #005229; text-align: center;
+    line-height: 1.25;
+  }
+  table.pv td { font-size: 12pt; padding: 5px 4px; border: 1px solid #d5d5d5; text-align: center; }
+  table.pv td.gauche { text-align: left; }
+  /* Coupure aux espaces seulement, et pas de césure : les deux libellés les
+     plus longs tiennent sur deux lignes entières plutôt que sur trois morceaux. */
+  table.pv td { word-break: keep-all; hyphens: none; }
+  table.pv tr:nth-child(even) td { background: #f7faf8; }
+  table.pv .moy { font-weight: 700; color: #006633; }
+  table.pv .ajustee { background: #fff8e6 !important; }
+
+  .synthese { margin: 6px 0 12px; font-size: 12pt; color: #333; }
+  .synthese span { display: inline-block; margin-right: 14px; }
+  .synthese b { color: #006633; }
+
+  .jury-titre {
+    font-size: 12pt; font-weight: 700; color: #006633; text-transform: uppercase;
+    border-bottom: 1px solid #006633; padding-bottom: 3px; margin-bottom: 6px;
+  }
+  table.jury { width: 100%; border-collapse: collapse; }
+  table.jury td {
+    width: 25%; vertical-align: top; padding: 7px 8px 5px; font-size: 12pt;
+    border: 1px solid #d5d5d5;
+  }
+  table.jury .role { color: #666; font-size: 12pt; }
+  table.jury .nom { font-weight: 700; }
+  table.jury .signature { margin-top: 12mm; font-size: 12pt; color: #555; }
+  table.jury .signee { color: #006633; font-weight: 700; }
+
+  .mentions { margin-top: 10px; font-size: 12pt; color: #777; text-align: center; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  {% comment %}
+  En-tête partagé — celui du suivi, des relevés, de la fiche de collecte et du
+  détail des notes. Le PV avait le sien, qui lisait pourtant les mêmes champs :
+  deux gabarits à tenir pour un seul bandeau, et deux occasions de diverger.
+  Le ministère, que celui-ci n'affiche pas, reste sous le filet — il figure sur
+  les PV de l'institut, et le perdre serait une régression.
+  {% endcomment %}
+  <div class="entete">
+    {% include '_institution_header.html' %}
+    {% if institution.ministere_fr or institution.ministere_ar %}
+    <table class="ministere">
+      <tr>
+        <td>{{ institution.ministere_fr }}</td>
+        <td dir="rtl" lang="ar">{{ institution.ministere_ar }}</td>
+      </tr>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="titre-zone">
+    <span class="titre">{{ titre }}</span>
+    <span class="sous-titre">
+      {{ niveau_libelle }} — Année universitaire {{ deliberation.annee_universitaire }}
+    </span>
+    {% comment %}
+    Pas de mention « projet » : ce document ne décide rien, il constate. Ce qui
+    peut manquer, c'est un RÉSULTAT DE CONCOURS — et c'est dit plus bas, là où
+    on lit les situations.
+    {% endcomment %}
+  </div>
+
+  <table class="cartouche">
+    <tr>
+      <td class="lab">Effectif</td><td class="val">{{ effectif }}</td>
+      <td class="lab">Jury annuel</td>
+      <td class="val">{% if deliberation.date_validation %}{{ deliberation.date_validation|date:"d/m/Y" }}{% else %}—{% endif %}</td>
+      <td class="lab">Jury de rattrapage</td>
+      <td class="val">{% if rattrapage.date_validation %}{{ rattrapage.date_validation|date:"d/m/Y" }}{% elif rattrapage %}non validé{% else %}sans objet{% endif %}</td>
+    </tr>
+  </table>
+
+  {% comment %}
+  Un concours dont la liste n'est pas rendue laisse des situations en suspens :
+  le dire ici évite qu'on lise ce PV comme définitif alors qu'il ne l'est pas.
+  {% endcomment %}
+  {% if en_attente %}
+  <div class="synthese" style="color:#b45309;">
+    <b style="color:#b45309;">{{ en_attente }}</b> étudiant(s) sans résultat de
+    concours connu : leur situation reste ouverte.
+  </div>
+  {% endif %}
+  {% comment %}
+  Le cas le plus trompeur : le résultat EST connu, mais les situations n'ont pas
+  été appliquées. Le PV afficherait alors « autorisé à concourir » en face d'un
+  « Admis », et l'on croirait le document faux.
+  {% endcomment %}
+  {% if a_appliquer %}
+  <div class="synthese" style="color:#b45309;">
+    <b style="color:#b45309;">{{ a_appliquer }}</b> résultat(s) de concours saisi(s)
+    mais non appliqué(s) : la situation finale ne les reflète pas encore.
+  </div>
+  {% endif %}
+
+  <table class="pv">
+    <thead>
+      <tr>
+        <th style="width:22mm">Matricule</th>
+        <th class="gauche">Nom et prénom</th>
+        {% if not deliberation.classe %}<th style="width:18mm">Classe</th>{% endif %}
+        <th style="width:20mm">Moyenne</th>
+        <th style="width:38mm">Décision du jury</th>
+        {% comment %}
+        Les deux colonnes du rattrapage restent VIDES pour qui n'y est pas
+        passé : les remplir d'office ferait croire à une seconde session pour
+        toute la promotion.
+        {% endcomment %}
+        <th style="width:20mm">Après rattr.</th>
+        <th style="width:36mm">Décision du rattrapage</th>
+        <th style="width:22mm">Concours</th>
+        <th style="width:40mm">Situation finale</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in lignes %}
+      <tr>
+        <td>{{ ligne.matricule }}</td>
+        <td class="gauche">{{ ligne.nom }}</td>
+        {% if not deliberation.classe %}<td>{{ ligne.classe }}</td>{% endif %}
+        <td class="moy">{{ ligne.moyenne|default_if_none:"—"|floatformat:2 }}</td>
+        <td>{{ ligne.decision|default:"—" }}</td>
+        <td class="moy">{{ ligne.moyenne_rattrapage|default_if_none:"—"|floatformat:2 }}</td>
+        <td>{{ ligne.decision_rattrapage|default:"—" }}</td>
+        <td>{{ ligne.cnim|default:"—" }}</td>
+        <td class="finale">{{ ligne.situation|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9">Aucun étudiant.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if repartition %}
+  <div class="synthese">
+    <b>Situations arrêtées :</b>
+    {% for item in repartition %}<span>{{ item.libelle }} : <b>{{ item.nombre }}</b></span>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if deliberation.observations %}
+  <div class="synthese"><b>Observations du jury :</b> {{ deliberation.observations }}</div>
+  {% endif %}
+
+  <div class="jury-titre">Composition du jury et signatures</div>
+  {% if membres %}
+  <table class="jury">
+    <tr>
+      {% for membre in membres %}
+      <td>
+        <div class="role">{{ membre.get_role_display }}</div>
+        <div class="nom">{{ membre.utilisateur.name|default:membre.utilisateur.username }}</div>
+        <div class="signature">
+          {% if membre.a_signe %}
+            <span class="signee">Signé le {{ membre.signature_le|date:"d/m/Y à H:i" }}</span>
+          {% else %}
+            Signature :
+          {% endif %}
+        </div>
+      </td>
+      {% if forloop.counter|divisibleby:4 and not forloop.last %}</tr><tr>{% endif %}
+      {% endfor %}
+    </tr>
+  </table>
+  {% else %}
+  <div class="synthese">Aucun membre de jury n'a encore été désigné pour cette délibération.</div>
+  {% endif %}
+
+  <div class="mentions">
+    Édité le {{ date_edition }} — {{ institution.nom_display }}.
+    Ce procès-verbal réunit les décisions du jury annuel, celles du jury de
+    rattrapage et le résultat du concours. Il ne prononce rien de nouveau :
+    chaque situation y est celle qu'un jury ou le concours a arrêtée.
+  </div>
+
+</div>
+</body>
+</html>

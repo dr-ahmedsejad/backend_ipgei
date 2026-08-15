@@ -851,22 +851,81 @@ class LigneDeliberationSerializer(serializers.ModelSerializer):
     decision_auto_display = serializers.CharField(source='get_decision_auto_display', read_only=True)
     est_ajustee        = serializers.BooleanField(read_only=True)
     nb_redoublements   = serializers.IntegerField(source='inscription.nb_redoublements', read_only=True)
+    #: CE QU'IL EST DEVENU depuis. La décision d'un jury est datée et ne bouge
+    #: plus — c'est ce qui protège son PV —, si bien qu'un jury annuel affiche
+    #: encore « autorisé au rattrapage » pour un étudiant devenu redoublant
+    #: depuis. Sans ce rappel, l'écran paraît en retard sur la réalité.
+    statut_actuel         = serializers.CharField(
+        source='inscription.statut', read_only=True)
+    statut_actuel_display = serializers.CharField(
+        source='inscription.get_statut_display', read_only=True)
+    #: D'OÙ vient la situation actuelle quand elle diffère de la décision. Deux
+    #: étudiants finissent redoublants par des chemins opposés — l'un recalé au
+    #: rattrapage, l'autre au concours —, et l'écran ne disait ni l'un ni
+    #: l'autre : il affichait « depuis », un mot suspendu sans complément.
+    origine_situation = serializers.SerializerMethodField()
     details            = DetailLigneDeliberationSerializer(many=True, read_only=True)
     motif_sans_proposition = serializers.SerializerMethodField()
+    # Les deux classements d'un jury de SEMESTRE — dans la classe, et sur la
+    # promotion toutes classes du niveau confondues. Nuls sur un jury annuel,
+    # qui prononce des décisions plutôt qu'un classement. Ils sont posés par
+    # la vue, qui seule connaît le périmètre à comparer.
+    rang_classe    = serializers.SerializerMethodField()
+    rang_promotion = serializers.SerializerMethodField()
+    effectif_classe    = serializers.SerializerMethodField()
+    effectif_promotion = serializers.SerializerMethodField()
 
     class Meta:
         model  = LigneDeliberation
         fields = [
             'id', 'deliberation', 'inscription', 'etudiant_nom', 'etudiant_matricule',
             'classe_nom', 'moyenne_generale', 'total_coefficients', 'rang',
+            'rang_classe', 'rang_promotion', 'effectif_classe', 'effectif_promotion',
             'decision_auto', 'decision_auto_display', 'decision', 'decision_display',
             'est_ajustee', 'motif_ajustement', 'observations', 'nb_redoublements',
+            'statut_actuel', 'statut_actuel_display', 'origine_situation',
             'motif_sans_proposition', 'details',
         ]
         read_only_fields = [
             'deliberation', 'inscription', 'moyenne_generale', 'total_coefficients',
             'rang', 'decision_auto',
         ]
+
+    def get_origine_situation(self, obj) -> str:
+        """
+        Ce qui a fait bouger la situation depuis ce jury : `concours`,
+        `rattrapage`, ou rien.
+
+        Deux signaux suffisent, et ils sont déjà chargés — aucune requête de
+        plus sur une liste de vingt-cinq lignes. Le résultat du concours est
+        porté par l'inscription et prime : c'est la DERNIÈRE étape du parcours,
+        même pour un étudiant passé d'abord par le rattrapage. À défaut, une
+        décision « autorisé au rattrapage » désigne la seconde session comme
+        seule suite possible.
+        """
+        inscription = obj.inscription
+        if inscription.statut == obj.decision:
+            return ''
+        if inscription.resultat_cnim:
+            return 'concours'
+        if obj.decision == LigneDeliberation.DECISION_RATTRAPAGE:
+            return 'rattrapage'
+        return ''
+
+    def _rangs(self, obj) -> dict:
+        return (self.context.get('rangs_semestriels') or {}).get(obj.pk, {})
+
+    def get_rang_classe(self, obj) -> int | None:
+        return self._rangs(obj).get('rang_classe')
+
+    def get_rang_promotion(self, obj) -> int | None:
+        return self._rangs(obj).get('rang_promotion')
+
+    def get_effectif_classe(self, obj) -> int | None:
+        return (self.context.get('effectifs_semestriels') or {}).get('effectif_classe')
+
+    def get_effectif_promotion(self, obj) -> int | None:
+        return (self.context.get('effectifs_semestriels') or {}).get('effectif_promotion')
 
     def get_motif_sans_proposition(self, obj) -> str:
         """
@@ -929,6 +988,11 @@ class DeliberationSerializer(serializers.ModelSerializer):
     nb_signatures    = serializers.SerializerMethodField()
     nb_decisions_emises = serializers.SerializerMethodField()
     decisions_niveau    = serializers.SerializerMethodField()
+    #: Combien d'étudiants ce jury a renvoyés au rattrapage, et le second jury
+    #: qui les reprend s'il est déjà ouvert. L'écran s'en sert pour proposer
+    #: l'ouverture — ou pour renvoyer vers le jury qui existe.
+    nb_au_rattrapage    = serializers.SerializerMethodField()
+    jury_rattrapage     = serializers.SerializerMethodField()
 
     class Meta:
         model  = Deliberation
@@ -940,7 +1004,8 @@ class DeliberationSerializer(serializers.ModelSerializer):
             'date_creation', 'date_calcul', 'date_validation',
             'validee_par', 'validee_par_nom', 'nb_lignes',
             'nb_membres_jury', 'nb_signatures', 'nb_decisions_emises',
-            'decisions_niveau',
+            'decisions_niveau', 'jury_source', 'nb_au_rattrapage',
+            'jury_rattrapage',
         ]
         read_only_fields = ['statut', 'date_calcul', 'date_validation', 'validee_par']
 
@@ -973,11 +1038,27 @@ class DeliberationSerializer(serializers.ModelSerializer):
         codes = list(fiche.decisions_possibles) if fiche and fiche.decisions_possibles else None
         if codes is None:
             rang = fiche.rang if fiche is not None else services.rang_du_niveau(obj.niveau)
+            # En 2e année, le jury dispose des quatre issues du cursus : les
+            # deux du jury annuel — concourir ou passer par le rattrapage — et
+            # les deux que prononce le jury de rattrapage, selon que le droit
+            # de redoublement reste ouvert.
             codes = ([LigneDeliberation.DECISION_ADMIS, LigneDeliberation.DECISION_REORIENTE]
                      if rang == 1 else
-                     [LigneDeliberation.DECISION_CNIM, LigneDeliberation.DECISION_REDOUBLANT,
-                      LigneDeliberation.DECISION_EXCLU])
+                     [LigneDeliberation.DECISION_CNIM, LigneDeliberation.DECISION_RATTRAPAGE,
+                      LigneDeliberation.DECISION_REDOUBLANT,
+                      LigneDeliberation.DECISION_REORIENTE])
         return [{'value': code, 'label': libelles.get(code, code)} for code in codes]
+
+    def get_nb_au_rattrapage(self, obj) -> int:
+        from .models import LigneDeliberation
+        if obj.portee != Deliberation.PORTEE_ANNUELLE:
+            return 0
+        return obj.lignes.filter(
+            decision=LigneDeliberation.DECISION_RATTRAPAGE).count()
+
+    def get_jury_rattrapage(self, obj) -> int | None:
+        enfant = obj.jurys_rattrapage.first() if obj.pk else None
+        return enfant.pk if enfant else None
 
     def validate_niveau(self, valeur):
         """

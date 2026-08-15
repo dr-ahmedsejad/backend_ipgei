@@ -841,7 +841,20 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='par-etudiant')
     def par_etudiant(self, request):
-        """Historique des présences pour un étudiant — filtres dates + pagination."""
+        """
+        Historique des absences d'un étudiant — filtres dates + pagination.
+
+        Deux sources, réunies ici :
+
+          * `absence_presence`, le pointage du Suivi ;
+          * l'émargement des séances IPGEI, qui n'a pas de ligne de Suivi
+            derrière lui et n'apparaissait donc nulle part dans ce module.
+
+        Les dates filtrent la SÉANCE, et non l'horodatage d'écriture de la
+        ligne. Une épreuve du 1er février pointée en août sortait sinon de
+        toute plage raisonnable : l'écran affichait « aucune absence » pour un
+        étudiant qui en avait.
+        """
         etudiant_id = request.query_params.get('etudiant')
         if not etudiant_id:
             return Response({'error': 'etudiant requis.'}, status=400)
@@ -853,16 +866,42 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
 
         date_debut = request.query_params.get('date_debut')
         date_fin   = request.query_params.get('date_fin')
+        # Le repli sur `date_modification` ne vaut que pour les lignes dont le
+        # suivi ne porte pas de date : les écarter d'office ferait disparaître
+        # un historique ancien sans que rien ne le dise.
         if date_debut:
-            qs = qs.filter(date_modification__date__gte=date_debut)
+            qs = qs.filter(
+                Q(suivi__date_suivie__gte=date_debut)
+                | Q(suivi__date_suivie__isnull=True,
+                    date_modification__date__gte=date_debut))
         if date_fin:
-            qs = qs.filter(date_modification__date__lte=date_fin)
+            qs = qs.filter(
+                Q(suivi__date_suivie__lte=date_fin)
+                | Q(suivi__date_suivie__isnull=True,
+                    date_modification__date__lte=date_fin))
 
-        # Pagination optionnelle (si page_size fourni)
-        page = self.paginate_queryset(qs)
+        lignes = list(PresenceSerializer(qs, many=True).data)
+
+        # Absences IPGEI. Import gardé : hors IPGEI, le module n'existe pas et
+        # ce point d'entrée doit continuer de répondre.
+        try:
+            from apps.ipgei.miroir import absences_pour_socle
+            lignes += absences_pour_socle(int(etudiant_id), date_debut, date_fin)
+        except Exception:                                      # noqa: BLE001
+            logger.exception("Absences IPGEI de l'étudiant %s illisibles", etudiant_id)
+
+        # Du plus récent au plus ancien, les deux origines confondues : c'est
+        # l'ordre dans lequel on relit un dossier.
+        lignes.sort(key=lambda ligne: (ligne.get('suivi_date') or '',
+                                       ligne.get('date_modification') or ''),
+                    reverse=True)
+
+        # Pagination optionnelle (si page_size fourni). Le paginateur accepte
+        # une liste : c'est ce qui permet de servir les deux origines ensemble.
+        page = self.paginate_queryset(lignes)
         if page is not None:
-            return self.get_paginated_response(PresenceSerializer(page, many=True).data)
-        return Response(PresenceSerializer(qs, many=True).data)
+            return self.get_paginated_response(page)
+        return Response(lignes)
     # ── Supprimer le justificatif d'une présence ─────────────────────────────
     @action(detail=True, methods=['delete'], url_path='supprimer-justificatif',
             permission_classes=[RBACPermission])

@@ -1,76 +1,402 @@
-{% extends "ipgei/_base_ipgei.html" %}
+{% comment %}
+Relevé de notes ANNUEL — c'est le relevé semestriel, deux fois, sous une même
+signature.
 
-{% block contenu %}
-  {% for bloc in semestres %}
-    <div class="bloc-semestre-titre">
-      Semestre {{ bloc.code }}
-      <span style="float:right;font-weight:400;color:#555">
-        Moyenne : <strong style="color:#006633">{{ bloc.moyenne|default_if_none:"—"|floatformat:2 }} / 20</strong>
-      </span>
-    </div>
+Rien n'y est propre à l'année : même en-tête trilingue, même barre d'année,
+mêmes blocs QR et photo, même tableau vert à double en-tête, même pied de page
+natif, même bloc de signature. Seuls changent le titre et le nombre de tableaux
+de notes — un par semestre, chacun identique à celui de la pièce semestrielle,
+moyennes de classe et rangs compris.
+
+Ce fichier n'étend pas `_base_ipgei.html`, et c'est délibéré : il l'étendait
+auparavant, si bien que les deux relevés d'un même étudiant ne se ressemblaient
+pas. Un étudiant qui présente ses deux pièces au même guichet doit y reconnaître
+le même document.
+
+Le résumé final porte l'ANNÉE — moyenne générale, total des coefficients,
+validation. Chaque semestre garde le sien juste sous son tableau, comme sur la
+pièce semestrielle.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4; margin: 0; }
+
+  html, body {
+    /* 240mm > A4 : wkhtmltopdf réduit le contenu (~0.83). Le NB est rendu par
+       le pied de page natif, la marge basse lui étant réservée. */
+    width: 240mm;
+    font-family: Arial, sans-serif;
+    font-size: 13pt;
+    color: #1a1a1a;
+    background: #fff;
+    padding: 5mm 2mm 5mm 2mm;
+    margin: auto;
+  }
+
+  .page-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+
+  .sec-header    { padding-top: 2px !important; padding-bottom: 6px !important; }
+  .sec-annee     { padding-bottom: 6px !important; }
+  .sec-titre     { padding-bottom: 5px !important; }
+  .sec-qr        { padding-bottom: 4px !important; }
+  .sec-etudiant  { padding-bottom: 6px !important; }
+  /* Deux tableaux de notes au lieu d'un : la trame semestrielle est calibrée
+     pour une page, et le second bloc la faisait déborder — la signature se
+     retrouvait seule sur une feuille presque vide. On rend la hauteur là où
+     elle ne se lit pas : les interlignes, non le corps du texte. */
+  .sec-notes     { vertical-align: top; padding-bottom: 4px !important; }
+  .sec-resume    { padding-bottom: 4px !important; }
+  .sec-signature { padding-bottom: 6px !important; }
+
+  .header-table { width: 100%; border-collapse: collapse; }
+  .header-table td { vertical-align: middle; }
+  .td-fr   { text-align: left;   width: 38%; font-size: 11pt;   font-weight: 700; line-height: 1.4; color: #006633; }
+  .td-logo { text-align: center; width: 24%; }
+  .td-ar   { text-align: right;  width: 38%; font-size: 12.5pt; font-weight: 700; line-height: 1.4; color: #006633; }
+
+  .annee-bar { width: 100%; border-collapse: collapse; font-size: 12.5pt; }
+  .annee-bar td { border-top: 2px solid #006633; border-bottom: 2px solid #006633; padding: 6px 4px; }
+  .annee-bar .ab-fr  { text-align: left;   font-weight: 600; width: 42%; }
+  .annee-bar .ab-val { text-align: center; font-weight: 700; width: 16%; }
+  .annee-bar .ab-ar  { text-align: right;  font-size: 14pt;  font-weight: 600; width: 42%; }
+
+  .title-ar { text-align: center; font-size: 22pt; font-weight: 700; color: #cc0000; margin-bottom: 4px; }
+  .title-fr { text-align: center; font-size: 17pt; font-weight: 700; letter-spacing: 0.05em; }
+
+  .student-table { width: 100%; border-collapse: collapse; border: 1.5px solid #006633; }
+  .student-table td {
+    padding: 3px 10px; border-bottom: 0.5px solid #c8e6d7;
+    font-size: 12pt; vertical-align: middle;
+  }
+  .student-table tr:last-child td { border-bottom: none; }
+  .st-lbl-fr { color: #006633; font-weight: 700; white-space: nowrap; width: 135px; }
+  .st-val    { text-align: center; font-weight: 600; }
+  .st-lbl-ar { color: #006633; font-weight: 700; text-align: right;
+               white-space: nowrap; width: 135px; font-size: 14pt; }
+
+  table.notes {
+    width: 100%; border-collapse: collapse; table-layout: fixed;
+    font-size: 10pt; border: 2px solid #006633;
+  }
+  table.notes thead tr.th-top { background: #006633; color: #fff; }
+  table.notes thead tr.th-top th {
+    padding: 3px 4px; text-align: center; font-weight: 700;
+    border-right: 1px solid #1a7a45; vertical-align: middle;
+  }
+  table.notes thead tr.th-sub { background: #1a7040; color: #e0f0e8; }
+  table.notes thead tr.th-sub th {
+    padding: 2px; text-align: center; font-size: 10.5pt; border-right: 1px solid #1a7a45;
+  }
+  table.notes tbody tr.em-row td {
+    padding: 2.5px 4px; border-bottom: 0.5px solid #e0e0e0; text-align: center;
+  }
+  /* Libellé à 9.5pt : les intitulés longs passeraient à la ligne et pousseraient
+     le relevé sur une seconde page. */
+  table.notes tbody tr.em-row td.em-label { font-size: 9.5pt; text-align: left; }
+  table.notes tbody tr.em-row td.em-code  { font-weight: 700; }
+  table.notes tbody tr.em-row td.retenue  { font-weight: 700; color: #006633; }
+
+  .summary-table { width: 100%; border-collapse: collapse; border: 1.5px solid #006633; font-size: 11pt; }
+  .summary-table td { padding: 3px 12px; border-bottom: 0.5px solid #c8e6d7; }
+  .summary-table tr:last-child td { border-bottom: none; }
+  .sum-lbl-fr { font-weight: 700; text-align: left;  width: 42%; }
+  .sum-val    { text-align: center; font-weight: 700; width: 16%; }
+  .sum-lbl-ar { font-weight: 700; text-align: right; width: 42%; }
+
+  .sig-date-row { display: table; width: 100%; font-size: 11.5pt; font-weight: 700; margin-bottom: 6px; }
+  .sig-date-fr  { display: table-cell; text-align: left; }
+  .sig-date-ar  { display: table-cell; text-align: right; }
+</style>
+</head>
+<body>
+<table class="page-table">
+<tbody>
+
+  <tr><td class="sec-header">
+    <table class="header-table">
+      <tr>
+        <td class="td-fr">
+          République Islamique de Mauritanie<br>
+          {{ institution.ministere_fr|default:"Ministère de l'Enseignement Supérieur et de la Recherche Scientifique" }}<br>
+          {{ institution.nom_fr }}
+        </td>
+        <td class="td-logo">
+          {% if logo_b64 %}
+            <img src="{{ logo_b64 }}" style="height:75px;object-fit:contain;" alt="Logo">
+          {% else %}
+            <div style="width:70px;height:70px;border:2px solid #006633;border-radius:50%;line-height:70px;text-align:center;margin:auto;font-weight:700;font-size:14pt;color:#006633;">IPGEI</div>
+          {% endif %}
+        </td>
+        <td class="td-ar">
+          <span dir="rtl" lang="ar">الجمهورية الإسلامية الموريتانية<br>
+          {{ institution.ministere_ar|default:"وزارة التعليم العالي والبحث العلمي" }}<br>
+          {{ institution.nom_ar }}</span>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-annee">
+    <table class="annee-bar">
+      <tr>
+        <td class="ab-fr">Année Universitaire :</td>
+        <td class="ab-val">{{ annee_universitaire }}</td>
+        <td class="ab-ar" dir="rtl" lang="ar">السنة الجامعية :</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-titre">
+    <div class="title-ar"><span dir="rtl" lang="ar">كشف درجات السنة الدراسية</span></div>
+    <div class="title-fr">RELEVÉ DES NOTES DE L'ANNÉE</div>
+  </td></tr>
+
+  <tr><td class="sec-qr">
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="width:85px;vertical-align:top;">
+          {% if qr_b64 %}
+            <img src="{{ qr_b64 }}" style="width:80px;height:80px;display:block;" alt="QR">
+          {% endif %}
+        </td>
+        <td></td>
+        <td style="width:85px;vertical-align:top;text-align:right;">
+          <div style="width:80px;height:95px;border:1.5px solid #006633;overflow:hidden;background:#fdfdfd;display:inline-block;">
+            {% if photo_b64 %}
+              <img src="{{ photo_b64 }}" style="width:100%;height:100%;object-fit:cover;" alt="Photo">
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td class="sec-etudiant">
+    <table class="student-table">
+      <tr>
+        <td class="st-lbl-fr">{% if etudiant.genre == 'M' %}L'étudiant :{% else %}L'étudiante :{% endif %}</td>
+        <td class="st-val">{{ etudiant.nom_fr|default:etudiant.nom }}</td>
+        <td class="st-val"><span dir="rtl" lang="ar">{{ etudiant.nom_ar|default:"" }}</span></td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">{% if etudiant.genre == 'M' %}الطالب :{% else %}الطالبة :{% endif %}</span></td>
+      </tr>
+      <tr>
+        <td class="st-lbl-fr">{% if etudiant.genre == 'M' %}Né le :{% else %}Née le :{% endif %}</td>
+        <td colspan="2" style="text-align:center;font-weight:600;">{{ etudiant.date_naissance|date:"d/m/Y"|default:"N/A" }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">{% if etudiant.genre == 'M' %}المولود :{% else %}المولودة :{% endif %}</span></td>
+      </tr>
+      <tr>
+        <td class="st-lbl-fr">Matricule :</td>
+        <td colspan="2" style="text-align:center;font-weight:700;font-family:monospace;font-size:13pt;">{{ etudiant.matricule }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">رقم التسجيل :</span></td>
+      </tr>
+      {% comment %}
+        Le cursus développé et la classe : « MPSI A » seul ne dit rien du
+        contenu de la formation à qui lit le relevé hors de l'établissement.
+      {% endcomment %}
+      <tr>
+        <td class="st-lbl-fr">Classe :</td>
+        <td colspan="2" style="text-align:center;font-weight:600;">{{ classe_label|default:classe.nom }}</td>
+        <td class="st-lbl-ar"><span dir="rtl" lang="ar">القسم :</span></td>
+      </tr>
+    </table>
+  </td></tr>
+
+{% for bloc in semestres %}
+  <tr><td class="sec-notes">
     <table class="notes">
+      <colgroup>
+        <col style="width: 10%;"> <col style="width: 24%;"> <col style="width: 7%;">
+        <col style="width: 7%;">  <col style="width: 7%;">  <col style="width: 7%;">
+        <col style="width: 8%;">  <col style="width: 10%;"> <col style="width: 10%;">
+        <col style="width: 10%;">
+      </colgroup>
       <thead>
-        <tr>
-          <th style="width:16mm">Code</th>
-          <th class="gauche">Matière</th>
-          <th style="width:13mm">Coef.</th>
-          <th style="width:13mm">VH</th>
-          <th style="width:16mm">Moy. DS</th>
-          <th style="width:14mm">TP</th>
-          <th style="width:16mm">Examen</th>
-          <th style="width:18mm">Note retenue</th>
+        <tr class="th-top">
+          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">الرمز</span><br>Code</th>
+          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">المادة</span><br>Matière</th>
+          <th colspan="4"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">{{ bloc.label_ar }}</span><br>{{ bloc.label }}</th>
+          <th><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">المعامل</span><br>Coef.</th>
+          <th colspan="3"><span dir="rtl" lang="ar" style="font-size:9.5pt;font-weight:600;">النتيجة</span><br>Résultat</th>
+        </tr>
+        <tr class="th-sub">
+          <th colspan="2"></th>
+          <th>DS</th>
+          <th>TP</th>
+          <th>EX</th>
+          <th>RAT</th>
+          <th></th>
+          <th>ME</th>
+          <th>MC</th>
+          <th>Rang</th>
         </tr>
       </thead>
       <tbody>
-        {% for l in bloc.lignes %}
-        <tr>
-          <td>{{ l.code }}</td>
-          <td class="gauche">{{ l.intitule }}</td>
-          <td>{{ l.coefficient|floatformat:"-2" }}</td>
-          <td>{{ l.volume_horaire }}</td>
-          <td>{{ l.moy_ds|default_if_none:"—"|floatformat:2 }}</td>
-          <td>{% if l.note_tp != None %}{{ l.note_tp|floatformat:2 }}{% else %}—{% endif %}</td>
-          <td>{{ l.moy_exam|default_if_none:"—"|floatformat:2 }}</td>
-          <td><strong>{{ l.note_retenue|default_if_none:"—"|floatformat:2 }}</strong></td>
+        {% for ligne in bloc.lignes %}
+        <tr class="em-row">
+          <td class="em-code">{{ ligne.code }}</td>
+          <td class="em-label">{{ ligne.intitule }}</td>
+          <td>{{ ligne.moy_ds|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.note_tp|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.moy_exam|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.rattrapage|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.coefficient|floatformat:"-2" }}</td>
+          <td class="retenue">{{ ligne.note_retenue|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.moyenne_classe|floatformat:2|default:"—" }}</td>
+          <td>{{ ligne.rang_matiere|default:"—" }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="8" style="padding:8px;color:#888">Aucune note enregistrée.</td></tr>
+        <tr class="em-row"><td colspan="10">Aucune matière notée sur {{ bloc.label|lower }}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+
+    <table class="summary-table" style="margin-top:6px;">
+      <tr>
+        <td class="sum-lbl-fr">Moyenne du {{ bloc.label|lower }}</td>
+        <td class="sum-val">{{ bloc.moyenne|floatformat:2|default:"—" }} / 20</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">معدل {{ bloc.label_ar }}</span></td>
+      </tr>
+      {% comment %}
+        Deux lignes distinctes, et non deux chiffres sur la même : ils ne
+        répondent pas à la même question. Le rang de classe situe dans le
+        groupe de travail, celui de promotion dans le concours à venir — la
+        répartition en MPSI A et MPSI B étant administrative, un premier de sa
+        classe peut être quinzième de sa promotion.
+      {% endcomment %}
+      {% if bloc.rang_general.rang %}
+      <tr>
+        <td class="sum-lbl-fr">Rang du {{ bloc.label|lower }} dans la classe</td>
+        <td class="sum-val">
+          {{ bloc.rang_general.rang }}{% if bloc.rang_general.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ bloc.rang_general.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب في القسم</span></td>
+      </tr>
+      {% endif %}
+      {% if bloc.rang_promotion.rang %}
+      <tr>
+        <td class="sum-lbl-fr">Rang du {{ bloc.label|lower }} sur la promotion{% if niveau_promo %} ({{ niveau_promo }}){% endif %}</td>
+        <td class="sum-val">
+          {{ bloc.rang_promotion.rang }}{% if bloc.rang_promotion.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ bloc.rang_promotion.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب على الدفعة</span></td>
+      </tr>
+      {% endif %}
+    </table>
+
+  </td></tr>
   {% empty %}
-    <p style="color:#888;padding:12px">Aucune note enregistrée pour cette année universitaire.</p>
+  <tr><td class="sec-notes">
+    <table class="notes"><tbody><tr class="em-row"><td>Aucune note enregistrée pour cette année universitaire.</td></tr></tbody></table>
+  </td></tr>
   {% endfor %}
 
-  <table style="width:100%">
-    <tr>
-      <td style="width:60%;vertical-align:top">
-        <div class="encadre">
-          <span class="cle">Moyenne générale annuelle</span><br>
-          <span class="valeur">{{ moyenne|default_if_none:"—"|floatformat:2 }} / 20</span>
-          <div style="margin-top:6px;font-size:9pt;color:#555">
-            Total des coefficients : {{ total_coefficients|floatformat:"-2" }} —
-            seuil de validation : {{ seuil|floatformat:2 }}<br>
-            {% if valide %}<strong style="color:#006633">Année validée</strong>
-            {% else %}<strong style="color:#a33">Année non validée</strong>{% endif %}
-          </div>
-        </div>
-      </td>
-      <td style="width:40%;vertical-align:top;padding-left:8px">
-        <div class="encadre">
-          <span class="cle">Assiduité de l'année</span>
-          <div style="margin-top:4px;font-size:9.5pt">
-            Absences : <strong>{{ absences.absences }}</strong><br>
-            Absences justifiées : <strong>{{ absences.justifiees }}</strong><br>
-            Retards : <strong>{{ absences.retards }}</strong>
-          </div>
-        </div>
-      </td>
-    </tr>
-  </table>
+  {% comment %}
+  Le résumé porte l'ANNÉE : c'est ce que cette pièce ajoute aux deux relevés
+  semestriels. Chaque semestre a déjà donné sa moyenne et son rang sous son
+  propre tableau.
+  {% endcomment %}
+  <tr><td class="sec-resume">
+    <table class="summary-table">
+      <tr>
+        <td class="sum-lbl-fr">Total des coefficients</td>
+        <td class="sum-val">{{ total_coefficients|floatformat:"-2"|default:"—" }}</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">مجموع الضوارب</span></td>
+      </tr>
+      <tr>
+        <td class="sum-lbl-fr">Moyenne générale annuelle</td>
+        <td class="sum-val">{{ moyenne|floatformat:2|default:"—" }} / 20</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">المعدل العام السنوي</span></td>
+      </tr>
+      {% comment %}
+      Le classement de l'ANNÉE — celui qui compte pour le passage et pour le
+      concours. Celui d'un semestre isolé ne le préjuge pas.
+      {% endcomment %}
+      {% if rang_general.rang %}
+      <tr>
+        <td class="sum-lbl-fr">Rang annuel dans la classe</td>
+        <td class="sum-val">
+          {{ rang_general.rang }}{% if rang_general.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ rang_general.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب السنوي في القسم</span></td>
+      </tr>
+      {% endif %}
+      {% if rang_promotion.rang %}
+      <tr>
+        <td class="sum-lbl-fr">Rang annuel sur la promotion{% if niveau_promo %} ({{ niveau_promo }}){% endif %}</td>
+        <td class="sum-val">
+          {{ rang_promotion.rang }}{% if rang_promotion.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ rang_promotion.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب السنوي على الدفعة</span></td>
+      </tr>
+      {% endif %}
+      {% if absences.total %}
+      <tr>
+        <td class="sum-lbl-fr">Absences de l'année</td>
+        <td class="sum-val">{{ absences.total }}</td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">غيابات السنة</span></td>
+      </tr>
+      {% endif %}
+    </table>
+  </td></tr>
 
-  <div style="font-size:7.5pt;color:#777;margin-top:4px">
-    La moyenne annuelle est pondérée par les coefficients de toutes les matières des deux semestres.
-    La note retenue par matière vaut max(moyenne, rattrapage).
-  </div>
-{% endblock %}
+
+
+  <tr><td class="sec-signature">
+    <div class="sig-date-row">
+      <span class="sig-date-fr">Fait à {{ ville }}, le {{ date_edition }}</span>
+      <span class="sig-date-ar" dir="rtl" lang="ar">{{ ville_ar }}، بتاريخ {{ date_edition }}</span>
+    </div>
+    {% comment %}
+    Signataire recopié sur le document à l'émission, et non lu sur le
+    paramétrage courant : un duplicata doit reproduire la pièce délivrée.
+    La signature reste manuscrite — d'où l'espace réservé sous le titre, et le
+    nom imprimé dessous quand il est renseigné.
+    {% endcomment %}
+    <div style="text-align:center; font-weight:700; font-size:11pt; margin-top:5px; line-height:1.15;">
+      Pour le Directeur et P.O.<br>
+      {{ signataire.titre }}
+      <div style="height:28px;"></div>
+      {% if signataire.nom %}<div style="font-weight:700;">{{ signataire.nom }}</div>{% endif %}
+    </div>
+  </td></tr>
+
+  <!-- Légende en bas de page, à gauche. L'espace au-dessus est celui où l'on
+       signe : 26 mm sur le relevé semestriel, 9 mm ici — deux tableaux de
+       notes au lieu d'un, et le relevé annuel doit TENIR SUR UNE PAGE. C'est
+       le maximum mesuré qui ne fait pas déborder ; au-delà, la signature part
+       seule sur une seconde feuille. -->
+  <tr><td style="padding-top:8mm;">
+    <table style="border:none;border-collapse:collapse;">
+      <tr>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">ME</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">moyenne de l&rsquo;étudiant</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">معدل الطالب</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">MC</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">moyenne de la classe</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">معدل القسم</td>
+      </tr>
+      <tr>
+        <td style="border:none;padding:0 4px 1px 0;font-size:8pt;font-weight:700;color:#333;white-space:nowrap;">Rang</td>
+        <td style="border:none;padding:0 6px 1px 0;font-size:8pt;color:#333;">:</td>
+        <td style="border:none;padding:0 10px 1px 0;font-size:8pt;color:#555;white-space:nowrap;">rang de l&rsquo;étudiant</td>
+        <td dir="rtl" lang="ar" style="border:none;padding:0 0 1px;font-size:8pt;color:#888;">ترتيب الطالب</td>
+      </tr>
+    </table>
+  </td></tr>
+
+</tbody>
+</table>
+</body>
+</html>

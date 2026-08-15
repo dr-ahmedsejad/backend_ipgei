@@ -397,3 +397,180 @@ def synchroniser_tout(institution=None) -> dict:
         'semaines': semaines,
         'seances':  seances,
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Présentation des absences IPGEI au module ABS du socle
+# ═════════════════════════════════════════════════════════════════════════════
+#: Traduction des statuts IPGEI vers ceux du socle (`absence.Presence`).
+#: Le retard n'y a pas d'équivalent — le socle ne connaît que présent, absent,
+#: sanctionné et justifiée. Il n'est donc pas présenté plutôt que rangé sous un
+#: libellé qui dirait autre chose que ce qui s'est passé.
+_STATUT_SOCLE = {'absent': 1, 'justifiee': 3}
+
+
+def absences_pour_socle(etudiant_id: int, date_debut=None, date_fin=None) -> list:
+    """
+    Les absences IPGEI d'un étudiant, au format des lignes du module ABS.
+
+    Le socle attache ses présences à une ligne de SUIVI ; IPGEI les attache à
+    la séance réelle. Les deux saisies sont légitimes, mais elles ne vivent pas
+    dans la même table, et les écrans « ABS par étudiant » ne lisaient que la
+    première : une absence pointée à la feuille d'appel d'une épreuve
+    n'apparaissait nulle part, et l'écran affichait « aucune absence » — ce qui
+    est pire que de ne rien afficher du tout.
+
+    Les lignes rendues sont en LECTURE SEULE : leur identifiant est négatif,
+    de sorte qu'aucune action du module (justificatif, changement de statut) ne
+    puisse viser par mégarde une ligne qui n'existe pas dans `absence_presence`.
+    Elles se corrigent depuis Évaluations → Émargement des épreuves.
+
+    Les dates portent sur la SÉANCE, seule date qui ait un sens ici : celle où
+    l'étudiant n'était pas là.
+    """
+    from .models import AbsenceSeance
+
+    lignes = (
+        AbsenceSeance.objects
+        .filter(inscription__etudiant_id=etudiant_id,
+                statut__in=tuple(_STATUT_SOCLE))
+        .select_related('inscription__etudiant', 'inscription__classe',
+                        'seance__matiere', 'seance__prof', 'seance__salle',
+                        'seance__jour', 'seance__creneau', 'seance__type_seance',
+                        'seance__semaine')
+    )
+    if date_debut:
+        lignes = lignes.filter(seance__date__gte=date_debut)
+    if date_fin:
+        lignes = lignes.filter(seance__date__lte=date_fin)
+
+    # Ce qui est DÉJÀ au registre du socle n'est pas présenté une seconde fois.
+    # Une absence reportée par `refleter_absences` y figure comme une présence
+    # ordinaire : la rendre aussi ici la ferait compter double, et l'écran
+    # annoncerait deux absences pour une seule épreuve manquée.
+    from apps.absence.models import Presence
+
+    deja = {
+        (p['suivi__date_suivie'], p['suivi__em_id'])
+        for p in Presence.objects
+        .filter(etudiant_id=etudiant_id)
+        .values('suivi__date_suivie', 'suivi__em_id')
+    }
+
+    presentees = []
+    for ligne in lignes:
+        seance   = ligne.seance
+        etudiant = ligne.inscription.etudiant
+        if (seance.date, getattr(seance.matiere, 'em_miroir_id', None)) in deja:
+            continue
+        presentees.append({
+            # Négatif : la ligne ne vient pas de `absence_presence`, et rien
+            # dans le module ne doit croire pouvoir la modifier.
+            'id':                 -ligne.pk,
+            'suivi':              None,
+            'etudiant':           etudiant.pk,
+            'etudiant_nom':       etudiant.nom,
+            'etudiant_matricule': etudiant.matricule,
+            'statut':             _STATUT_SOCLE[ligne.statut],
+            'statut_label':       ligne.get_statut_display(),
+            'commentaire':        ligne.justificatif or 'Émargement de la séance (IPGEI)',
+            'justificatif':       None,
+            'date_modification':  ligne.date_saisie.isoformat(),
+            'suivi_jour':         seance.jour.jour if seance.jour_id else None,
+            'suivi_date':         seance.date.isoformat() if seance.date else None,
+            'suivi_semaine':      seance.semaine.numero if seance.semaine_id else None,
+            'suivi_prof':         seance.prof.nom if seance.prof_id else None,
+            'suivi_em':           seance.matiere.intitule if seance.matiere_id else None,
+            'suivi_salle':        seance.salle.nom if seance.salle_id else None,
+            'suivi_departement':  ligne.inscription.classe.nom,
+            'suivi_creneau':      seance.creneau.creneau if seance.creneau_id else None,
+            'suivi_type':         (seance.type_seance.type_seance
+                                   if seance.type_seance_id else None),
+        })
+    return presentees
+
+
+def refleter_absences(annee_universitaire: str, type_semestre: str,
+                      numero_semaine=None) -> int:
+    """
+    Reporte l'émargement IPGEI dans le registre du socle (`absence.Presence`).
+
+    **Le registre est celui du socle** — c'est la règle déjà posée par
+    `services.bilan_absences` : « deux registres finissent par diverger ». La
+    feuille d'appel d'une séance IPGEI est une SAISIE, pas un second registre :
+    ce qu'elle relève doit rejoindre `absence_presence`, faute de quoi les
+    écrans ABS, les rapports et les fiches ignorent les épreuves.
+
+    Le raccord passe par la ligne de SUIVI, qui identifie la séance de la même
+    façon des deux côtés : classe, matière (par son miroir), jour, créneau,
+    type de séance et semaine. Une absence dont la séance n'a pas encore de
+    ligne de Suivi n'est pas perdue — elle sera reportée à la génération de la
+    semaine, qui appelle cette fonction.
+
+    Idempotent : rejouer ne crée pas de doublon, `Presence` étant unique par
+    (suivi, étudiant). Ne touche JAMAIS une ligne pointée à la main dans le
+    module ABS avec un autre statut que celui d'origine : on ne récrit que ce
+    qui vient de l'émargement.
+
+    Renvoie le nombre de présences écrites ou mises à jour.
+    """
+    from apps.absence.models import Presence
+    from apps.suivi.models import Suivie
+
+    from .models import AbsenceSeance
+
+    absences = (
+        AbsenceSeance.objects
+        .filter(statut__in=tuple(_STATUT_SOCLE),
+                seance__semaine__semestre__annee_universitaire=annee_universitaire,
+                seance__annulee=False)
+        .select_related('seance__matiere', 'seance__semaine', 'inscription')
+    )
+    if numero_semaine is not None:
+        absences = absences.filter(seance__semaine__numero=numero_semaine)
+
+    absences = [a for a in absences
+                if a.seance.semaine.semestre.type_semestre == type_semestre]
+    if not absences:
+        return 0
+
+    # Les lignes de Suivi candidates, indexées par ce qui identifie une séance.
+    # Un seul aller en base : la semaine d'une classe en porte des dizaines.
+    lignes = Suivie.objects.filter(
+        annee_universitaire=annee_universitaire, type_semestre=type_semestre,
+    )
+    if numero_semaine is not None:
+        lignes = lignes.filter(numero_semaine=numero_semaine)
+
+    index = {
+        (s.numero_semaine, s.departement_id, s.em_id, s.jour_fk_id,
+         s.creneau_fk_id, s.type_seance_fk_id): s.pk
+        for s in lignes
+    }
+
+    ecrites = 0
+    for absence in absences:
+        seance = absence.seance
+        matiere = seance.matiere
+        if matiere is None or matiere.em_miroir_id is None:
+            continue
+        # Le sous-groupe de TP porte sa propre ligne de Suivi ; une épreuve,
+        # elle, se tient en classe entière. On cherche donc l'unité telle que
+        # la projection l'a écrite.
+        unite = seance.sous_groupe_id or seance.classe_id
+        cle = (seance.semaine.numero, unite, matiere.em_miroir_id,
+               seance.jour_id, seance.creneau_id, seance.type_seance_id)
+        suivi_id = index.get(cle)
+        if suivi_id is None:
+            continue
+
+        Presence.objects.update_or_create(
+            suivi_id=suivi_id, etudiant_id=absence.inscription.etudiant_id,
+            defaults={
+                'statut':      _STATUT_SOCLE[absence.statut],
+                'commentaire': absence.justificatif
+                               or "Émargement de l'épreuve (IPGEI)",
+            },
+        )
+        ecrites += 1
+    return ecrites

@@ -56,6 +56,12 @@ ALIAS_ANONYMAT = ('n° anonymat', 'n°anonymat', 'no anonymat', 'anonymat',
                   'numero anonymat', 'numéro anonymat')
 ALIAS_NOTE = ('note /20', 'note', 'note/20', 'note sur 20')
 
+#: Ce qu'un correcteur écrit à la place d'une note quand la copie n'existe pas.
+#: La fiche l'imprime déjà, tiré de l'émargement de l'épreuve ; le classeur doit
+#: donc revenir sans que ces lignes soient rejetées. L'absence vaut ZÉRO, comme
+#: l'épreuve manquée — c'est la règle posée pour les devoirs.
+MARQUEURS_ABSENCE = ('abs', 'absent', 'absente', 'nc')
+
 
 def _texte(valeur) -> str:
     return '' if valeur is None else str(valeur).strip()
@@ -83,16 +89,26 @@ def _valeur_note(brut):
     """
     Note lue d'une cellule : `Decimal`, ou `None` si la case est vide.
 
-    Lève `ValueError` si la cellule contient quelque chose qui n'est pas une
-    note — on ne devine pas, on le dit. La virgule décimale est admise : c'est
-    ainsi qu'un clavier français la produit.
+    « ABS » — et ses variantes — vaut ZÉRO : c'est la règle de l'épreuve
+    manquée, et la fiche du correcteur imprime déjà ce mot sur les lignes des
+    absents, d'après l'émargement de l'épreuve.
+
+    Lève `ValueError` si la cellule contient autre chose : on ne devine pas, on
+    le dit. La virgule décimale est admise, c'est ainsi qu'un clavier français
+    la produit.
     """
     if brut is None or (isinstance(brut, str) and not brut.strip()):
         return None
+    texte = str(brut).strip()
+    if texte.lower().rstrip('.') in MARQUEURS_ABSENCE:
+        # Absent : ZÉRO, et non « rien ». Laisser la case vide reviendrait à
+        # dire « pas encore corrigé », ce qui n'est pas la même chose.
+        return Decimal('0')
     try:
-        valeur = Decimal(str(brut).strip().replace(',', '.'))
+        valeur = Decimal(texte.replace(',', '.'))
     except (InvalidOperation, ValueError):
-        raise ValueError(f'« {brut} » n\'est pas une note.')
+        raise ValueError(
+            f'« {brut} » n\'est pas une note. Pour une absence, écrivez ABS.')
     if not (Decimal('0') <= valeur <= Decimal('20')):
         raise ValueError(f'note {valeur} hors de [0 - 20].')
     return valeur

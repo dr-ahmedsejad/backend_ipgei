@@ -767,6 +767,11 @@ class InscriptionIPGEI(models.Model):
     STATUT_REORIENTE  = 'reoriente'
     STATUT_REDOUBLANT = 'redoublant'
     STATUT_CNIM       = 'autorise_cnim'
+    #: Entre le jury annuel et le jury de rattrapage : l'étudiant n'est ni
+    #: admis à concourir ni écarté, il compose une seconde fois.
+    STATUT_RATTRAPAGE = 'autorise_rattrapage'
+    #: Fin du cursus par la réussite au concours — l'étudiant sort de l'IPGEI.
+    STATUT_SORTANT    = 'sortant'
     STATUT_ABANDON    = 'abandon'
     STATUT_CHOICES    = [
         (STATUT_ACTIF,      'En cours'),
@@ -774,6 +779,8 @@ class InscriptionIPGEI(models.Model):
         (STATUT_REORIENTE,  'Réorienté'),
         (STATUT_REDOUBLANT, 'Redoublant'),
         (STATUT_CNIM,       'Autorisé à concourir (CNIM)'),
+        (STATUT_RATTRAPAGE, 'Autorisé au rattrapage'),
+        (STATUT_SORTANT,    'Sortant — admis au concours'),
         (STATUT_ABANDON,    'Abandon'),
     ]
 
@@ -802,7 +809,26 @@ class InscriptionIPGEI(models.Model):
         'ipgei.LigneDeliberation', on_delete=models.PROTECT,
         null=True, blank=True, related_name='inscriptions_issues',
     )
-    statut              = models.CharField(max_length=15, choices=STATUT_CHOICES, default=STATUT_ACTIF)
+    statut              = models.CharField(max_length=24, choices=STATUT_CHOICES, default=STATUT_ACTIF)
+
+    # ── Concours CNIM ────────────────────────────────────────────────────────
+    # Le résultat vient de l'EXTÉRIEUR : il ne se calcule pas, il se constate.
+    # Il est conservé — plutôt que déduit du statut — pour répondre plus tard à
+    # « pourquoi cet étudiant est-il sortant ? », et pour qu'appliquer deux fois
+    # les situations ne compte pas deux redoublements.
+    CNIM_EN_ATTENTE = ''
+    CNIM_ADMIS      = 'admis'
+    CNIM_NON_ADMIS  = 'non_admis'
+    CNIM_CHOICES    = [
+        (CNIM_EN_ATTENTE, 'En attente du résultat'),
+        (CNIM_ADMIS,      'Admis au concours'),
+        (CNIM_NON_ADMIS,  'Non admis'),
+    ]
+    resultat_cnim      = models.CharField(
+        max_length=10, choices=CNIM_CHOICES, blank=True, default=CNIM_EN_ATTENTE,
+        help_text='Résultat du concours CNIM, saisi ou importé.',
+    )
+    date_resultat_cnim = models.DateTimeField(null=True, blank=True)
     nb_redoublements    = models.PositiveSmallIntegerField(
         default=0,
         help_text='Compteur du droit de redoublement (MP). Au-delà du max, le redoublement est refusé.',
@@ -1244,9 +1270,19 @@ class Deliberation(models.Model):
     la création** puis figés dans la délibération : rejouer un calcul donne
     toujours le même résultat, même si le paramétrage a bougé entre-temps.
     """
-    PORTEE_SEMESTRE = 'semestre'
-    PORTEE_ANNUELLE = 'annuelle'
-    PORTEE_CHOICES  = [(PORTEE_SEMESTRE, 'Semestre'), (PORTEE_ANNUELLE, 'Annuelle')]
+    PORTEE_SEMESTRE  = 'semestre'
+    PORTEE_ANNUELLE  = 'annuelle'
+    #: Le second jury de deuxième année, tenu après la session de rattrapage.
+    #: C'est une délibération À PART, et non une reprise de l'annuelle : deux
+    #: jurys siègent, à deux dates, et chacun signe son procès-verbal. Le PV
+    #: annuel dit « X est autorisé au rattrapage » ; celui-ci dit ce qu'il en
+    #: est advenu. Rouvrir le premier effacerait la première décision.
+    PORTEE_RATTRAPAGE = 'rattrapage'
+    PORTEE_CHOICES  = [
+        (PORTEE_SEMESTRE,  'Semestre'),
+        (PORTEE_ANNUELLE,  'Annuelle'),
+        (PORTEE_RATTRAPAGE, 'Rattrapage'),
+    ]
 
     STATUT_BROUILLON = 'brouillon'
     STATUT_CALCULEE  = 'calculee'
@@ -1274,7 +1310,16 @@ class Deliberation(models.Model):
         related_name='deliberations',
     )
     annee_universitaire = models.CharField(max_length=9)
-    portee              = models.CharField(max_length=10, choices=PORTEE_CHOICES, default=PORTEE_ANNUELLE)
+    portee              = models.CharField(max_length=12, choices=PORTEE_CHOICES, default=PORTEE_ANNUELLE)
+    #: D'où vient la cohorte d'un jury de RATTRAPAGE : le jury annuel qui l'a
+    #: renvoyée au rattrapage. Le lien n'est pas décoratif — il désigne le
+    #: périmètre exact (les lignes « autorisé au rattrapage ») et interdit
+    #: d'ouvrir deux fois le même second jury.
+    jury_source         = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='jurys_rattrapage',
+        help_text='Jury annuel dont ce rattrapage reprend les étudiants.',
+    )
     semestre            = models.ForeignKey(
         SemestreIPGEI, on_delete=models.PROTECT, null=True, blank=True,
         related_name='deliberations',
@@ -1305,11 +1350,22 @@ class Deliberation(models.Model):
 
     def __str__(self):
         cible = self.semestre.code if self.semestre_id else self.annee_universitaire
-        return f'Délibération {self.classe.nom if self.classe_id else self.niveau} {cible}'
+        quoi = ('Jury de rattrapage' if self.portee == self.PORTEE_RATTRAPAGE
+                else 'Délibération')
+        return f'{quoi} {self.classe.nom if self.classe_id else self.niveau} {cible}'
 
     def clean(self):
         if self.portee == self.PORTEE_SEMESTRE and not self.semestre_id:
             raise ValidationError({'semestre': 'Une délibération de semestre doit cibler un semestre.'})
+        if self.portee == self.PORTEE_RATTRAPAGE and not self.jury_source_id:
+            raise ValidationError(
+                {'jury_source': "Un jury de rattrapage reprend les étudiants d'un "
+                                "jury annuel : il ne s'ouvre pas seul."})
+        if (self.jury_source_id
+                and self.jury_source.portee != self.PORTEE_ANNUELLE):
+            raise ValidationError(
+                {'jury_source': 'Le rattrapage suit un jury ANNUEL — un jury de '
+                                "semestre ne prononce rien qui l'appelle."})
         if self.classe_id and self.classe.niveau_code != self.niveau:
             raise ValidationError(
                 {'classe': f'{self.classe.nom} relève du niveau '
@@ -1328,19 +1384,25 @@ class LigneDeliberation(models.Model):
     le jury retient. Quand les deux diffèrent, `motif_ajustement` est exigé —
     l'écart reste ainsi toujours justifié et auditable.
     """
-    # 1re année (MPSI) : admis ou réorienté — pas de redoublement.
+    # 1re année (MPSI) : admis ou réorienté — ni rattrapage, ni redoublement.
     DECISION_ADMIS      = 'admis'
     DECISION_REORIENTE  = 'reoriente'
-    # 2e année (MP) : autorisé CNIM ou redoublant (droit unique).
+    # 2e année (MP). Le jury ANNUEL n'a que deux issues : le seuil est atteint
+    # et l'étudiant concourt, ou il ne l'est pas et il passe par le rattrapage.
+    # On ne va JAMAIS au concours sans passer par là, et le redoublement ne se
+    # prononce pas d'emblée — il ne vient qu'après le rattrapage, ou après un
+    # échec au concours.
     DECISION_CNIM       = 'autorise_cnim'
+    DECISION_RATTRAPAGE = 'autorise_rattrapage'
+    # Prononcés par le jury de RATTRAPAGE, ou après le résultat du concours,
+    # selon que le droit de redoublement est encore ouvert.
     DECISION_REDOUBLANT = 'redoublant'
-    DECISION_EXCLU      = 'exclu'
     DECISION_CHOICES    = [
         (DECISION_ADMIS,      'Admis en 2e année'),
         (DECISION_REORIENTE,  'Réorienté'),
         (DECISION_CNIM,       'Autorisé à concourir (CNIM)'),
+        (DECISION_RATTRAPAGE, 'Autorisé au rattrapage'),
         (DECISION_REDOUBLANT, 'Redoublant'),
-        (DECISION_EXCLU,      'Exclu — droit de redoublement épuisé'),
     ]
 
     deliberation      = models.ForeignKey(
@@ -1352,8 +1414,8 @@ class LigneDeliberation(models.Model):
     moyenne_generale  = _note_field(null=True, blank=True)
     total_coefficients = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     rang              = models.PositiveSmallIntegerField(null=True, blank=True)
-    decision_auto     = models.CharField(max_length=15, choices=DECISION_CHOICES, blank=True, default='')
-    decision          = models.CharField(max_length=15, choices=DECISION_CHOICES, blank=True, default='')
+    decision_auto     = models.CharField(max_length=24, choices=DECISION_CHOICES, blank=True, default='')
+    decision          = models.CharField(max_length=24, choices=DECISION_CHOICES, blank=True, default='')
     motif_ajustement  = models.TextField(blank=True, default='')
     observations      = models.TextField(blank=True, default='')
 
@@ -1362,7 +1424,10 @@ class LigneDeliberation(models.Model):
     # l'inscription. Sans eux, dévalider un jury ne saurait pas quoi restaurer :
     # remettre « actif » d'office effacerait un redoublement antérieur, et
     # décrémenter à l'aveugle fausserait le droit au redoublement.
-    statut_avant           = models.CharField(max_length=15, blank=True, default='')
+    # Même largeur que `InscriptionIPGEI.statut` : c'est une COPIE de ce champ,
+    # et la laisser plus courte faisait échouer la validation dès qu'un statut
+    # dépassait quinze caractères — « autorise_rattrapage » en fait dix-neuf.
+    statut_avant           = models.CharField(max_length=24, blank=True, default='')
     nb_redoublements_avant = models.PositiveSmallIntegerField(null=True, blank=True)
 
     class Meta:

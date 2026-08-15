@@ -29,8 +29,10 @@ logger = logging.getLogger('siga')
 
 TEMPLATE = 'ipgei/pv_deliberation.html'
 
-# Paysage : le tableau porte le rang, la moyenne, les deux décisions et le
-# motif. En portrait, la colonne des motifs devient illisible.
+# Paysage : sur un PV annuel, le tableau porte le rang, la moyenne, les deux
+# décisions et le motif — en portrait, la colonne des motifs devient illisible.
+# Le PV de semestre, plus étroit, s'en accommode aussi : garder une seule
+# orientation évite deux gabarits à maintenir.
 OPTIONS_PDF = {
     'page-size':    'A4',
     'orientation':  'Landscape',
@@ -85,6 +87,73 @@ def _moyennes_par_semestre(lignes, codes: list) -> None:
         ]
 
 
+def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
+    """
+    Pose sur chaque ligne son rang DANS SA CLASSE et son rang SUR LA PROMOTION.
+
+    Un jury de semestre ne décide de rien : ce qu'il arrête, c'est un
+    classement. Encore faut-il dire lequel — la promotion de MPSI est répartie
+    en MPSI A et MPSI B, et le PV d'une classe ne montrait qu'un rang, sans
+    dire s'il valait dans la classe ou dans la promotion. Un premier de MPSI B
+    peut être quinzième de sa promotion.
+
+    Les moyennes des étudiants DÉLIBÉRÉS sont celles du jury, telles qu'elles
+    ont été figées : le PV doit dire ce que le jury a vu. Celles des autres
+    classes du niveau sont calculées à la même règle — absents comptés zéro —
+    pour que la comparaison ait un sens.
+
+    Renvoie les effectifs classés, que le cartouche annonce : « 17ᵉ » ne se lit
+    pas sans savoir sur combien.
+    """
+    from .models import InscriptionIPGEI
+
+    semestre = deliberation.semestre
+    if semestre is None:
+        return {}
+
+    figees = {l.inscription_id: l.moyenne_generale for l in lignes
+              if l.moyenne_generale is not None}
+    moyennes = {}
+    for inscription in (InscriptionIPGEI.objects
+                        .filter(actif=True,
+                                annee_universitaire=deliberation.annee_universitaire,
+                                classe__niveau_id=deliberation.classe.niveau_id
+                                if deliberation.classe_id else None)
+                        .select_related('classe')
+                        if deliberation.classe_id else
+                        InscriptionIPGEI.objects
+                        .filter(actif=True,
+                                annee_universitaire=deliberation.annee_universitaire,
+                                classe__niveau__niveau=deliberation.niveau)
+                        .select_related('classe')):
+        valeur = figees.get(inscription.pk)
+        if valeur is None:
+            valeur, _, _ = services.moyenne_semestrielle(
+                inscription, semestre, absents_a_zero=True)
+        if valeur is not None:
+            moyennes[inscription.pk] = (Decimal(valeur), inscription.classe_id)
+
+    for ligne in lignes:
+        mienne = moyennes.get(ligne.inscription_id)
+        if mienne is None:
+            ligne.rang_classe = ligne.rang_promotion = None
+            continue
+        valeur, classe_id = mienne
+        ligne.rang_classe = 1 + sum(
+            1 for v, c in moyennes.values() if c == classe_id and v > valeur)
+        ligne.rang_promotion = 1 + sum(
+            1 for v, _ in moyennes.values() if v > valeur)
+
+    classes = {c for _, c in moyennes.values()}
+    return {
+        'classes_du_niveau': len(classes),
+        'effectif_promotion': len(moyennes),
+        'effectif_classe': (
+            sum(1 for _, c in moyennes.values()
+                if c == deliberation.classe_id) if deliberation.classe_id else None),
+    }
+
+
 def _libelle_decision(code: str) -> str:
     return dict(LigneDeliberation.DECISION_CHOICES).get(code, '')
 
@@ -102,6 +171,12 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
     )
     if codes_semestres:
         _moyennes_par_semestre(lignes, codes_semestres)
+
+    # Un jury de SEMESTRE ne décide de rien : son PV n'a ni seuil, ni décision,
+    # ni motif d'écart — trois colonnes vides sur toute la hauteur de la page.
+    # Il porte à la place ce qu'il arrête vraiment : deux classements.
+    semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
+    effectifs = _poser_rangs(deliberation, lignes) if semestrielle else {}
 
     # Répartition des décisions : le jury la relit avant de signer, et elle
     # évite de recompter à la main sur une promotion de 80 élèves.
@@ -128,6 +203,9 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
                            if deliberation.semestre_id else 'Année complète'),
         'lignes':        lignes,
         'effectif':      len(lignes),
+        'semestrielle':  semestrielle,
+        'effectif_classe':    effectifs.get('effectif_classe'),
+        'effectif_promotion': effectifs.get('effectif_promotion'),
         'membres':       membres,
         'repartition':   [
             {'libelle': _libelle_decision(code), 'nombre': nombre}
@@ -165,9 +243,12 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     feuille['A1'] = (f'{services.libelle_pv(deliberation)} — '
                      f'{deliberation.annee_universitaire}')
     feuille['A1'].font = Font(bold=True, size=13, color='006633')
+    # Le seuil ne sert qu'à proposer une décision : un PV de semestre n'en
+    # prononce aucune, l'annoncer laisserait croire à une validation.
+    semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
     feuille['A2'] = (f'{"Semestre " + deliberation.semestre.code if deliberation.semestre_id else "Année complète"}'
-                     f' · Seuil {deliberation.seuil_validation} · '
-                     f'{deliberation.get_statut_display()}'
+                     + ('' if semestrielle else f' · Seuil {deliberation.seuil_validation}')
+                     + f' · {deliberation.get_statut_display()}'
                      f'{" — PROJET, non validé" if deliberation.statut != Deliberation.STATUT_VALIDEE else ""}')
     feuille['A2'].font = Font(size=9, italic=True, color='555555')
 
@@ -178,7 +259,21 @@ def generer_excel(deliberation: Deliberation) -> bytes:
         services.codes_semestres_du_niveau(deliberation.niveau, deliberation.institution)
         if deliberation.portee == Deliberation.PORTEE_ANNUELLE else []
     )
-    entetes = EN_TETES[:4] + list(codes_semestres) + EN_TETES[4:]
+    # Sur un PV de semestre, la colonne « Rang » du jury répéterait l'une des
+    # deux colonnes de rang : elle cède la place.
+    tete = EN_TETES[1:4] if semestrielle else EN_TETES[:4]
+    # Plus de « Décision proposée » : le procès-verbal rend ce que le jury a
+    # prononcé, pas ce que le calcul suggérait. La proposition reste visible à
+    # l'écran, où elle sert à délibérer ; sur la pièce signée, elle laissait
+    # croire à deux décisions concurrentes.
+    queue = (['Rang classe', 'Rang promotion', 'Observations'] if semestrielle
+             else EN_TETES[7:])
+    # Le total des coefficients ne varie pas d'un étudiant à l'autre dans une
+    # même classe : sur un PV de semestre, la colonne répétait vingt-cinq fois
+    # le même nombre. Le PV annuel la garde — la moyenne y agrège deux
+    # semestres, et le poids permet de la refaire.
+    milieu = EN_TETES[4:5] if semestrielle else EN_TETES[4:6]
+    entetes = tete + list(codes_semestres) + milieu + queue
     for colonne, libelle in enumerate(entetes, start=1):
         cellule = feuille.cell(row=4, column=colonne, value=libelle)
         cellule.fill, cellule.font, cellule.border = vert, blanc, bordure
@@ -187,35 +282,47 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     lignes = list(_lignes(deliberation))
     if codes_semestres:
         _moyennes_par_semestre(lignes, codes_semestres)
+    if semestrielle:
+        _poser_rangs(deliberation, lignes)
 
     for index, ligne in enumerate(lignes, start=5):
         etudiant = ligne.inscription.etudiant
         valeurs = [
-            ligne.rang,
+            *([] if semestrielle else [ligne.rang]),
             etudiant.matricule,
             getattr(etudiant, 'nom_display', None) or etudiant.nom,
             ligne.inscription.classe.nom,
             *[float(m) if m is not None else None
               for m in getattr(ligne, 'par_semestre', [])],
             float(ligne.moyenne_generale) if ligne.moyenne_generale is not None else None,
-            float(ligne.total_coefficients) if ligne.total_coefficients is not None else None,
-            _libelle_decision(ligne.decision_auto),
-            _libelle_decision(ligne.decision),
-            ligne.motif_ajustement,
+            *([] if semestrielle else
+              [float(ligne.total_coefficients)
+               if ligne.total_coefficients is not None else None]),
+            # Les rangs restent des NOMBRES : le classeur sert à retrier, et
+            # « 17e/25 » ne se trie pas.
+            *([getattr(ligne, 'rang_classe', None),
+               getattr(ligne, 'rang_promotion', None)] if semestrielle
+              else [_libelle_decision(ligne.decision),
+                    ligne.motif_ajustement]),
             ligne.observations,
         ]
         # Les colonnes numériques suivent le nombre de semestres insérés : les
         # figer à (5, 6) laissait la moyenne générale en texte dès qu'une
         # colonne s'ajoutait devant.
-        numeriques = set(range(5, 5 + len(codes_semestres) + 2))
+        # Le décalage suit la colonne « Rang » retirée sur un PV de semestre.
+        depart = 4 if semestrielle else 5
+        numeriques = set(range(
+            depart, depart + len(codes_semestres) + (1 if semestrielle else 2)))
         for colonne, valeur in enumerate(valeurs, start=1):
             cellule = feuille.cell(row=index, column=colonne, value=valeur)
             cellule.border = bordure
             if colonne in numeriques:
                 cellule.number_format = '0.00'
 
-    largeurs = ([7, 16, 30, 12] + [9] * len(codes_semestres)
-                + [15, 12, 24, 24, 34, 26])
+    largeurs = (([16, 30, 12] if semestrielle else [7, 16, 30, 12])
+                + [9] * len(codes_semestres)
+                + ([15] if semestrielle else [15, 12])
+                + ([14, 16, 26] if semestrielle else [24, 34, 26]))
     for index_colonne, largeur in enumerate(largeurs, start=1):
         feuille.column_dimensions[
             get_column_letter(index_colonne)].width = largeur

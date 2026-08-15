@@ -1022,6 +1022,26 @@ class SignataireIPGEIViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelVi
         instance.save(update_fields=['actif', 'par_defaut'])
 
 
+def _epreuve_demandee(donnees) -> dict:
+    """
+    L'épreuve désignée par l'écran : `{'type': 'DS', 'date': '2027-03-12'}`.
+
+    Rendue vide si rien n'est demandé — la fiche couvre alors toutes les
+    épreuves du semestre, comme avant. C'est le comportement le moins
+    surprenant pour un appel qui ne connaîtrait pas encore ce paramètre.
+    """
+    type_epreuve = (donnees.get('epreuve_type') or '').strip().upper()
+    date_epreuve = (donnees.get('epreuve_date') or '').strip()
+    if not type_epreuve:
+        return {}
+    from . import secretariat
+    if type_epreuve not in secretariat.TYPES_EPREUVE:
+        raise ValidationError(
+            {'epreuve_type': f"« {type_epreuve} » n'est pas un type d'épreuve. "
+                             f"Attendu : {', '.join(secretariat.TYPES_EPREUVE)}."})
+    return {'type': type_epreuve, 'date': date_epreuve or None}
+
+
 class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
                                     RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     """
@@ -1160,6 +1180,31 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
             for ligne in lignes
         ])
 
+    @action(detail=True, methods=['get'], url_path='epreuves-tenues')
+    def epreuves_tenues(self, request, pk=None):
+        """
+        Les épreuves de la matière qui ont EU LIEU, d'après le pointage du Suivi.
+
+        Une fiche de collecte porte sur UNE épreuve : sans ce choix, les
+        absences de tous les devoirs du semestre se retrouvaient sur la même
+        feuille. Seules celles marquées « Fait » sont proposées — une séance
+        planifiée n'est pas une épreuve tenue, et ses copies n'existent pas.
+
+        `matiere` est requise : le pointage se rattache à l'enseignement, et
+        « toutes matières confondues » n'aurait pas de sens ici.
+        """
+        from . import secretariat
+
+        session = self.get_object()
+        identifiant = request.query_params.get('matiere')
+        if not identifiant:
+            return Response([])
+
+        matiere = Matiere.objects.filter(pk=identifiant).first()
+        if matiere is None:
+            raise ValidationError({'matiere': 'Matière introuvable.'})
+        return Response(secretariat.epreuves_tenues(matiere, session.semestre))
+
     @action(detail=True, methods=['get'], url_path='export-secretariat')
     def export_secretariat(self, request, pk=None):
         """
@@ -1230,23 +1275,37 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
         if not isinstance(lots, list):
             raise ValidationError({'lots': 'Liste de lots attendue.'})
 
-        if str(request.data.get('apercu', '')).lower() in ('1', 'true', 'on'):
-            return Response(self._executer(secretariat.repartir, session, lots, niveau))
-
         matiere = None
         if request.data.get('matiere'):
             matiere = Matiere.objects.filter(pk=request.data['matiere']).first()
             if matiere is None:
                 raise ValidationError({'matiere': 'Matière introuvable.'})
 
+        # L'ÉPREUVE désignée : `{type, date}`, prise dans la liste de celles que
+        # le Suivi déclare tenues. Sans elle, les absents de tous les devoirs du
+        # semestre se retrouvent sur la même fiche.
+        epreuve = _epreuve_demandee(request.data)
+
+        # La matière vaut aussi pour l'aperçu : c'est elle qui rattache
+        # l'émargement de l'épreuve aux numéros, et l'écran doit annoncer
+        # combien de copies manquent AVANT qu'on imprime les fiches.
+        if str(request.data.get('apercu', '')).lower() in ('1', 'true', 'on'):
+            return Response(self._executer(
+                secretariat.repartir, session, lots, niveau, matiere, epreuve))
+
         libelle = _nom_fichier(
             f'collecte_{session.semestre.code}_{niveau or "tous"}'
-            + (f'_{matiere.code}' if matiere else ''))
+            + (f'_{matiere.code}' if matiere else '')
+            # La date dans le NOM DU FICHIER : deux devoirs de la même matière
+            # produisaient jusqu'ici deux pièces jointes homonymes, que la
+            # seconde écrasait dans le dossier de téléchargement.
+            + (f"_{epreuve['date']}" if epreuve and epreuve.get('date') else ''))
         # Le classeur se REVERSE par Notes → Import Excel : c'est le même
         # format que la fiche de collecte, et c'est ce qui ferme la boucle.
         if (request.data.get('sortie') or 'pdf').lower() == 'excel':
             contenu = self._executer(
-                secretariat.generer_repartition_excel, session, lots, niveau, matiere)
+                secretariat.generer_repartition_excel, session, lots, niveau,
+                matiere, epreuve)
             reponse = HttpResponse(
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
@@ -1255,7 +1314,8 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
             return reponse
 
         contenu = self._executer(
-            secretariat.generer_repartition_pdf, session, lots, niveau, matiere)
+            secretariat.generer_repartition_pdf, session, lots, niveau,
+            matiere, epreuve)
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
         return reponse
@@ -1644,7 +1704,20 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
                 note, _ = Note.objects.get_or_create(
                     inscription_id=ligne['inscription'], matiere=matiere, semestre=semestre,
                 )
+                # Une note verrouillée par le jury annuel accepte encore SA
+                # NOTE DE RATTRAPAGE, et elle seule : la session se compose
+                # après le jury, et l'interdire rendait la seconde chance
+                # inapplicable. Le reste de la ligne, lui, reste figé.
                 if note.verrouillee:
+                    if 'note_rattrapage' not in ligne:
+                        continue
+                    note.note_rattrapage = ligne['note_rattrapage']
+                    note.save(update_fields=['note_rattrapage', 'date_modification'])
+                    self._executer(services.calculer_note, note,
+                                   plafond_rattrapage=plafond,
+                                   rattrapage_seulement=True)
+                    traitees += 1
+                    classes.add(note.inscription.classe_id)
                     continue
 
                 if 'note_tp' in ligne:
@@ -2109,6 +2182,82 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         deliberation.refresh_from_db()
         return Response(self.get_serializer(deliberation).data)
 
+    @action(detail=True, methods=['get'], url_path='pv-final')
+    def pv_final(self, request, pk=None):
+        """
+        Le PV FINAL : tout le parcours en une pièce.
+
+        Session normale, rattrapage, concours, situation arrêtée. Il ne
+        prononce rien — tout y a été décidé ailleurs —, et se tire donc du jury
+        ANNUEL, seul à définir la promotion entière.
+        """
+        from django.http import HttpResponse
+
+        from . import pv_final as pieces
+
+        deliberation = self.get_object()
+        excel = (request.query_params.get('sortie') or 'pdf').lower() == 'excel'
+        libelle = _nom_fichier(
+            f'PV-final-{deliberation.niveau}-'
+            f'{deliberation.classe.nom if deliberation.classe_id else "niveau"}-'
+            f'{deliberation.annee_universitaire}')
+
+        if excel:
+            contenu = self._executer(pieces.generer_excel, deliberation)
+            reponse = HttpResponse(
+                contenu,
+                content_type='application/vnd.openxmlformats-officedocument.'
+                             'spreadsheetml.sheet')
+            reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+            return reponse
+
+        contenu = self._executer(pieces.generer_pdf, deliberation,
+                                 base_url=request.build_absolute_uri('/')[:-1])
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        return reponse
+
+    @action(detail=True, methods=['post'], url_path='ouvrir-rattrapage')
+    def ouvrir_rattrapage(self, request, pk=None):
+        """
+        Ouvre le second jury, celui qui suit la session de rattrapage.
+
+        Rendu déjà calculé : sa cohorte est connue — les étudiants que ce
+        jury-ci a renvoyés au rattrapage —, et un jury qu'il faudrait
+        « calculer » avant de voir qui il concerne se lirait comme une coquille.
+
+        Rejoué, il rend le jury existant plutôt que d'en créer un second.
+        """
+        annuelle = self.get_object()
+        rattrapage = self._executer(
+            services.ouvrir_jury_rattrapage, annuelle, _utilisateur(request))
+        return Response(self.get_serializer(rattrapage).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='notes-rattrapage',
+            pagination_class=NoPagination)
+    def notes_rattrapage(self, request, pk=None):
+        """
+        Saisie des notes de rattrapage, sur le jury qui désigne les concernés.
+
+        GET  → la grille : les étudiants du jury × toutes les matières de
+               l'année, chaque case rappelant la moyenne de session normale.
+        POST → `{saisies: [{inscription, matiere, note_rattrapage}]}`. Une
+               valeur nulle efface le rattrapage. Le jury est recalculé dans la
+               foulée, sans quoi ses décisions resteraient établies sur des
+               moyennes périmées.
+        """
+        deliberation = self.get_object()
+        if request.method == 'GET':
+            return Response(self._executer(services.grille_rattrapage, deliberation))
+
+        saisies = request.data.get('saisies') or []
+        if not isinstance(saisies, list):
+            raise ValidationError({'saisies': 'Liste de saisies attendue.'})
+        bilan = self._executer(services.saisir_rattrapage, deliberation, saisies)
+        deliberation.refresh_from_db()
+        return Response({**bilan,
+                         'deliberation': self.get_serializer(deliberation).data})
+
     @action(detail=True, methods=['get'], url_path='lignes', pagination_class=NoPagination)
     def lignes(self, request, pk=None):
         deliberation = self.get_object()
@@ -2119,7 +2268,11 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         )
         if request.query_params.get('classe'):
             qs = qs.filter(inscription__classe_id=request.query_params['classe'])
-        return Response(LigneDeliberationListSerializer(qs, many=True).data)
+        # C'est CET endpoint que l'écran de jury interroge : sans le contexte,
+        # ses colonnes de rang sortaient vides alors que l'autre viewset, lui,
+        # les servait bien.
+        return Response(LigneDeliberationListSerializer(
+            qs, many=True, context=_contexte_rangs(deliberation)).data)
 
     @action(detail=True, methods=['get'], url_path='statistiques')
     def statistiques(self, request, pk=None):
@@ -2131,6 +2284,9 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         for ligne in lignes:
             cle = ligne.decision or 'sans_decision'
             repartition[cle] = repartition.get(cle, 0) + 1
+        # Ce que la règle de l'épreuve non rendue va coûter — le jury doit le
+        # lire AVANT de valider, pas le découvrir aux moyennes.
+        lacunes = services.lacunes_deliberation(deliberation)
         return Response({
             'effectif':     len(lignes),
             'notes_saisies': len(moyennes),
@@ -2138,6 +2294,8 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
             'meilleure':    max(moyennes) if moyennes else None,
             'plus_faible':  min(moyennes) if moyennes else None,
             'repartition':  repartition,
+            'lacunes':      lacunes,
+            'matieres_vides': sum(1 for l in lacunes if l['totale']),
         })
 
     @action(detail=True, methods=['post'], url_path='devalider')
@@ -2269,6 +2427,169 @@ def _nom_pv(deliberation) -> str:
     return _nom_fichier(f'PV_{deliberation.niveau}_{cible}_{deliberation.annee_universitaire}')
 
 
+class ConcoursCNIMViewSet(_ErreurMetierMixin, GenericViewSet):
+    """
+    Résultat du concours CNIM, et situation de fin de cursus.
+
+    Ce n'est pas un jury : le concours est externe, son résultat se constate.
+    La conséquence, elle, est mécanique — et c'est pourquoi elle s'applique en
+    un geste, après un aperçu.
+    """
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_deliberation'
+    queryset           = InscriptionIPGEI.objects.none()
+    serializer_class   = None
+    pagination_class   = NoPagination
+
+    def _perimetre(self, request):
+        annee = (request.query_params.get('annee_universitaire')
+                 or request.data.get('annee_universitaire') or '').strip()
+        if not annee:
+            raise ValidationError({'annee_universitaire': 'Année requise.'})
+        niveau = (request.query_params.get('niveau')
+                  or request.data.get('niveau') or '').strip()
+        return annee, niveau, _institution_principale()
+
+    @action(detail=False, methods=['get'], url_path='grille')
+    def grille(self, request):
+        """Les candidats, leur résultat, et la situation qui en découlerait."""
+        from . import concours
+
+        annee, niveau, institution = self._perimetre(request)
+        return Response(self._executer(concours.grille, annee, niveau, institution))
+
+    @action(detail=False, methods=['post'], url_path='saisir')
+    def saisir(self, request):
+        """`{saisies: [{inscription, resultat}]}` — vide remet en attente."""
+        from . import concours
+
+        saisies = request.data.get('saisies') or []
+        if not isinstance(saisies, list):
+            raise ValidationError({'saisies': 'Liste de saisies attendue.'})
+        return Response(self._executer(concours.saisir, saisies))
+
+    @action(detail=False, methods=['post'], url_path='importer',
+            parser_classes=[MultiPartParser, FormParser])
+    def importer(self, request):
+        """
+        Import de la LISTE DES ADMIS.
+
+        `liste_definitive` bascule les absents en « non admis » — un geste
+        explicite : une liste d'admis ne dit rien des autres tant qu'on ne la
+        déclare pas complète.
+        """
+        from . import concours
+
+        fichier = request.FILES.get('fichier')
+        if fichier is None:
+            raise ValidationError({'fichier': 'Aucun fichier reçu.'})
+        annee, niveau, institution = self._perimetre(request)
+        definitive = str(request.data.get('liste_definitive', '')).lower() in (
+            '1', 'true', 'on', 'oui')
+        return Response(self._executer(
+            concours.importer_admis, fichier, annee, niveau, institution,
+            definitive))
+
+    @action(detail=False, methods=['get'], url_path='modele')
+    def modele(self, request):
+        """
+        Le classeur à remplir, pré-rempli des candidats autorisés.
+
+        Il se reverse par l'import de cet écran : le tour est complet, et on n'y
+        retape aucun matricule.
+        """
+        from django.http import HttpResponse
+
+        from . import concours
+
+        annee, niveau, institution = self._perimetre(request)
+        contenu = self._executer(concours.modele_excel, annee, niveau, institution)
+        libelle = _nom_fichier(f'CNIM_{niveau or "2e-annee"}_{annee}')
+        reponse = HttpResponse(
+            contenu,
+            content_type='application/vnd.openxmlformats-officedocument.'
+                         'spreadsheetml.sheet')
+        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+        return reponse
+
+    @action(detail=False, methods=['post'], url_path='appliquer')
+    def appliquer(self, request):
+        """
+        Pose les situations. `apercu=true` montre ce qui changerait sans rien
+        écrire — un redoublement compté ne se reprend pas d'un clic.
+        """
+        from . import concours
+
+        annee, niveau, institution = self._perimetre(request)
+        apercu = str(request.data.get('apercu', '')).lower() in ('1', 'true', 'on')
+        return Response(self._executer(
+            concours.appliquer, annee, niveau, institution, apercu))
+
+
+class ClassementS3ViewSet(_ErreurMetierMixin, GenericViewSet):
+    """
+    Classement de S3 — la feuille de travail de la séance d'affectation.
+
+    Deux exports et un aperçu. Ce n'est ni un jury ni un document officiel : il
+    ne passe pas par le registre, ne porte pas de numéro de série, et s'édite
+    autant de fois qu'on veut. C'est ce qu'on demande d'une pièce préparatoire,
+    qu'on réimprime dès qu'une note bouge.
+    """
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_deliberation'
+    queryset           = InscriptionIPGEI.objects.none()
+    serializer_class   = None
+    pagination_class   = NoPagination
+
+    @action(detail=False, methods=['get'], url_path='s3')
+    def s3(self, request):
+        """
+        `sortie` vaut `pdf`, `excel`, ou rien du tout — l'aperçu JSON, dont
+        l'écran se sert pour annoncer l'effectif avant de produire quoi que ce
+        soit.
+        """
+        from django.http import HttpResponse
+
+        from . import classement
+
+        annee = (request.query_params.get('annee_universitaire') or '').strip()
+        if not annee:
+            raise ValidationError({'annee_universitaire': 'Année requise.'})
+        niveau = (request.query_params.get('niveau') or '').strip()
+        classe = (request.query_params.get('classe') or '').strip() or None
+        institution = _institution_principale()
+
+        sortie = (request.query_params.get('sortie') or '').lower()
+        if not sortie:
+            return Response([
+                {'rang':            ligne['rang'],
+                 'matricule':       ligne['matricule'],
+                 'nom':             ligne['nom'],
+                 'classe':          ligne['classe'],
+                 'moyenne_annee1':  ligne['moyenne_annee1'],
+                 'annee1':          ligne['annee1'],
+                 'moyenne_s3':      ligne['moyenne_s3']}
+                for ligne in classement.lignes(annee, niveau, institution, classe)
+            ])
+
+        libelle = _nom_fichier(f'classement_S3_{niveau or "2e-annee"}_{annee}')
+        if sortie == 'excel':
+            contenu = self._executer(
+                classement.generer_excel, annee, niveau, institution, classe)
+            reponse = HttpResponse(
+                contenu,
+                content_type='application/vnd.openxmlformats-officedocument.'
+                             'spreadsheetml.sheet')
+            reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+            return reponse
+
+        contenu = self._executer(
+            classement.generer_pdf, annee, niveau, institution, classe)
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        return reponse
+
+
 class MembreJuryIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixin,
                              CreateModelMixin, DestroyModelMixin, GenericViewSet):
     """
@@ -2284,6 +2605,55 @@ class MembreJuryIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMi
     queryset           = MembreJuryIPGEI.objects.select_related('utilisateur', 'deliberation')
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
     filterset_fields   = ['deliberation', 'role']
+
+    @action(detail=False, methods=['get'], url_path='candidats')
+    def candidats(self, request):
+        """
+        Qui peut siéger : tout compte actif, SAUF les étudiants.
+
+        Un jury juge des étudiants — aucun n'y siège. Le reste de
+        l'établissement en revanche peut y être appelé : direction, scolarité,
+        responsables de filière, enseignants, et jusqu'à l'informatique quand
+        c'est elle qui tient le procès-verbal. Énumérer les rôles admis aurait
+        fermé la porte à celui qu'on ajoute demain ; on énumère donc le seul
+        qui est exclu.
+
+        Endpoint DÉDIÉ plutôt que la liste des comptes : celle-ci est réservée
+        aux administrateurs, si bien que le champ restait vide — sans le dire —
+        pour un président de jury ou un agent de scolarité. Il n'était pas
+        question d'ouvrir le registre des comptes pour autant : on n'expose ici
+        qu'un identifiant, un nom et un rôle, sous le module du jury.
+
+        `search` filtre sur le nom et l'identifiant : la liste se cherche, elle
+        ne se déroule pas — un établissement compte vite cent comptes.
+        """
+        from apps.authentication.models import CustomUser
+
+        comptes = (CustomUser.objects
+                   .filter(is_active=True)
+                   .exclude(role='etudiant')
+                   .order_by('name', 'username'))
+
+        recherche = (request.query_params.get('search') or '').strip()
+        if recherche:
+            comptes = comptes.filter(
+                Q(name__icontains=recherche) | Q(username__icontains=recherche))
+
+        # Ceux qui siègent déjà ne sont pas des candidats : les proposer
+        # inviterait à un doublon que le serveur refuse ensuite.
+        deja = request.query_params.get('deliberation')
+        if deja:
+            comptes = comptes.exclude(
+                pk__in=MembreJuryIPGEI.objects
+                .filter(deliberation_id=deja).values_list('utilisateur_id', flat=True))
+
+        return Response([
+            {'id': compte.pk,
+             'nom': compte.name or compte.username,
+             'role': compte.role,
+             'role_display': compte.get_role_display()}
+            for compte in comptes[:200]
+        ])
     ordering           = ['deliberation', 'id']
     pagination_class   = NoPagination
 
@@ -2302,6 +2672,40 @@ class MembreJuryIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMi
         self._executer(services.retirer_membre_jury, instance)
 
 
+def _contexte_rangs(deliberation) -> dict:
+    """
+    Les deux classements d'un jury de SEMESTRE, prêts pour le sérialiseur.
+
+    Ils ne se lisent pas sur la ligne : le rang du jury vaut dans le périmètre
+    délibéré — la classe, quand la délibération en vise une — et ne dit rien de
+    la promotion. C'est pourtant ce second chiffre qui situe l'étudiant dans le
+    concours à venir, et c'est celui que porte le PV.
+
+    Le calcul est celui du PV, appelé tel quel : l'écran et le document doivent
+    dire la même chose, et deux calculs séparés finissent toujours par
+    diverger. Rien n'est stocké — le rang de promotion dépend de l'état des
+    autres classes du niveau, qui bouge sans que cette délibération change.
+
+    Rendu vide hors jury de semestre : un jury annuel prononce des décisions,
+    pas un classement.
+    """
+    if deliberation is None or deliberation.portee != Deliberation.PORTEE_SEMESTRE:
+        return {}
+
+    from . import pv
+
+    lignes = list(pv._lignes(deliberation))
+    effectifs = pv._poser_rangs(deliberation, lignes)
+    return {
+        'rangs_semestriels': {
+            ligne.pk: {'rang_classe': ligne.rang_classe,
+                       'rang_promotion': ligne.rang_promotion}
+            for ligne in lignes
+        },
+        'effectifs_semestriels': effectifs,
+    }
+
+
 class LigneDeliberationViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     """Ajustement des décisions par le jury (motif obligatoire si dérogation)."""
     serializer_class   = LigneDeliberationSerializer
@@ -2317,6 +2721,22 @@ class LigneDeliberationViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelMi
     search_fields      = ['inscription__etudiant__nom', 'inscription__etudiant__matricule']
     ordering           = ['rang']
     pagination_class   = StandardPagination
+
+    def get_serializer_context(self):
+        """
+        Ajoute les deux classements d'un jury de semestre (voir `_contexte_rangs`).
+
+        Le calcul suppose de connaître le périmètre : il n'a lieu que sur une
+        liste filtrée par délibération. Une consultation sans filtre rend les
+        rangs nuls plutôt qu'une valeur calculée sur un mélange de jurys.
+        """
+        contexte = super().get_serializer_context()
+        identifiant = self.request.query_params.get('deliberation') if self.request else None
+        if self.action != 'list' or not identifiant:
+            return contexte
+        contexte.update(_contexte_rangs(
+            Deliberation.objects.filter(pk=identifiant).first()))
+        return contexte
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2431,8 +2851,23 @@ class SeanceReelleViewSet(_ErreurMetierMixin, ModelViewSet):
         'prof', 'prof_initial', 'salle', 'sous_groupe',
     ).annotate(nb_absents_annote=Count('absences', distinct=True))
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields   = ['classe', 'semaine', 'semaine__semestre', 'prof', 'matiere',
-                          'salle', 'jour', 'annulee', 'sous_groupe']
+    # Forme étendue pour un seul besoin : `type_seance__type_seance__in`.
+    # L'écran d'émargement cherche LES ÉPREUVES — « EF » et « DS » ensemble —
+    # par leur libellé de référentiel, sans avoir à connaître les clés de
+    # « Paramètres → Séances », qui diffèrent d'une base à l'autre.
+    filterset_fields   = {
+        'classe':          ['exact'],
+        'semaine':         ['exact'],
+        'semaine__semestre': ['exact'],
+        'prof':            ['exact'],
+        'matiere':         ['exact'],
+        'salle':           ['exact'],
+        'jour':            ['exact'],
+        'annulee':         ['exact'],
+        'sous_groupe':     ['exact'],
+        'type_seance':     ['exact'],
+        'type_seance__type_seance': ['exact', 'in'],
+    }
     ordering           = ['semaine', 'jour_id', 'creneau__ordre']
     pagination_class   = NoPagination
 

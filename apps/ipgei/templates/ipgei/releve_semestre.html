@@ -256,7 +256,7 @@ Les écarts tiennent au cursus, pas au goût :
       <tr>
         <td class="sum-lbl-fr">Total des coefficients</td>
         <td class="sum-val">{{ total_coefficients|floatformat:"-2"|default:"—" }}</td>
-        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">مجموع المعاملات</span></td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">مجموع الضوارب</span></td>
       </tr>
       <tr>
         <td class="sum-lbl-fr">Moyenne du semestre</td>
@@ -268,23 +268,39 @@ Les écarts tiennent au cursus, pas au goût :
         seul noté le faisait disparaître sans explication d'un relevé où toutes
         les autres lignes du bloc étaient là — on le croyait oublié.
       {% endcomment %}
+      {% comment %}
+        Deux lignes distinctes, et non deux chiffres sur la même : ils ne
+        répondent pas à la même question. Le rang de classe situe dans le
+        groupe de travail, celui de promotion dans le concours à venir — la
+        répartition en MPSI A et MPSI B étant administrative, un premier de sa
+        classe peut être quinzième de sa promotion.
+      {% endcomment %}
       {% if rang_general.rang %}
       <tr>
-        <td class="sum-lbl-fr">Rang général</td>
+        <td class="sum-lbl-fr">Rang dans la classe</td>
         <td class="sum-val">
           {{ rang_general.rang }}{% if rang_general.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
           sur {{ rang_general.effectif }}
         </td>
-        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب العام</span></td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب في القسم</span></td>
       </tr>
       {% endif %}
-      {% if absences.total %}
+      {% if rang_promotion.rang %}
       <tr>
-        <td class="sum-lbl-fr">Absences</td>
-        <td class="sum-val">{{ absences.total }}</td>
-        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الغيابات</span></td>
+        <td class="sum-lbl-fr">Rang sur la promotion{% if niveau_promo %} ({{ niveau_promo }}){% endif %}</td>
+        <td class="sum-val">
+          {{ rang_promotion.rang }}{% if rang_promotion.rang == 1 %}<sup>er</sup>{% else %}<sup>e</sup>{% endif %}
+          sur {{ rang_promotion.effectif }}
+        </td>
+        <td class="sum-lbl-ar"><span dir="rtl" lang="ar">الترتيب على الدفعة</span></td>
       </tr>
       {% endif %}
+      {% comment %}
+      Pas de compte d'absences ici : un relevé de notes constate des
+      résultats. L'assiduité se suit dans le module ABS, où elle se lit séance
+      par séance avec ses motifs — un total sec, sorti de ce contexte, ne se
+      discute pas et ne s'explique pas.
+      {% endcomment %}
     </table>
   </td></tr>
 

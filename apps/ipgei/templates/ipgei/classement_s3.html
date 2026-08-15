@@ -1,0 +1,99 @@
+{% comment %}
+Classement de S3 — feuille de travail de la séance d'affectation.
+
+Deux colonnes de chiffres, et deux colonnes VIDES. Ces dernières sont l'objet
+du document : la décision et l'affectation s'y écrivent à la main, en séance.
+Elles sont donc larges et hautes, avec un filet clair — on écrit dessus, on ne
+les lit pas.
+
+Pas de bandeau, pas de bloc de signature du jury : ce n'est pas un
+procès-verbal. C'est la feuille qu'on pose sur la table avant d'en rédiger un —
+et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 portrait; }
+  body {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 10.5pt; color: #1a1a1a;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  .institution td:last-child { font-family: 'Segoe UI', 'Cairo', Tahoma, sans-serif; }
+
+  .titre {
+    text-align: center; font-size: 15pt; font-weight: 700;
+    color: #006633; margin: 10px 0 2px;
+  }
+  .sous-titre { text-align: center; font-size: 10.5pt; margin-bottom: 10px; }
+
+  .repere { width: 100%; margin-bottom: 8px; font-size: 10pt; }
+  .repere td { padding: 1px 0; }
+  .repere .cle { font-weight: 700; width: 30mm; }
+
+  .classement th {
+    background: #006633; color: #fff; font-size: 9.5pt; font-weight: 700;
+    border: 1px solid #1a1a1a; padding: 5px 4px; text-align: center;
+  }
+  .classement td {
+    border: 1px solid #1a1a1a; padding: 4px; font-size: 10.5pt;
+    text-align: center; height: 9mm;
+  }
+  .classement .rang { width: 12mm; font-weight: 700; }
+  .classement .mat  { width: 24mm; font-weight: 700; }
+  .classement .moy  { width: 26mm; }
+  /* Les deux colonnes à remplir : larges, et sans rien dedans. */
+  .classement .vide { width: 38mm; }
+</style>
+</head>
+<body>
+
+<div class="institution">{% include '_institution_header.html' %}</div>
+
+<div class="titre">Classement {{ code_semestre }}</div>
+<div class="sous-titre">{{ niveau }} · {{ annee_universitaire }}</div>
+
+<table class="repere">
+  <tr>
+    <td class="cle">Effectif classé :</td><td>{{ effectif }}</td>
+    <td class="cle">Édité le :</td><td>{{ date_edition }}</td>
+  </tr>
+</table>
+
+<table class="classement">
+  <thead>
+    <tr>
+      <th class="rang">Rang</th>
+      <th class="mat">Matricule</th>
+      <th class="moy">Moyenne 1re année</th>
+      <th class="moy">Moyenne {{ code_semestre }}</th>
+      <th class="vide">Décision</th>
+      <th class="vide">Affectation</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ligne in lignes %}
+    <tr>
+      <td class="rang">{{ ligne.rang|default_if_none:"—" }}</td>
+      <td class="mat">{{ ligne.matricule }}</td>
+      {% comment %}
+      Un tiret, et non un zéro, quand la moyenne manque : l'établissement n'a
+      pas cette note — l'étudiant vient d'ailleurs, ou son année n'est pas
+      saisie. Écrire 0,00 le classerait dernier sur une donnée absente.
+      {% endcomment %}
+      <td class="moy">{{ ligne.moyenne_annee1|default_if_none:"—"|floatformat:2 }}</td>
+      <td class="moy">{{ ligne.moyenne_s3|default_if_none:"—"|floatformat:2 }}</td>
+      <td class="vide"></td>
+      <td class="vide"></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6">Aucun étudiant de deuxième année à classer.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+</body>
+</html>

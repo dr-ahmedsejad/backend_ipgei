@@ -203,7 +203,9 @@ def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
         'seuil':    donnees['seuil'],
         'valide':   donnees['valide'],
         'absences': donnees['absences'],
-        'rang_general': donnees['rang_general'],
+        'rang_general':   donnees['rang_general'],
+        'rang_promotion': donnees['rang_promotion'],
+        'niveau_promo':   donnees['niveau'],
         # Libellés attendus par le gabarit repris du socle.
         'semestre_label':    f'SEMESTRE {semestre.code[1:]}',
         'semestre_label_ar': SEMESTRE_AR.get(semestre.code, semestre.code),
@@ -212,6 +214,16 @@ def _contexte_releve_semestre(doc, inscription, semestre, base_url) -> dict:
 
 
 def _contexte_releve_annuel(doc, inscription, base_url) -> dict:
+    """
+    Le relevé annuel, bâti comme le semestriel — parce qu'il EST le semestriel,
+    deux fois, sous une même signature.
+
+    Chaque bloc reçoit donc les mêmes clés qu'un relevé de semestre, libellés
+    bilingues compris : le gabarit répète alors le même tableau sans rien avoir
+    à connaître de particulier à l'année. Les moyennes de classe et les rangs
+    en font partie — présents sur la pièce semestrielle, leur absence sur
+    l'annuelle se lisait comme un oubli.
+    """
     donnees = services.releve_annuel(inscription, inscription.annee_universitaire)
     contexte = _contexte_commun(doc, inscription, base_url)
     contexte.update({
@@ -220,7 +232,14 @@ def _contexte_releve_annuel(doc, inscription, base_url) -> dict:
             {
                 'code':    bloc['code'],
                 'moyenne': bloc['moyenne'],
-                'lignes':  [_ligne_note(n) for n in bloc['notes']],
+                'total_coefficients': bloc['total_coefficients'],
+                'rang_general':       bloc['rang_general'],
+                'rang_promotion':     bloc['rang_promotion'],
+                'absences':           bloc['absences'],
+                'lignes':  [_ligne_note(n, bloc['stats_classe'])
+                            for n in bloc['notes']],
+                'label':    f"SEMESTRE {bloc['code'][1:]}",
+                'label_ar': SEMESTRE_AR.get(bloc['code'], bloc['code']),
             }
             for bloc in donnees['semestres']
         ],
@@ -229,6 +248,9 @@ def _contexte_releve_annuel(doc, inscription, base_url) -> dict:
         'seuil':    donnees['seuil'],
         'valide':   donnees['valide'],
         'absences': donnees['absences'],
+        'rang_general':   donnees['rang_general'],
+        'rang_promotion': donnees['rang_promotion'],
+        'niveau_promo':   donnees['niveau'],
     })
     return contexte
 
@@ -402,6 +424,10 @@ def _rendre(type_document: str, contexte: dict) -> bytes:
     PIEDS = {
         TYPE_ATTESTATION:     'ipgei/_attestation_footer.html',
         TYPE_RELEVE_SEMESTRE: 'ipgei/_releve_footer.html',
+        # Le relevé annuel reprend la trame du semestriel : même corps de
+        # 240 mm, donc mêmes marges, et le même pied de page natif. L'oublier
+        # ici aurait donné deux pièces jumelles dont l'une seule porte le NB.
+        TYPE_RELEVE_ANNUEL:   'ipgei/_releve_footer.html',
     }
     if type_document == TYPE_CNIM:
         return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF_CNIM)
@@ -476,6 +502,15 @@ def _ligne_validee(deliberation: Deliberation, inscription: InscriptionIPGEI) ->
         raise ValidationError(
             'La délibération doit être validée avant toute émission de document officiel.'
         )
+    # Un jury de SEMESTRE ne prononce rien : il n'y a donc pas de décision à
+    # notifier. Sans cette garde, la pièce sortait avec une décision vide —
+    # numérotée au registre et vérifiable en ligne, mais ne disant rien.
+    if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
+        raise ValidationError(
+            "Un jury de semestre est un bilan intermédiaire : il ne prononce "
+            "aucune décision. Les décisions se délivrent au terme du jury "
+            "ANNUEL."
+        )
     ligne = deliberation.lignes.filter(inscription=inscription).first()
     if ligne is None:
         raise ValidationError("Cet étudiant ne figure pas dans cette délibération.")
@@ -496,8 +531,9 @@ SUITES_SANS_CNIM = {
     LigneDeliberation.DECISION_REDOUBLANT:
         "Un redoublant se réinscrit en deuxième année ; il concourra au terme "
         "de l'année suivante.",
-    LigneDeliberation.DECISION_EXCLU:
-        "Aucune suite ne lui est ouverte dans le cursus préparatoire.",
+    LigneDeliberation.DECISION_RATTRAPAGE:
+        "L'autorisation de concourir se prononce APRÈS la session de "
+        "rattrapage : cet étudiant y compose d'abord.",
     LigneDeliberation.DECISION_ADMIS:
         "Cette décision fait passer en deuxième année : le concours vient au "
         "terme de celle-ci, pas avant.",

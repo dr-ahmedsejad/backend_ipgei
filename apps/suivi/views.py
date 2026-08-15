@@ -747,6 +747,21 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         except Exception:
             logger.exception('Archivage EDT IPGEI de la semaine %s impossible', numero_sem)
 
+        # IPGEI : reporter l'emargement des seances dans le registre du socle.
+        # Une absence est souvent pointee AVANT que le suivi de la semaine
+        # n'existe — c'est le cas d'une epreuve pointee le jour meme. Les
+        # lignes de Suivi viennent d'etre creees : c'est l'instant ou ces
+        # absences trouvent a quoi s'accrocher. Sans effet hors IPGEI.
+        try:
+            from apps.ipgei.miroir import refleter_absences
+            reportees = refleter_absences(annee, type_semestre, numero_sem)
+            if reportees:
+                logger.info('IPGEI : %s absence(s) reportee(s) au registre du '
+                            'socle pour la semaine %s', reportees, numero_sem)
+        except Exception:
+            logger.exception('Report des absences IPGEI de la semaine %s impossible',
+                             numero_sem)
+
         semaine_ipgei = False
         try:
             from apps.ipgei.models import SemaineIPGEI

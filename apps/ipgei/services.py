@@ -264,7 +264,7 @@ def _tracer_session(session: SessionEvaluationIPGEI, acte: str, utilisateur) -> 
 # Calcul d'une note de matière
 # ═════════════════════════════════════════════════════════════════════════════
 def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
-                  epreuves: dict = None) -> Note:
+                  epreuves: dict = None, rattrapage_seulement: bool = False) -> Note:
     """
     Recalcule une ligne de note et **fige la pondération** de la matière dedans.
 
@@ -283,8 +283,25 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
     La note retenue applique ensuite la règle SIGA `max(moyenne, rattrapage)`,
     bornée par le plafond éventuel.
     """
-    if note.verrouillee:
+    if note.verrouillee and not rattrapage_seulement:
         raise ValidationError('Note verrouillée par une délibération validée — recalcul refusé.')
+
+    if rattrapage_seulement:
+        # Le verrou protège CE QUE LE JURY A VU : les notes de la session
+        # normale, arrêtées le jour où il a siégé. Le rattrapage, lui, se
+        # compose APRÈS — l'interdire revenait à rendre la seconde chance
+        # inapplicable, puisque valider le jury annuel figeait tout.
+        #
+        # On ne recalcule donc que la note RETENUE, à partir de la moyenne déjà
+        # figée : les composantes du jury ne bougent pas d'un centième.
+        note.plafond_rattrapage_applique = plafond_rattrapage
+        note.note_retenue = _appliquer_rattrapage(
+            note.moyenne, note.note_rattrapage, plafond_rattrapage)
+        note.date_calcul = timezone.now()
+        if sauvegarder:
+            note.save(update_fields=['note_retenue', 'plafond_rattrapage_applique',
+                                     'date_calcul', 'date_modification'])
+        return note
 
     evaluations = list(note.evaluations.all())
     # Le dénominateur est celui de la CLASSE : une épreuve manquée compte zéro.
@@ -359,7 +376,8 @@ def _appliquer_rattrapage(moyenne, rattrapage, plafond):
     return _arrondi(max(Decimal(moyenne), valeur_rattrapage))
 
 
-def recalculer_notes(queryset, *, plafond_rattrapage=None) -> int:
+def recalculer_notes(queryset, *, plafond_rattrapage=None,
+                     rattrapage_seulement: bool = False) -> int:
     """
     Recalcule un lot de notes ; renvoie le nombre de lignes traitées.
 
@@ -368,15 +386,17 @@ def recalculer_notes(queryset, *, plafond_rattrapage=None) -> int:
     quarante, ce serait quarante requêtes identiques.
     """
     total = 0
-    qs = (queryset.filter(verrouillee=False)
-          .select_related('matiere', 'inscription')
-          .prefetch_related('evaluations'))
+    qs = queryset if rattrapage_seulement else queryset.filter(verrouillee=False)
+    qs = (qs.select_related('matiere', 'inscription')
+            .prefetch_related('evaluations'))
     cache = {}
     for note in qs:
         cle = (note.matiere_id, note.semestre_id, note.inscription.classe_id)
         if cle not in cache:
             cache[cle] = epreuves_tenues(*cle)
-        calculer_note(note, plafond_rattrapage=plafond_rattrapage, epreuves=cache[cle])
+        calculer_note(note, plafond_rattrapage=plafond_rattrapage,
+                      epreuves=cache[cle],
+                      rattrapage_seulement=rattrapage_seulement)
         total += 1
     return total
 
@@ -623,10 +643,18 @@ def decision_automatique(niveau: str, moyenne, seuil, nb_redoublements: int,
     """
     Décision proposée par le calcul (plan §4.4).
 
-    Première année : admis si la moyenne atteint le seuil, sinon réorienté — le
-    redoublement n'y existe pas.
-    Deuxième année : autorisé CNIM si le seuil est atteint ; sinon redoublant,
-    et exclu une fois le droit de redoublement épuisé.
+    Première année : admis si la moyenne atteint le seuil, sinon réorienté — ni
+    rattrapage, ni redoublement.
+
+    Deuxième année, JURY ANNUEL : deux issues et deux seulement. Le seuil est
+    atteint et l'étudiant est autorisé à concourir ; il ne l'est pas et il passe
+    par le RATTRAPAGE. On ne va jamais au concours en sautant le rattrapage, et
+    le redoublement ne se prononce pas ici — il ne vient qu'après la session de
+    rattrapage, ou après un échec au concours, selon que le droit reste ouvert.
+
+    C'est ce que faisait le calcul auparavant : sous le seuil, il proposait
+    d'emblée « redoublant », ou « exclu » une fois le droit épuisé. Un étudiant
+    était donc renvoyé de l'établissement sans avoir composé sa seconde chance.
 
     Le rang et le droit au redoublement viennent du référentiel : un niveau
     ajouté — MPI par exemple — suit la règle de son rang sans que ce code ait à
@@ -650,11 +678,304 @@ def decision_automatique(niveau: str, moyenne, seuil, nb_redoublements: int,
                        else LigneDeliberation.DECISION_REORIENTE)
     if atteint:
         return retenue(LigneDeliberation.DECISION_CNIM)
+    return retenue(LigneDeliberation.DECISION_RATTRAPAGE)
 
-    redoublement_ouvert = (fiche.redoublement_autorise if fiche is not None else rang > 1)
-    if not redoublement_ouvert or nb_redoublements >= droit_redoublement_max:
-        return retenue(LigneDeliberation.DECISION_EXCLU)
-    return retenue(LigneDeliberation.DECISION_REDOUBLANT)
+
+def decision_apres_seconde_chance(inscription, droit_redoublement_max: int,
+                                  institution=None) -> str:
+    """
+    Ce qu'il advient d'un étudiant qui n'ira pas au concours.
+
+    Deux cas de figure, un seul embranchement : le jury de rattrapage ne l'a pas
+    autorisé à concourir, ou il a concouru sans succès. Dans les deux, la suite
+    ne dépend que de son droit de redoublement — il redouble s'il lui en reste,
+    il est réorienté sinon.
+
+    « Réorienté » et non « exclu » : l'établissement ne renvoie pas, il oriente
+    ailleurs. Le mot figure sur une pièce remise à l'étudiant.
+    """
+    fiche = niveau_ref(inscription.niveau, institution
+                       or inscription.classe.institution)
+    ouvert = (fiche.redoublement_autorise if fiche is not None
+              else rang_du_niveau(inscription.niveau) > 1)
+    if ouvert and inscription.nb_redoublements < droit_redoublement_max:
+        return LigneDeliberation.DECISION_REDOUBLANT
+    return LigneDeliberation.DECISION_REORIENTE
+
+
+def grille_rattrapage(deliberation: Deliberation) -> dict:
+    """
+    La grille de saisie du rattrapage : les étudiants du jury × TOUTES les
+    matières de l'année.
+
+    Toutes, et non celles où l'étudiant a échoué : c'est le jury qui décide où
+    l'on repasse, et la règle retenue est `max(session normale, rattrapage)`.
+    Une matière qu'on repasse sans l'améliorer ne fait donc aucun mal — mais une
+    matière absente de la grille aurait interdit de la repasser.
+
+    Chaque case rappelle la moyenne de la session normale : on ne saisit pas un
+    rattrapage sans savoir ce qu'il doit dépasser.
+    """
+    codes = codes_semestres_du_niveau(deliberation.niveau, deliberation.institution)
+    matieres = list(
+        Matiere.objects
+        .filter(niveau_ref__code=deliberation.niveau, code_semestre__in=codes,
+                actif=True)
+        .order_by('code_semestre', 'ordre', 'code'))
+
+    lignes = list(deliberation.lignes
+                  .select_related('inscription__etudiant', 'inscription__classe')
+                  .order_by('rang', 'inscription__etudiant__nom'))
+    inscriptions = [ligne.inscription for ligne in lignes]
+
+    notes = {
+        (note.inscription_id, note.matiere_id): note
+        for note in Note.objects.filter(
+            inscription__in=inscriptions,
+            semestre__annee_universitaire=deliberation.annee_universitaire,
+            matiere__in=matieres)
+    }
+
+    return {
+        'matieres': [
+            {'id': m.pk, 'code': m.code, 'intitule': m.intitule,
+             'semestre': m.code_semestre, 'coefficient': m.coefficient}
+            for m in matieres
+        ],
+        'lignes': [
+            {
+                'inscription':        ligne.inscription_id,
+                'etudiant_nom':       ligne.inscription.etudiant.nom_display,
+                'etudiant_matricule': ligne.inscription.etudiant.matricule,
+                'classe_nom':         ligne.inscription.classe.nom,
+                'moyenne_generale':   ligne.moyenne_generale,
+                'decision_auto':      ligne.decision_auto,
+                'notes': {
+                    str(m.pk): {
+                        'moyenne':       getattr(notes.get((ligne.inscription_id, m.pk)),
+                                                 'moyenne', None),
+                        'rattrapage':    getattr(notes.get((ligne.inscription_id, m.pk)),
+                                                 'note_rattrapage', None),
+                        'note_retenue':  getattr(notes.get((ligne.inscription_id, m.pk)),
+                                                 'note_retenue', None),
+                    }
+                    for m in matieres
+                },
+            }
+            for ligne in lignes
+        ],
+    }
+
+
+@transaction.atomic
+def saisir_rattrapage(deliberation: Deliberation, saisies: list) -> dict:
+    """
+    Enregistre les notes de rattrapage du jury, puis le recalcule.
+
+    `saisies` : `[{'inscription': id, 'matiere': id, 'note_rattrapage': 12.5}]`.
+    Une valeur nulle EFFACE le rattrapage — l'étudiant retombe alors sur sa
+    moyenne de session normale, ce qui est le sens de « il ne s'est pas
+    présenté ».
+
+    Les notes sont verrouillées par le jury annuel : c'est normal, et seule la
+    note de rattrapage peut encore les faire bouger. On ne recalcule donc que
+    la note RETENUE — les composantes que le jury a arrêtées ne changent pas.
+
+    Le jury est recalculé dans la foulée : sans cela, l'écran afficherait des
+    décisions établies sur des moyennes périmées.
+    """
+    if deliberation.est_verrouillee:
+        raise ValidationError(
+            'Jury de rattrapage validé — la saisie est close. Dévalidez-le pour '
+            'y revenir.')
+    if deliberation.portee != Deliberation.PORTEE_RATTRAPAGE:
+        raise ValidationError(
+            "La saisie du rattrapage appartient au jury de RATTRAPAGE : c'est "
+            'lui qui désigne les étudiants concernés.')
+
+    permises = set(deliberation.lignes.values_list('inscription_id', flat=True))
+    ecrites = 0
+    for saisie in saisies:
+        inscription_id = int(saisie['inscription'])
+        if inscription_id not in permises:
+            raise ValidationError(
+                f"L'inscription {inscription_id} ne relève pas de ce jury de "
+                'rattrapage.')
+        matiere = Matiere.objects.filter(pk=saisie['matiere']).first()
+        if matiere is None:
+            raise ValidationError({'matiere': 'Matière introuvable.'})
+
+        semestre = SemestreIPGEI.objects.filter(
+            code=matiere.code_semestre,
+            annee_universitaire=deliberation.annee_universitaire,
+            institution=deliberation.institution).first()
+        if semestre is None:
+            raise ValidationError(
+                f"{matiere.code_semestre} n'existe pas en "
+                f'{deliberation.annee_universitaire} : la note ne peut se '
+                'rattacher à aucun semestre.')
+
+        note, _ = Note.objects.get_or_create(
+            inscription_id=inscription_id, matiere=matiere, semestre=semestre)
+        note.note_rattrapage = saisie.get('note_rattrapage')
+        note.save(update_fields=['note_rattrapage', 'date_modification'])
+        calculer_note(note, plafond_rattrapage=plafond_effectif(semestre),
+                      rattrapage_seulement=True)
+        ecrites += 1
+
+    calculer_deliberation(deliberation)
+    return {'saisies': ecrites}
+
+
+@transaction.atomic
+def ouvrir_jury_rattrapage(annuelle: Deliberation, utilisateur=None) -> Deliberation:
+    """
+    Ouvre le second jury de deuxième année, celui qui suit la session de
+    rattrapage.
+
+    Il reprend EXACTEMENT les étudiants que le jury annuel y a renvoyés — ni
+    plus, ni moins. Une délibération à part, et non une reprise de la première :
+    deux jurys siègent à deux dates et signent chacun son procès-verbal. Le PV
+    annuel dit « X est autorisé au rattrapage », celui-ci dit ce qu'il en est
+    advenu ; rouvrir le premier effacerait la première décision.
+
+    Trois refus, et chacun dit ce qu'il faut faire :
+      * le jury annuel doit être VALIDÉ — tant que ses décisions peuvent
+        changer, la liste des candidats au rattrapage aussi ;
+      * il doit avoir renvoyé quelqu'un au rattrapage, sinon il n'y a pas de
+        session à délibérer ;
+      * il ne s'ouvre qu'une fois : le second jury existant est rendu tel quel
+        plutôt que dupliqué.
+
+    Le seuil est celui du jury annuel, recopié : on ne juge pas la seconde
+    chance à une exigence différente de la première.
+    """
+    if annuelle.portee != Deliberation.PORTEE_ANNUELLE:
+        raise ValidationError(
+            "Le jury de rattrapage suit un jury ANNUEL. Un jury de semestre est "
+            "un bilan intermédiaire : il ne prononce rien qui l'appelle."
+        )
+    if not annuelle.est_verrouillee:
+        raise ValidationError(
+            'Validez le jury annuel avant : tant que ses décisions peuvent '
+            'changer, la liste des étudiants envoyés au rattrapage aussi.'
+        )
+
+    deja = annuelle.jurys_rattrapage.first()
+    if deja is not None:
+        return deja
+
+    attendus = annuelle.lignes.filter(
+        decision=LigneDeliberation.DECISION_RATTRAPAGE).count()
+    if not attendus:
+        raise ValidationError(
+            "Aucun étudiant n'a été autorisé au rattrapage par ce jury : il n'y "
+            'a pas de session à délibérer.'
+        )
+
+    rattrapage = Deliberation.objects.create(
+        institution=annuelle.institution,
+        libelle='',
+        niveau=annuelle.niveau,
+        classe=annuelle.classe,
+        annee_universitaire=annuelle.annee_universitaire,
+        portee=Deliberation.PORTEE_RATTRAPAGE,
+        jury_source=annuelle,
+        seuil_validation=annuelle.seuil_validation,
+        plafond_rattrapage=annuelle.plafond_rattrapage,
+    )
+    # Calculé d'emblée : la cohorte est connue, et un jury qu'il faut d'abord
+    # « calculer » avant de voir qui il concerne se lit comme une coquille.
+    calculer_deliberation(rattrapage)
+    import logging
+    logging.getLogger(__name__).info(
+        'Jury de rattrapage %s ouvert depuis le jury annuel %s (%s étudiant(s))',
+        rattrapage.pk, annuelle.pk, attendus)
+    return rattrapage
+
+
+def lacunes_deliberation(deliberation: Deliberation) -> list:
+    """
+    Les matières que le jury s'apprête à compter ZÉRO.
+
+    La règle de l'épreuve non rendue est juste, mais elle est SILENCIEUSE : une
+    matière jamais saisie n'a pas de ligne de note, elle entre au calcul par sa
+    seule maquette, avec son coefficient et un cumul nul. Un semestre oublié
+    fait alors passer une promotion entière sous le seuil sans qu'aucun écran
+    ne l'annonce — c'est arrivé, et le jury ne l'a vu qu'aux moyennes.
+
+    On rend donc ce que la règle coûte, matière par matière : combien
+    d'étudiants du jury n'y ont pas de note retenue, et quel coefficient pèse
+    dans le vide. Rien n'est bloqué pour autant — un jury peut parfaitement
+    délibérer sur une matière non rendue. Il doit seulement le savoir.
+    """
+    from .models import Matiere, SemestreIPGEI
+
+    lignes = list(deliberation.lignes.select_related(
+        'inscription__classe__institution'))
+    if not lignes:
+        return []
+
+    inscriptions = [ligne.inscription for ligne in lignes]
+    reference    = inscriptions[0]
+    institution  = reference.classe.institution
+
+    # Un jury de semestre ne regarde que le sien ; l'annuel et le rattrapage
+    # portent l'année entière — c'est sur elle qu'ils prononcent.
+    if deliberation.semestre_id:
+        codes = [deliberation.semestre.code]
+    else:
+        codes = codes_semestres_du_niveau(deliberation.niveau, institution)
+
+    semestres = {
+        semestre.pk: semestre
+        for semestre in SemestreIPGEI.objects.filter(
+            institution=institution, code__in=codes,
+            annee_universitaire=deliberation.annee_universitaire)
+    }
+    if not semestres:
+        return []
+
+    maquette = Matiere.objects.filter(
+        institution=institution, niveau_ref__code=deliberation.niveau,
+        code_semestre__in=codes, actif=True,
+    ).order_by('code_semestre', 'ordre', 'code')
+
+    # Une seule requête pour toutes les notes du jury : le comptage se fait en
+    # mémoire, sur quelques centaines de lignes au plus.
+    notees = set(
+        Note.objects.filter(
+            inscription__in=inscriptions, semestre_id__in=semestres,
+            note_retenue__isnull=False,
+        ).values_list('semestre__code', 'matiere_id', 'inscription_id')
+    )
+
+    effectif = len(inscriptions)
+    manquantes = []
+    for matiere in maquette:
+        sans = sum(
+            1 for inscription in inscriptions
+            if (matiere.code_semestre, matiere.pk, inscription.pk) not in notees
+        )
+        if not sans:
+            continue
+        manquantes.append({
+            'semestre':    matiere.code_semestre,
+            'matiere':     matiere.pk,
+            'code':        matiere.code,
+            'intitule':    matiere.intitule,
+            # En chaîne comme partout ailleurs : les sérialiseurs rendent les
+            # décimaux ainsi, et un dictionnaire brut sortirait un flottant —
+            # deux formats pour un même coefficient selon l'endpoint.
+            'coefficient': str(matiere.coefficient),
+            'manquants':   sans,
+            'effectif':    effectif,
+            # Une matière que PERSONNE n'a passée se lit autrement qu'un absent
+            # isolé : la première est un oubli de saisie, la seconde un cas.
+            'totale':      sans == effectif,
+        })
+    manquantes.sort(key=lambda m: (-m['manquants'], m['semestre'], m['code']))
+    return manquantes
 
 
 @transaction.atomic
@@ -687,7 +1008,16 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
         )
         .select_related('etudiant', 'classe')
     )
-    if deliberation.classe_id:
+    if deliberation.portee == Deliberation.PORTEE_RATTRAPAGE:
+        # Le périmètre d'un jury de rattrapage n'est pas une classe : c'est la
+        # liste exacte de ceux que le jury annuel y a renvoyés. Reprendre toute
+        # la classe y ferait entrer des étudiants déjà autorisés à concourir, à
+        # qui l'on redemanderait une décision.
+        inscriptions = inscriptions.filter(
+            pk__in=deliberation.jury_source.lignes
+            .filter(decision=LigneDeliberation.DECISION_RATTRAPAGE)
+            .values_list('inscription_id', flat=True))
+    elif deliberation.classe_id:
         inscriptions = inscriptions.filter(classe_id=deliberation.classe_id)
     else:
         inscriptions = inscriptions.filter(
@@ -726,10 +1056,22 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     # libre de trancher autrement — c'est la *proposition* qu'on retient, pas
     # la décision.
     semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
+    rattrapage   = deliberation.portee == Deliberation.PORTEE_RATTRAPAGE
 
     for inscription, moyenne, poids, notes in resultats:
         if semestrielle:
             auto = ''
+        elif rattrapage:
+            # Après la seconde chance, deux issues et deux seulement : le seuil
+            # est atteint et l'étudiant concourt ; il ne l'est pas et tout
+            # dépend de son droit de redoublement. La moyenne intègre déjà les
+            # notes de rattrapage — `note_retenue` vaut max(moyenne, rattrapage),
+            # plafond compris.
+            auto = (LigneDeliberation.DECISION_CNIM
+                    if moyenne is not None
+                    and Decimal(moyenne) >= Decimal(deliberation.seuil_validation)
+                    else decision_apres_seconde_chance(
+                        inscription, droit_max, deliberation.institution))
         else:
             auto = decision_automatique(
                 inscription.niveau, moyenne, deliberation.seuil_validation,
@@ -794,6 +1136,8 @@ def notes_couvertes(deliberation: Deliberation):
     )
     if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
         return notes.filter(semestre=deliberation.semestre)
+    # Le rattrapage couvre l'année, comme le jury annuel : c'est la moyenne
+    # annuelle qu'il arrête, notes de rattrapage comprises.
     return notes.filter(
         semestre__annee_universitaire=deliberation.annee_universitaire,
         semestre__code__in=codes_semestres_du_niveau(deliberation.niveau,
@@ -807,6 +1151,17 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
     Fige la délibération : verrouille les notes concernées et reporte chaque
     décision sur le statut de l'inscription. Le compteur de redoublement n'est
     incrémenté qu'ici, une seule fois, à la validation.
+
+    **Un jury de SEMESTRE ne décide de rien.** Il arrête un bilan intermédiaire
+    et verrouille les notes du semestre, rien de plus : ni statut d'inscription
+    modifié, ni redoublement compté. C'est la règle déjà posée au calcul, qui
+    ne lui propose aucune décision, et à `preparer_passage`, qui refuse le
+    passage hors jury annuel.
+
+    Elle ne l'était pas ici : la validation exigeait une décision par étudiant,
+    et les reportait comme celles d'un jury de fin d'année. Un bilan de mi-année
+    pouvait donc rendre vingt-cinq étudiants « redoublants » et incrémenter leur
+    compteur — la seule façon d'y échapper étant de ne jamais valider.
     """
     if deliberation.est_verrouillee:
         raise ValidationError('Délibération déjà validée.')
@@ -814,6 +1169,18 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
         raise ValidationError('Calculer la délibération avant de la valider.')
 
     lignes = deliberation.lignes.select_related('inscription').all()
+
+    if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
+        # Seul effet : figer les notes du semestre. Le bilan devient consultable
+        # sans risque qu'une note bouge sous lui.
+        notes_couvertes(deliberation).update(verrouillee=True)
+        deliberation.statut          = Deliberation.STATUT_VALIDEE
+        deliberation.validee_par     = (utilisateur if getattr(
+            utilisateur, 'is_authenticated', False) else None)
+        deliberation.date_validation = timezone.now()
+        deliberation.save(update_fields=['statut', 'validee_par', 'date_validation'])
+        return deliberation
+
     sans_decision = [l for l in lignes if not l.decision]
     if sans_decision:
         raise ValidationError(
@@ -832,7 +1199,7 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
         LigneDeliberation.DECISION_REORIENTE:  InscriptionIPGEI.STATUT_REORIENTE,
         LigneDeliberation.DECISION_CNIM:       InscriptionIPGEI.STATUT_CNIM,
         LigneDeliberation.DECISION_REDOUBLANT: InscriptionIPGEI.STATUT_REDOUBLANT,
-        LigneDeliberation.DECISION_EXCLU:      InscriptionIPGEI.STATUT_ABANDON,
+        LigneDeliberation.DECISION_RATTRAPAGE: InscriptionIPGEI.STATUT_RATTRAPAGE,
     }
 
     for ligne in lignes:
@@ -1651,6 +2018,22 @@ def saisir_absences(seance: SeanceReelle, saisies: list, utilisateur=None) -> di
     supprimees, _ = (
         AbsenceSeance.objects.filter(seance=seance).exclude(inscription_id__in=vus).delete()
     )
+
+    # Le registre est celui du socle (cf. `bilan_absences`) : ce qui est relevé
+    # ici doit y parvenir, sans quoi les écrans ABS, les rapports et les fiches
+    # ignoreraient l'épreuve. Si le suivi de la semaine n'existe pas encore,
+    # rien n'est écrit — le report se fera à sa génération, qui appelle la même
+    # fonction. Un échec ne fait pas échouer la saisie : la feuille d'appel doit
+    # rester enregistrable même si le reflet, lui, achoppe.
+    semaine = seance.semaine
+    try:
+        from .miroir import refleter_absences
+        refleter_absences(semaine.semestre.annee_universitaire,
+                          semaine.semestre.type_semestre, semaine.numero)
+    except Exception:                                          # noqa: BLE001
+        logger.exception('Report au registre du socle impossible (séance %s)',
+                         seance.pk)
+
     return {'enregistrees': len(vus), 'reinitialisees': supprimees}
 
 
@@ -1843,7 +2226,11 @@ def libelle_pv(deliberation) -> str:
     délibération ne soit rattachée à une classe portent leur niveau — dire
     « Classe MPSI » d'un document qui couvre deux classes serait faux.
     """
-    portee = ('annuels' if deliberation.portee == deliberation.PORTEE_ANNUELLE
+    # Le rattrapage se nomme, et ne se devine pas : posés côte à côte, ses
+    # feuillets et ceux du jury annuel portent la même classe et la même année.
+    portee = ('de la session de rattrapage'
+              if deliberation.portee == deliberation.PORTEE_RATTRAPAGE
+              else 'annuels' if deliberation.portee == deliberation.PORTEE_ANNUELLE
               else f'du {deliberation.semestre.code}'
                    if deliberation.semestre_id else '')
     cible = (f'la Classe {deliberation.classe.nom}' if deliberation.classe_id
@@ -1948,18 +2335,25 @@ def rang_general_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) 
     Une seule requête pour toute la classe. Les ex æquo partagent leur rang,
     comme pour le classement par matière.
     """
-    lignes = (
-        Note.objects
-        .filter(semestre=semestre,
-                inscription__classe_id=inscription.classe_id,
-                inscription__actif=True,
-                note_retenue__isnull=False)
-        .values_list('inscription_id', 'note_retenue', 'coefficient',
-                     'matiere__coefficient')
-    )
+    return _classer(inscription, Note.objects.filter(
+        semestre=semestre,
+        inscription__classe_id=inscription.classe_id,
+        inscription__actif=True,
+        note_retenue__isnull=False))
 
+
+def _classer(inscription: InscriptionIPGEI, lignes) -> dict:
+    """
+    Rang de l'étudiant parmi les moyennes tirées de `lignes`, et effectif classé.
+
+    Le périmètre est décidé par l'appelant — une classe, une promotion, un
+    semestre ou l'année — et le calcul reste le même : moyenne pondérée par les
+    coefficients FIGÉS sur chaque note, ex æquo partagés.
+    """
     cumuls = {}
-    for inscription_id, note, coef_fige, coef_matiere in lignes:
+    for inscription_id, note, coef_fige, coef_matiere in lignes.values_list(
+        'inscription_id', 'note_retenue', 'coefficient', 'matiere__coefficient',
+    ):
         coef = Decimal(coef_fige if coef_fige is not None else coef_matiere)
         cumul, poids = cumuls.get(inscription_id, (Decimal('0'), Decimal('0')))
         cumuls[inscription_id] = (cumul + Decimal(note) * coef, poids + coef)
@@ -1972,6 +2366,55 @@ def rang_general_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) 
                     if mienne is not None else None,
         'effectif': len(moyennes),
     }
+
+
+def rang_general_promotion(inscription: InscriptionIPGEI,
+                           semestre: SemestreIPGEI) -> dict:
+    """
+    Rang sur la PROMOTION — toutes les classes du niveau confondues.
+
+    Une promotion de MPSI répartie en MPSI A et MPSI B suit le même programme
+    et compose les mêmes épreuves : le rang dans sa classe ne dit pas où l'on
+    se situe dans sa promotion, et un premier de MPSI B peut être quinzième de
+    la promotion. Les deux chiffres sont donnés côte à côte plutôt que l'un à
+    la place de l'autre : le premier situe dans le groupe de travail, le second
+    dans le concours à venir.
+
+    La répartition entre classes est administrative — elle n'a pas à peser sur
+    la lecture d'un résultat.
+    """
+    return _classer(inscription, Note.objects.filter(
+        semestre=semestre,
+        inscription__classe__niveau_id=inscription.classe.niveau_id,
+        inscription__annee_universitaire=inscription.annee_universitaire,
+        inscription__actif=True,
+        note_retenue__isnull=False))
+
+
+def rang_annuel_promotion(inscription: InscriptionIPGEI,
+                          annee_universitaire: str) -> dict:
+    """
+    Rang sur la promotion à l'ANNÉE, tous semestres cumulés.
+
+    C'est le classement qui compte pour le passage et pour le concours ; celui
+    d'un semestre isolé ne le préjuge pas.
+    """
+    return _classer(inscription, Note.objects.filter(
+        semestre__annee_universitaire=annee_universitaire,
+        inscription__classe__niveau_id=inscription.classe.niveau_id,
+        inscription__annee_universitaire=annee_universitaire,
+        inscription__actif=True,
+        note_retenue__isnull=False))
+
+
+def rang_annuel_classe(inscription: InscriptionIPGEI,
+                       annee_universitaire: str) -> dict:
+    """Rang dans sa classe à l'année — le pendant de `rang_annuel_promotion`."""
+    return _classer(inscription, Note.objects.filter(
+        semestre__annee_universitaire=annee_universitaire,
+        inscription__classe_id=inscription.classe_id,
+        inscription__actif=True,
+        note_retenue__isnull=False))
 
 
 def releve_semestre(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> dict:
@@ -1989,24 +2432,47 @@ def releve_semestre(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> d
         'absences':    bilan_absences(inscription, semestre),
         'stats_classe': statistiques_classe(inscription, semestre),
         'rang_general': rang_general_classe(inscription, semestre),
+        # Le rang sur la PROMOTION, toutes classes du niveau confondues : la
+        # répartition en MPSI A et MPSI B est administrative, elle n'a pas à
+        # peser sur la lecture d'un résultat.
+        'rang_promotion': rang_general_promotion(inscription, semestre),
+        'niveau':         inscription.classe.niveau_code,
     }
 
 
 def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> dict:
-    """Données d'un relevé annuel, regroupées par semestre."""
+    """
+    Données d'un relevé annuel, regroupées par semestre.
+
+    Chaque bloc porte EXACTEMENT ce que porte un relevé semestriel — moyennes
+    de classe, rangs par matière, rang général, total des coefficients. Le
+    relevé annuel n'est pas un résumé de l'année : c'est le relevé de chaque
+    semestre, réuni sous une même signature. Un rang qui figure sur la pièce
+    semestrielle et disparaît de l'annuelle se lit comme une omission.
+    """
     moyenne, poids, notes = moyenne_annuelle(inscription, annee_universitaire)
     params = ParametresIPGEI.pour(inscription.classe.institution)
     par_semestre = {}
     for n in notes:
         par_semestre.setdefault(n.semestre.code, []).append(n)
-    semestres = [
-        {
-            'code':    code,
-            'notes':   sorted(lignes, key=lambda n: (n.matiere.ordre, n.matiere.code)),
-            'moyenne': _agreger(lignes)[0],
-        }
-        for code, lignes in sorted(par_semestre.items())
-    ]
+
+    semestres = []
+    for code, lignes in sorted(par_semestre.items()):
+        # Le semestre porté par les notes elles-mêmes : le regroupement se fait
+        # par code, mais les statistiques de classe demandent l'objet.
+        semestre = lignes[0].semestre
+        moyenne_bloc, poids_bloc = _agreger(lignes)[:2]
+        semestres.append({
+            'code':     code,
+            'semestre': semestre,
+            'notes':    sorted(lignes, key=lambda n: (n.matiere.ordre, n.matiere.code)),
+            'moyenne':  moyenne_bloc,
+            'total_coefficients': poids_bloc,
+            'stats_classe':       statistiques_classe(inscription, semestre),
+            'rang_general':       rang_general_classe(inscription, semestre),
+            'rang_promotion':     rang_general_promotion(inscription, semestre),
+            'absences':           bilan_absences(inscription, semestre),
+        })
     return {
         'inscription':         inscription,
         'annee_universitaire': annee_universitaire,
@@ -2016,6 +2482,11 @@ def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> di
         'seuil':               params.seuil_validation,
         'valide':              moyenne is not None and moyenne >= params.seuil_validation,
         'absences':            bilan_absences(inscription),
+        # Les deux classements de l'ANNÉE : celui qui compte pour le passage et
+        # pour le concours. Le rang d'un semestre isolé ne le préjuge pas.
+        'rang_general':        rang_annuel_classe(inscription, annee_universitaire),
+        'rang_promotion':      rang_annuel_promotion(inscription, annee_universitaire),
+        'niveau':              inscription.classe.niveau_code,
     }
 
 
@@ -2301,14 +2772,33 @@ SUITE_PAR_STATUT  = {
 }
 
 
+#: Décisions qui NE DÉCIDENT PAS de la suite : elles ouvrent une étape de plus.
+#: « Autorisé au rattrapage » attend le second jury ; « autorisé à concourir »
+#: attend le résultat du concours. Ce que l'étudiant devient est alors porté par
+#: son inscription, et non par cette ligne-ci.
+DECISIONS_EN_SUSPENS = (
+    LigneDeliberation.DECISION_RATTRAPAGE,
+    LigneDeliberation.DECISION_CNIM,
+)
+
+
 def candidats_passage(deliberation: Deliberation) -> list:
     """
     Qui repart l'an prochain, et vers quel niveau.
 
-    Lit les LIGNES du jury et non le statut des inscriptions : c'est la décision
-    prononcée qui fait foi, et elle est là même si le report sur l'inscription
-    a été défait depuis. Chaque entrée dit l'inscription, la suite qui lui est
-    faite et le code de niveau visé.
+    Lit les LIGNES du jury : c'est la décision prononcée qui fait foi, et elle
+    est là même si le report sur l'inscription a été défait depuis.
+
+    Deux décisions font exception, et il fallait les traiter : « autorisé au
+    rattrapage » et « autorisé à concourir » ne disent pas la suite — elles
+    ouvrent une étape de plus. Ce que l'étudiant devient est alors décidé par le
+    second jury ou par le concours, et vit sur son INSCRIPTION. Sans cette
+    lecture, un redoublant issu d'un concours manqué restait invisible du
+    passage : sa ligne disait « autorisé à concourir », et personne ne le
+    réinscrivait.
+
+    Chaque entrée dit l'inscription, la suite qui lui est faite et le code de
+    niveau visé.
     """
     institution = deliberation.institution
     rang_actuel = rang_du_niveau(deliberation.niveau, institution)
@@ -2316,12 +2806,16 @@ def candidats_passage(deliberation: Deliberation) -> list:
     sortie = []
     for ligne in deliberation.lignes.select_related('inscription__etudiant',
                                                     'inscription__classe'):
-        suite = SUITE_PAR_STATUT.get(
-            {
+        if ligne.decision in DECISIONS_EN_SUSPENS:
+            # La suite ne se lit plus ici, mais sur l'inscription : c'est le
+            # jury de rattrapage ou le concours qui l'a arrêtée.
+            statut = ligne.inscription.statut
+        else:
+            statut = {
                 LigneDeliberation.DECISION_ADMIS:      InscriptionIPGEI.STATUT_ADMIS,
                 LigneDeliberation.DECISION_REDOUBLANT: InscriptionIPGEI.STATUT_REDOUBLANT,
             }.get(ligne.decision)
-        )
+        suite = SUITE_PAR_STATUT.get(statut)
         if suite is None:
             continue
         rang_cible = rang_actuel + 1 if suite == PASSAGE_MONTE else rang_actuel
