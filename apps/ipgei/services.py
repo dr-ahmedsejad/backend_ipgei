@@ -539,16 +539,43 @@ def maquette_de_lannee(inscription: InscriptionIPGEI, annee_universitaire: str):
     ))
 
 
+#: Poids de chaque SEMESTRE dans la moyenne annuelle, par rang d'année.
+#:
+#: La moyenne annuelle n'est PAS une moyenne pondérée sur toutes les matières
+#: des deux semestres : c'est la moyenne des deux MOYENNES SEMESTRIELLES, et les
+#: deux années n'y appliquent pas la même règle.
+#:
+#:   première année : (S1 × 2 + S2 × 3) / 5   — le second semestre pèse plus
+#:   deuxième année : (S3 + S4) / 2           — les deux à égalité
+#:
+#: La nuance n'est pas cosmétique : agréger toutes les matières d'un coup donne
+#: un autre nombre, car les deux semestres n'ont ni le même nombre de matières
+#: ni le même total de coefficients. C'est la règle de l'établissement qui
+#: tranche, pas l'arithmétique la plus commode.
+PONDERATION_ANNUELLE = {
+    1: {'S1': Decimal('2'), 'S2': Decimal('3')},
+    2: {'S3': Decimal('1'), 'S4': Decimal('1')},
+}
+
+
 def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
                      *, absents_a_zero: bool = False):
     """
-    Moyenne annuelle : tous les semestres du niveau de l'étudiant pour l'année.
-    Les semestres pèsent au prorata des coefficients de leurs matières, ce qui
-    revient à une moyenne pondérée unique sur l'ensemble des matières.
+    Moyenne annuelle : la moyenne PONDÉRÉE DES MOYENNES SEMESTRIELLES.
 
-    `absents_a_zero` : voir `moyenne_semestrielle`. C'est ce qui permet au jury
-    de statuer sur un étudiant dont un semestre entier manque — il pèse alors
-    zéro, et la décision se prononce là-dessus plutôt que de rester en blanc.
+    Voir `PONDERATION_ANNUELLE` pour les poids. Chaque moyenne de semestre reste,
+    elle, pondérée par les coefficients de ses matières.
+
+    `absents_a_zero` : règle du jury. Une matière sans note vaut zéro dans son
+    semestre ; un semestre entièrement vide vaut zéro dans l'année, avec son
+    poids. C'est ce qui permet de statuer sur un dossier incomplet plutôt que de
+    le laisser en blanc. Sans ce drapeau — relevés, écrans de consultation — un
+    semestre non saisi est simplement écarté et les poids se renormalisent : une
+    promotion en cours de saisie n'a pas à afficher des moyennes catastrophiques.
+
+    Rend `(moyenne, total_coefficients, notes)`. Le total des coefficients reste
+    celui des MATIÈRES de l'année — c'est lui que le PV affiche, et il ne se
+    confond pas avec la somme des poids de semestre.
     """
     codes = codes_semestres_du_niveau(inscription.niveau,
                                       inscription.classe.institution)
@@ -559,11 +586,39 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
             semestre__code__in=codes,
         ).select_related('matiere', 'semestre')
     )
-    return _agreger(
-        notes, absents_a_zero=absents_a_zero,
-        maquette=(maquette_de_lannee(inscription, annee_universitaire)
-                  if absents_a_zero else None),
-    )
+
+    maquette = (maquette_de_lannee(inscription, annee_universitaire)
+                if absents_a_zero else None)
+    # Le total des coefficients, inchangé : c'est la colonne « Total coef. » du
+    # PV, et elle doit continuer de dire le poids de l'année en matières.
+    _, poids_matieres, _ = _agreger(notes, absents_a_zero=absents_a_zero,
+                                    maquette=maquette)
+
+    rang = rang_du_niveau(inscription.niveau, inscription.classe.institution)
+    poids_semestres = PONDERATION_ANNUELLE.get(rang) or {}
+
+    cumul = Decimal('0')
+    poids_retenu = Decimal('0')
+    for code in codes:
+        poids = poids_semestres.get(code)
+        if poids is None:
+            continue
+        lot = [n for n in notes if n.semestre.code == code]
+        attendues = ([m for m in maquette if m.code_semestre == code]
+                     if maquette is not None else None)
+        moyenne_semestre, _, _ = _agreger(lot, absents_a_zero=absents_a_zero,
+                                          maquette=attendues)
+        if moyenne_semestre is None:
+            # Semestre muet : il compte zéro pour le jury — une année à moitié
+            # faite ne vaut pas une année réussie — et s'efface ailleurs.
+            if not absents_a_zero:
+                continue
+            moyenne_semestre = Decimal('0')
+        cumul += Decimal(moyenne_semestre) * poids
+        poids_retenu += poids
+
+    moyenne = _arrondi(cumul / poids_retenu) if poids_retenu else None
+    return moyenne, poids_matieres, notes
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -19,6 +19,7 @@ préparatoire.
 import io
 import logging
 from datetime import date
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 
@@ -39,7 +40,9 @@ CODE_SEMESTRE = 'S3'
 
 OPTIONS_PDF = {
     'page-size':    'A4',
-    'orientation':  'Portrait',
+    # wkhtmltopdf tranche sur cette option, pas sur le @page du gabarit : les
+    # deux disent paysage, mais c'est celle-ci qui fait foi.
+    'orientation':  'Landscape',
     'margin-top':   '12mm',
     'margin-bottom': '12mm',
     'margin-left':  '12mm',
@@ -48,8 +51,20 @@ OPTIONS_PDF = {
     'enable-local-file-access': None,
 }
 
-EN_TETES = ['Matricule', 'Moyenne 1re année', 'Moyenne S3',
+# Qui, puis ses chiffres, puis ce qu'on écrira. « Moyenne de classement » vient
+# APRÈS les deux termes qui la composent : on lit d'abord ce qui est constaté,
+# puis ce qui en découle et qui range la liste.
+EN_TETES = ['Matricule', 'Étudiant', 'Classe',
+            'Moyenne 1re année', 'Moyenne S3', 'Moyenne de classement',
             'Décision', 'Affectation']
+
+#: Largeurs des colonnes du classeur, dans l'ordre d'`EN_TETES`. Nommées ici
+#: parce que le bandeau s'en sert pour centrer le logo : elles doivent être
+#: posées avant lui, et ne plus bouger ensuite.
+LARGEURS_EXCEL = (16, 34, 12, 20, 14, 22, 24, 26)
+
+#: Les colonnes de moyennes, à formater en 0,00 et à centrer.
+COLONNES_MOYENNES = (4, 5, 6)
 
 
 def _moyenne_premiere_annee(inscription: InscriptionIPGEI):
@@ -82,6 +97,20 @@ def _moyenne_premiere_annee(inscription: InscriptionIPGEI):
         if moyenne is not None:
             return moyenne, candidate.annee_universitaire
     return None, ''
+
+
+def _classement(premiere, moyenne_s3):
+    """
+    La moyenne qui classe : `(1re année + S3) / 2`.
+
+    Rien si l'un des deux termes manque — un étudiant sans S3, ou arrivé sans
+    première année chez nous, n'est pas classable. Le déclarer à la moitié de ce
+    qu'il a serait pire que de le laisser hors rang : la feuille sert à
+    affecter, et une demi-moyenne y passerait pour une vraie.
+    """
+    if premiere is None or moyenne_s3 is None:
+        return None
+    return ((Decimal(premiere) + Decimal(moyenne_s3)) / 2).quantize(Decimal('0.01'))
 
 
 def lignes(annee_universitaire: str, niveau: str = '', institution=None,
@@ -130,15 +159,28 @@ def lignes(annee_universitaire: str, niveau: str = '', institution=None,
             'moyenne_annee1': premiere,
             'annee1':         annee_premiere,
             'moyenne_s3':     moyenne_s3,
+            # Ce qui classe : la première année et le S3 à parts ÉGALES.
+            #
+            #     classement = (moyenne de 1re année + moyenne S3) / 2
+            #
+            # La moyenne de première année est elle-même pondérée — S1 × 2 plus
+            # S2 × 3, divisé par 5 —, mais cela s'est joué à sa source : ici,
+            # les deux termes pèsent pareil. Classer sur le seul S3 revenait à
+            # oublier l'année qui a précédé, alors que l'affectation se décide
+            # sur le parcours.
+            'moyenne_classement': _classement(premiere, moyenne_s3),
         })
 
     # Du meilleur au moins bon : c'est un CLASSEMENT, et l'ordre est ce que la
     # feuille apporte. Sans moyenne, on ferme la marche plutôt que d'être
     # rangé premier par un tri qui prend l'absence pour un zéro.
-    resultats.sort(key=lambda r: (r['moyenne_s3'] is not None, r['moyenne_s3'] or 0),
-                   reverse=True)
+    resultats.sort(
+        key=lambda r: (r['moyenne_classement'] is not None,
+                       r['moyenne_classement'] or 0),
+        reverse=True)
     for rang, resultat in enumerate(resultats, start=1):
-        resultat['rang'] = rang if resultat['moyenne_s3'] is not None else None
+        resultat['rang'] = (rang if resultat['moyenne_classement'] is not None
+                            else None)
     return resultats
 
 
@@ -189,12 +231,15 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
     """
     Le même classement en classeur — pour le retrier et le remplir à l'écran.
 
-    Les deux dernières colonnes restent vides ici aussi. Elles sont larges :
-    c'est là qu'on écrit, au clavier comme au stylo.
+    Mêmes colonnes que le PDF, dans le même ordre, et la même A4 paysage à
+    l'impression : c'est la même feuille, sous deux formes. Les deux dernières
+    colonnes restent vides ici aussi, et larges : c'est là qu'on écrit, au
+    clavier comme au stylo.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     from .collecte import _entete_excel, _logo_reduit
 
@@ -210,15 +255,20 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
 
     # Les largeurs AVANT le bandeau : il s'en sert pour centrer le logo entre le
     # bloc français et le bloc arabe, et les poser après le laisserait de biais.
-    for colonne, largeur in enumerate((16, 20, 14, 26, 30), start=1):
+    for colonne, largeur in enumerate(LARGEURS_EXCEL, start=1):
         feuille.column_dimensions[get_column_letter(colonne)].width = largeur
 
     # Le même bandeau d'institution que le classeur de collecte : ces feuilles
     # circulent par courriel, et sans en-tête on ne sait plus de quel
     # établissement vient le fichier reçu. Le helper rend la première ligne
     # libre — tout ce qui suit s'y accroche plutôt qu'à des numéros en dur.
+    #
+    # `largeurs_figees` : le bandeau ne touche à aucune largeur — celles
+    # ci-dessus sont calculées pour tenir sur une A4 paysage, et l'élargissement
+    # automatique du helper les aurait fait déborder. Il se contente de poser le
+    # logo au milieu de la feuille telle qu'elle est.
     depart = _entete_excel(feuille, donnees, len(EN_TETES),
-                           _logo_reduit(donnees))
+                           _logo_reduit(donnees), largeurs_figees=True)
 
     feuille.cell(depart, 1, f'Classement {CODE_SEMESTRE} — {donnees["niveau"]} — '
                             f'{annee_universitaire}')
@@ -240,22 +290,48 @@ def generer_excel(annee_universitaire: str, niveau: str = '', institution=None,
     for index, ligne in enumerate(donnees['lignes'], start=ligne_entetes + 1):
         valeurs = [
             ligne['matricule'],
+            ligne['nom'],
+            ligne['classe'],
             float(ligne['moyenne_annee1']) if ligne['moyenne_annee1'] is not None else None,
             float(ligne['moyenne_s3']) if ligne['moyenne_s3'] is not None else None,
+            (float(ligne['moyenne_classement'])
+             if ligne['moyenne_classement'] is not None else None),
             None,   # Décision — remplie en séance
             None,   # Affectation — idem
         ]
         for colonne, valeur in enumerate(valeurs, start=1):
             cellule = feuille.cell(row=index, column=colonne, value=valeur)
             cellule.border = bordure
-            if colonne in (2, 3):
+            if colonne in COLONNES_MOYENNES:
                 cellule.number_format = '0.00'
                 cellule.alignment = Alignment(horizontal='center')
-            elif colonne == 1:
+            elif colonne == 2:
+                # Le nom est la seule colonne dont la longueur varie : à gauche
+                # comme on lit une liste, et replié plutôt que débordant sur la
+                # classe du voisin.
+                cellule.alignment = Alignment(horizontal='left', vertical='center',
+                                              wrap_text=True)
+            else:
                 cellule.alignment = Alignment(horizontal='center')
 
     # Le volet figé suit la ligne d'en-têtes, qui a glissé sous le bandeau.
     feuille.freeze_panes = f'A{ligne_entetes + 1}'
+
+    # ── Tenir dans la largeur d'une A4 paysage, comme le PDF ─────────────────
+    # `fitToWidth = 1` réduit l'échelle jusqu'à ce que les huit colonnes tiennent
+    # sur une page en largeur ; `fitToHeight = 0` laisse en revanche la liste
+    # déborder vers le bas — une promotion n'a pas à être écrasée pour tenir en
+    # hauteur. Sans `fitToPage`, les deux sont ignorés : c'est lui qui bascule la
+    # feuille en « ajuster » plutôt qu'en « échelle fixe ».
+    feuille.page_setup.orientation = 'landscape'
+    feuille.page_setup.paperSize = feuille.PAPERSIZE_A4
+    feuille.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    feuille.page_setup.fitToWidth = 1
+    feuille.page_setup.fitToHeight = 0
+    feuille.print_options.horizontalCentered = True
+    # La ligne d'en-têtes se répète en tête de chaque page imprimée : au-delà de
+    # la première, on ne sait plus quelle colonne porte quoi.
+    feuille.print_title_rows = f'{ligne_entetes}:{ligne_entetes}'
 
     tampon = io.BytesIO()
     classeur.save(tampon)

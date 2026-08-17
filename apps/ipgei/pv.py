@@ -231,6 +231,7 @@ def generer_excel(deliberation: Deliberation) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     from .collecte import _entete_excel, _logo_reduit
 
@@ -270,19 +271,39 @@ def generer_excel(deliberation: Deliberation) -> bytes:
 
     # Les largeurs AVANT le bandeau : il s'en sert pour centrer le logo entre le
     # bloc français et le bloc arabe.
+    #
+    # Motif et observations sont bornés à 26 et 22 : ce sont les deux seules
+    # colonnes de texte libre, et les laisser s'étendre poussait le tableau
+    # au-delà d'une A4 paysage. Le texte y passe à la ligne plutôt que de
+    # s'étaler — la page reste lisible, la colonne reste dans le cadre.
     largeurs = (([16, 30, 12] if semestrielle else [7, 16, 30, 12])
                 + [9] * len(codes_semestres)
                 + ([15] if semestrielle else [15, 12])
-                + ([14, 16, 26] if semestrielle else [24, 34, 26]))
+                + ([14, 16, 22] if semestrielle else [24, 26, 22]))
     for index_colonne, largeur in enumerate(largeurs, start=1):
         feuille.column_dimensions[get_column_letter(index_colonne)].width = largeur
+
+    # Les colonnes de texte libre, repérées par leur position : sur un PV de
+    # semestre il n'y a que « Observations », sur un PV annuel « Motif » la
+    # précède.
+    colonnes_texte = ({len(largeurs)} if semestrielle
+                      else {len(largeurs) - 1, len(largeurs)})
 
     # Le même bandeau d'institution que les fiches de collecte et le classement :
     # un PV circule par courriel, et sans en-tête on ne sait plus de quel
     # établissement vient le fichier reçu. Il rend la première ligne libre — tout
     # ce qui suit s'y accroche plutôt qu'à des numéros en dur.
     donnees = contexte(deliberation)
-    depart = _entete_excel(feuille, donnees, len(entetes), _logo_reduit(donnees))
+    # Sceau au MILIEU du tableau : laissé à l'avant-dernière colonne, il forçait
+    # l'équilibrage à gonfler « Observations » jusqu'à 148 caractères pour que le
+    # bloc arabe pèse autant que le français — et la feuille passait largement
+    # au-delà d'une A4 paysage.
+    # `largeurs_figees` : le bandeau ne touche à aucune largeur — il place le
+    # sceau au milieu EN LARGEUR de la feuille et l'y décale au pixel près.
+    # Sans cela, il élargissait la dernière colonne pour équilibrer ses deux
+    # blocs, et « Observations » enflait jusqu'à 148 caractères.
+    depart = _entete_excel(feuille, donnees, len(entetes), _logo_reduit(donnees),
+                           largeurs_figees=True)
 
     feuille.cell(depart, 1, f'{services.libelle_pv(deliberation)} — '
                             f'{deliberation.annee_universitaire}')
@@ -340,9 +361,33 @@ def generer_excel(deliberation: Deliberation) -> bytes:
             cellule.border = bordure
             if colonne in numeriques:
                 cellule.number_format = '0.00'
+            # Motif et observations sont du texte libre : sans retour à la ligne,
+            # une phrase un peu longue s'étale sur la droite et pousse le tableau
+            # hors de la page. Elle s'empile désormais dans sa colonne.
+            elif colonne in colonnes_texte:
+                cellule.alignment = Alignment(vertical='top', wrap_text=True)
 
     # Le volet figé suit la ligne d'en-têtes, qui a glissé sous le bandeau.
     feuille.freeze_panes = f'A{ligne_entetes + 1}'
+
+    # ── Tenir dans la largeur d'une A4 paysage ───────────────────────────────
+    # Deux réglages, et il faut les deux. `fitToWidth = 1` demande à Excel de
+    # réduire l'échelle jusqu'à ce que TOUTES les colonnes tiennent sur une seule
+    # page en largeur ; `fitToHeight = 0` le laisse en revanche déborder vers le
+    # bas autant qu'il faut — une promotion de quatre-vingts lignes n'a pas à
+    # être écrasée pour tenir en hauteur.
+    #
+    # Sans `fitToPage`, les deux précédents sont ignorés : c'est lui qui bascule
+    # la feuille en « ajuster », par opposition à « échelle fixe ».
+    feuille.page_setup.orientation = 'landscape'
+    feuille.page_setup.paperSize = feuille.PAPERSIZE_A4
+    feuille.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    feuille.page_setup.fitToWidth = 1
+    feuille.page_setup.fitToHeight = 0
+    feuille.print_options.horizontalCentered = True
+    # La ligne d'en-têtes se répète en tête de chaque page imprimée : au-delà de
+    # la première, on ne sait plus quelle colonne porte quoi.
+    feuille.print_title_rows = f'{ligne_entetes}:{ligne_entetes}'
 
     jury = classeur.create_sheet('Jury')
     for colonne, libelle in enumerate(['Rôle', 'Membre', 'Signature'], start=1):

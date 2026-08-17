@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, Max, Prefetch, Q
+from django.db.models.functions import Length
 from django.utils import timezone as _tz
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status
@@ -1636,7 +1637,11 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
             .filter(inscription__in=inscriptions, matiere=matiere, semestre=semestre)
             .select_related('inscription__etudiant', 'matiere', 'semestre')
             .prefetch_related('evaluations')
-            .order_by('inscription__numero_ordre', 'inscription__etudiant__nom')
+            # Ordre matricule : c'est celui des listes de l'IPGEI, donc celui
+            # sous les yeux de qui saisit. Length d'abord, sinon « 9 » passerait
+            # après « 10 » le jour où les matricules n'ont plus la même longueur.
+            .order_by(Length('inscription__etudiant__matricule'),
+                      'inscription__etudiant__matricule')
         )
         # Nombre de colonnes DS / examens = le max déjà saisi dans la classe,
         # pour que la grille s'élargisse d'elle-même quand on ajoute un DS.
@@ -2568,7 +2573,8 @@ class ClassementS3ViewSet(_ErreurMetierMixin, GenericViewSet):
                  'classe':          ligne['classe'],
                  'moyenne_annee1':  ligne['moyenne_annee1'],
                  'annee1':          ligne['annee1'],
-                 'moyenne_s3':      ligne['moyenne_s3']}
+                 'moyenne_s3':      ligne['moyenne_s3'],
+                 'moyenne_classement': ligne['moyenne_classement']}
                 for ligne in classement.lignes(annee, niveau, institution, classe)
             ])
 

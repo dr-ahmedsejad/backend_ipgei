@@ -318,7 +318,8 @@ def _logo_reduit(donnees: dict) -> bytes:
         return b''
 
 
-def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
+def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes,
+                  colonne_logo: int = None, largeurs_figees: bool = False) -> int:
     """
     Bandeau d'institution — le même que sur le PDF : intitulé français à
     gauche, logo au centre, arabe à droite, filet en dessous.
@@ -326,6 +327,21 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
     Le classeur circule autant que la feuille imprimée : sans en-tête, on ne
     savait plus de quel établissement venait le fichier reçu par courriel.
     Renvoie le numéro de la première ligne libre.
+
+    `colonne_logo` : où poser le sceau. Par défaut l'avant-dernière colonne, ce
+    qui convient aux feuilles étroites. Sur une feuille LARGE, l'appelant a tout
+    intérêt à désigner une colonne médiane : le bloc arabe se retrouverait sinon
+    seul dans la dernière colonne, que l'équilibrage devrait gonfler démesurément
+    pour égaler le bloc français — c'est ainsi qu'une colonne « Observations »
+    se retrouvait large de 148 caractères, et la feuille hors d'une A4 paysage.
+
+    `largeurs_figees` : l'appelant a déjà posé ses largeurs et ne veut pas qu'on
+    y touche. Le bandeau renonce alors à élargir quoi que ce soit, choisit lui-
+    même la colonne qui CONTIENT le milieu de la feuille, et décale le sceau à
+    l'intérieur de celle-ci pour que son centre tombe exactement au milieu. Le
+    numéro de colonne médian ne suffit pas : les colonnes n'ont pas la même
+    largeur, et viser la sixième sur onze laissait le sceau à 88 pixels du
+    centre.
     """
     from openpyxl.drawing.image import Image
     from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
@@ -337,7 +353,37 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
     # est à sa gauche, l'arabe tout ce qui est à sa droite. Serré dans la seule
     # colonne A — large de seize caractères, celle des matricules — l'intitulé
     # français se coupait en cinq lignes et débordait de la bande.
-    colonne_logo = max(2, nb_colonnes - 1)
+    # Le MILIEU EN LARGEUR, pas en numéro de colonne : on avance dans les
+    # largeurs jusqu'à franchir la moitié de la feuille, et c'est cette colonne
+    # qui porte le sceau. `decalage_logo` finit le travail à l'intérieur d'elle.
+    decalage_logo = None
+    if largeurs_figees:
+        largeurs_px = [_px_colonne(
+            feuille.column_dimensions[get_column_letter(c)].width or 0)
+            for c in range(1, nb_colonnes + 1)]
+        # On vise le BORD GAUCHE du sceau, pas son centre : ancré sur la colonne
+        # qui contient le milieu, il ne pouvait pas reculer — un décalage négatif
+        # n'existe pas — et restait à quarante pixels du centre.
+        bord_gauche = max(0.0, sum(largeurs_px) / 2 - _COTE_LOGO / 2)
+        cumul = 0.0
+        for index, largeur in enumerate(largeurs_px, start=1):
+            if cumul + largeur > bord_gauche:
+                colonne_logo = index
+                decalage_logo = bord_gauche - cumul
+                break
+            cumul += largeur
+
+    colonne_logo = colonne_logo or max(2, nb_colonnes - 1)
+    # Jamais la colonne A — le bloc français n'aurait plus où s'écrire — ni
+    # au-delà de la dernière. Quand les largeurs sont figées, le décalage calculé
+    # plus haut reste valable : il se mesure depuis le bord de CETTE colonne.
+    borne = max(2, min(colonne_logo, nb_colonnes))
+    if borne != colonne_logo and decalage_logo is not None:
+        largeurs_px = [_px_colonne(
+            feuille.column_dimensions[get_column_letter(c)].width or 0)
+            for c in range(1, nb_colonnes + 1)]
+        decalage_logo += sum(largeurs_px[borne - 1:colonne_logo - 1]) or 0
+    colonne_logo = borne
     lettre_logo  = get_column_letter(colonne_logo)
     derniere     = get_column_letter(nb_colonnes)
 
@@ -358,9 +404,13 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
         if actuelle < largeur:
             feuille.column_dimensions[lettre].width = largeur
 
-    au_moins(1, 24 if colonne_logo == 2 else 16)
-    au_moins(colonne_logo, 13)
-    if nb_colonnes > colonne_logo:
+    # Ces minimums servent aux feuilles étroites, dont le bandeau serait sinon
+    # illisible. Quand l'appelant fige ses largeurs, on n'y touche pas : c'est
+    # lui qui a calculé sa page, et un élargissement d'office la ferait déborder.
+    if not largeurs_figees:
+        au_moins(1, 24 if colonne_logo == 2 else 16)
+        au_moins(colonne_logo, 13)
+    if nb_colonnes > colonne_logo and not largeurs_figees:
         au_moins(colonne_logo + 1, 26)
 
     # Blocs gauche et droite mis à ÉGALE largeur, faute de quoi la colonne du
@@ -377,7 +427,7 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
 
     colonnes_fr = list(range(1, colonne_logo))
     colonnes_ar = list(range(colonne_logo + 1, nb_colonnes + 1))
-    if colonnes_fr and colonnes_ar:
+    if colonnes_fr and colonnes_ar and not largeurs_figees:
         ecart = largeur_px(colonnes_fr) - largeur_px(colonnes_ar)
         if ecart > 0:
             au_moins(nb_colonnes,
@@ -418,10 +468,15 @@ def _entete_excel(feuille, donnees: dict, nb_colonnes: int, logo: bytes) -> int:
             feuille.column_dimensions[lettre_logo].width or 13)
         hauteur_case = sum(_px_ligne(feuille.row_dimensions[ligne].height or 22)
                            for ligne in (1, 2, 3))
+        # Décalage calculé sur toute la feuille quand les largeurs sont figées,
+        # centré dans sa seule colonne sinon. Borné à la cellule : une image
+        # ancrée au-delà de sa colonne déborde sur la suivante.
+        decalage = (decalage_logo if decalage_logo is not None
+                    else (largeur_case - _COTE_LOGO) / 2)
         image.anchor = OneCellAnchor(
             _from=AnchorMarker(
                 col=colonne_logo - 1,
-                colOff=_emu(max(0, (largeur_case - _COTE_LOGO) / 2)),
+                colOff=_emu(min(max(0, decalage), max(0, largeur_case - 1))),
                 row=0,
                 rowOff=_emu(max(0, (hauteur_case - _COTE_LOGO) / 2)),
             ),

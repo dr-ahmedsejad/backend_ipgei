@@ -1,7 +1,7 @@
 {% comment %}
 Classement de S3 — feuille de travail de la séance d'affectation.
 
-Deux colonnes de chiffres, et deux colonnes VIDES. Ces dernières sont l'objet
+De qui il s'agit, ses chiffres, et deux colonnes VIDES. Ces dernières sont l'objet
 du document : la décision et l'affectation s'y écrivent à la main, en séance.
 Elles sont donc larges et hautes, avec un filet clair — on écrit dessus, on ne
 les lit pas.
@@ -16,7 +16,9 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
 <meta charset="UTF-8">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  @page { size: A4 portrait; }
+  /* Paysage : neuf colonnes, dont un nom en clair et deux colonnes à écrire à
+     la main. En portrait, il fallait rogner les unes ou les autres. */
+  @page { size: A4 landscape; }
   body {
     font-family: Calibri, 'Segoe UI', Arial, sans-serif;
     font-size: 10.5pt; color: #1a1a1a;
@@ -44,9 +46,13 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
   }
   .classement .rang { width: 12mm; font-weight: 700; }
   .classement .mat  { width: 24mm; font-weight: 700; }
-  .classement .moy  { width: 26mm; }
+  /* Le nom prend ce qui reste : c'est la seule colonne dont la longueur varie,
+     et l'appel se fait dessus. Aligné à gauche, comme on lit une liste. */
+  .classement .nom  { text-align: left; padding-left: 6px; }
+  .classement .cls  { width: 20mm; }
+  .classement .moy  { width: 24mm; }
   /* Les deux colonnes à remplir : larges, et sans rien dedans. */
-  .classement .vide { width: 38mm; }
+  .classement .vide { width: 36mm; }
 </style>
 </head>
 <body>
@@ -68,8 +74,11 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
     <tr>
       <th class="rang">Rang</th>
       <th class="mat">Matricule</th>
+      <th class="nom">Étudiant</th>
+      <th class="cls">Classe</th>
       <th class="moy">Moyenne 1re année</th>
       <th class="moy">Moyenne {{ code_semestre }}</th>
+      <th class="moy">Moyenne de classement</th>
       <th class="vide">Décision</th>
       <th class="vide">Affectation</th>
     </tr>
@@ -79,6 +88,8 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
     <tr>
       <td class="rang">{{ ligne.rang|default_if_none:"—" }}</td>
       <td class="mat">{{ ligne.matricule }}</td>
+      <td class="nom">{{ ligne.nom }}</td>
+      <td class="cls">{{ ligne.classe }}</td>
       {% comment %}
       Un tiret, et non un zéro, quand la moyenne manque : l'établissement n'a
       pas cette note — l'étudiant vient d'ailleurs, ou son année n'est pas
@@ -86,11 +97,12 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
       {% endcomment %}
       <td class="moy">{{ ligne.moyenne_annee1|default_if_none:"—"|floatformat:2 }}</td>
       <td class="moy">{{ ligne.moyenne_s3|default_if_none:"—"|floatformat:2 }}</td>
+      <td class="moy"><b>{{ ligne.moyenne_classement|default_if_none:"—"|floatformat:2 }}</b></td>
       <td class="vide"></td>
       <td class="vide"></td>
     </tr>
     {% empty %}
-    <tr><td colspan="6">Aucun étudiant de deuxième année à classer.</td></tr>
+    <tr><td colspan="9">Aucun étudiant de deuxième année à classer.</td></tr>
     {% endfor %}
   </tbody>
 </table>
