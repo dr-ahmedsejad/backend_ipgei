@@ -220,7 +220,8 @@ services:
       - ../media:/var/www/media:ro
       - static:/var/www/static:ro
       # Page « en construction » servie sur iss-gp.mr / www (site ISS a venir).
-      - ./iss-placeholder:/var/www/iss:ro
+      # Rangée avec les autres vestiges SIGA : elle ne concerne pas l'IPGEI.
+      - ../docs_siga/iss-placeholder:/var/www/iss:ro
       # Certificats Let's Encrypt — emis sur l'HOTE par `certbot certonly
       # --standalone` puis montes en lecture seule dans le conteneur nginx.
       - /etc/letsencrypt:/etc/letsencrypt:ro

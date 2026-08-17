@@ -91,3 +91,11 @@ Thumbs.db
 
 # Sauvegardes locales creees avant migration structurelle (dumps pg_dump).
 .backup/
+
+# Documentation hors périmètre — conservée sur disque, hors du dépôt.
+#   docs_siga/  vestiges SIGA antérieurs au fork (analyses, guide DigitalOcean,
+#               script pgloader, schéma canonique, placeholder du site ISS)
+#   docs/       notes de travail : audit, migration PostgreSQL, plan IPGEI
+# Ces fichiers restent dans l'historique : `git log -- docs/…` les retrouve.
+docs_siga/
+docs/
