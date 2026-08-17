@@ -1,0 +1,168 @@
+# ════════════════════════════════════════════════════════════════════════════
+# IPGEI — pile de production, sur un VPS qui héberge DÉJÀ d'autres services.
+#
+#   http://208.85.19.82:9090   —  HTTP simple, sans TLS (choix assumé)
+#
+# ┌── POURQUOI CE FICHIER EXISTE ────────────────────────────────────────────┐
+# │ `docker-compose.yml`, hérité de SIGA, fige ses conteneurs sous les noms  │
+# │ siga-db, siga-backend, siga-frontend, siga-nginx… — EXACTEMENT ceux de   │
+# │ la pile SIGA en service sur cette machine. Le lancer ici réclamerait des │
+# │ noms déjà pris : au mieux il échoue, au pire il remplace SIGA.           │
+# │                                                                          │
+# │ Tout est donc préfixé `ipgei-`, et le projet Compose s'appelle `ipgei` — │
+# │ ses volumes naissent `ipgei_*` et ne croisent jamais `siga_*`.           │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# Écarts assumés par rapport à la pile SIGA :
+#   • pas de Redis — Django retombe sur son cache mémoire dès que REDIS_URL
+#     est absent, et la mémoire est comptée sur ce serveur ;
+#   • pas d'Adminer — un client SQL exposé sur une machine de production est
+#     une porte de plus à surveiller ; `docker exec ipgei-db psql` suffit ;
+#   • une base à part, plutôt que celle de SIGA : partager `siga-db` ferait
+#     partager le sort, et un `down -v` sur SIGA emporterait IPGEI.
+#
+# Démarrage :  docker compose -f docker-compose.ipgei.yml up -d
+# ════════════════════════════════════════════════════════════════════════════
+
+name: ipgei
+
+services:
+
+  # ─── PostgreSQL 18 ────────────────────────────────────────────────────────
+  db:
+    image: postgres:18
+    container_name: ipgei-db
+    restart: always
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-ipgei}
+      POSTGRES_USER:     ${DB_USER:-ipgei}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?definir DB_PASSWORD dans .env}
+      # Tri « à la française » : accents et casse ordonnés comme on les attend
+      # dans une liste d'appel.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=icu --icu-locale=fr-FR --locale=C.UTF-8"
+    volumes:
+      # postgres:18 monte le volume sur /var/lib/postgresql (et non plus sur
+      # .../data comme en 16) : le monter ailleurs le ferait ignorer en silence,
+      # avec des données qui disparaissent au redémarrage.
+      - pg_data:/var/lib/postgresql
+      # ── AMORÇAGE — la base de l'atelier est reprise ─────────────────────
+      # `dump-ipgei.sql.gz` doit être présent dans ce dossier AVANT le premier
+      # `up` : l'image ne le lit qu'une fois, quand le volume est vierge. Passé
+      # ce moment il est ignoré, et il faut `down -v` pour recommencer.
+      #
+      # Produit par :
+      #   pg_dump --no-owner --no-privileges -U postgres IPGEI | gzip > dump-ipgei.sql.gz
+      # Les deux drapeaux ne sont pas décoratifs : sans eux, les ALTER … OWNER
+      # du dump désignent des rôles absents du conteneur et l'import s'arrête
+      # net (l'entrypoint importe avec ON_ERROR_STOP).
+      - ./dump-ipgei.sql.gz:/docker-entrypoint-initdb.d/00-init.sql.gz:ro
+    healthcheck:
+      # Volontairement générique — pas de test sur une table précise : au tout
+      # premier démarrage la base est vide, le schéma n'arrive qu'avec `migrate`,
+      # et un test sur une table ferait attendre le backend indéfiniment.
+      # -h 127.0.0.1 force le TCP : pendant un import, PostgreSQL sert d'abord
+      # sur le socket local, et sans cela on se croirait prêt trop tôt.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    # Aucun port publié : la base n'est jointe que par le réseau du projet.
+
+  # ─── Django ───────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ipgei-backend
+    container_name: ipgei-backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Le profil `docker` n'impose pas HTTPS — c'est celui qui convient ici.
+      # `production` forcerait la redirection SSL et des cookies Secure, que le
+      # navigateur refuse d'émettre en clair : personne ne pourrait se connecter.
+      DJANGO_SETTINGS_MODULE: siga.settings.docker
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?definir SECRET_KEY dans .env}
+
+      # Django compare le NOM D'HÔTE seul : le port n'a pas sa place ici.
+      ALLOWED_HOSTS: ${PUBLIC_IP:-208.85.19.82},localhost,127.0.0.1,backend
+
+      DB_ENGINE: postgresql
+      DB_NAME:   ${DB_NAME:-ipgei}
+      DB_USER:   ${DB_USER:-ipgei}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST:   db
+      DB_PORT:   5432
+
+      # CORS, lui, veut l'origine complète, port compris. En pratique peu
+      # sollicité : Nginx réécrit l'URL de l'API vers l'origine d'arrivée, donc
+      # les appels du navigateur restent sur la même origine que la page.
+      CORS_ALLOWED_ORIGINS: http://${PUBLIC_IP:-208.85.19.82}:${PUBLIC_PORT:-9090},http://localhost:${PUBLIC_PORT:-9090}
+
+      # EN CLAIR : les cookies ne doivent PAS être marqués Secure, sinon le
+      # navigateur ne les renvoie jamais et la connexion échoue sans message.
+      DJANGO_COOKIE_SECURE: "False"
+
+      # Le QR d'un document officiel pointe vers cette base d'URL. Il est gravé
+      # dans le PDF : le changer plus tard n'atteint pas les pièces déjà émises.
+      DOCUMENTS_BASE_URL: http://${PUBLIC_IP:-208.85.19.82}:${PUBLIC_PORT:-9090}
+
+      # Instance UNIQUE, qui fait autorité. Le mode miroir reste au repos.
+      MIRROR_MODE: "False"
+
+      USE_PROF_TYPE_HISTORY: "true"
+      JWT_ACCESS_TOKEN_LIFETIME_MINUTES: "60"
+      JWT_REFRESH_TOKEN_LIFETIME_DAYS:   "7"
+      AXES_FAILURE_LIMIT:   "5"
+      AXES_COOLOFF_MINUTES: "15"
+      BACKUP_BASE_DIR: /app/backups
+      # REDIS_URL volontairement absent → cache mémoire locale.
+    volumes:
+      - ../media:/app/media
+      - ../../backups:/app/backups
+      # Certificat de signature des PDF : sur l'hôte, donc il survit aux
+      # recréations de conteneur.
+      - ../secrets:/app/secrets
+      - static:/app/staticfiles
+      - logs:/app/logs
+
+  # ─── Next.js ──────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../../frontend_ipgei
+      dockerfile: Dockerfile
+      args:
+        # Placeholder réécrit au vol par Nginx selon l'hôte d'arrivée : une
+        # seule image sert l'IP, un futur nom de domaine, ou le LAN.
+        NEXT_PUBLIC_API_URL: http://__SIGA_API_HOST__
+    image: ipgei-frontend
+    container_name: ipgei-frontend
+    restart: always
+    depends_on:
+      - backend
+
+  # ─── Nginx ────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: ipgei-nginx
+    restart: always
+    ports:
+      # 9090 sur l'hôte → 80 dans le conteneur. Ni 80 ni 443 ne sont réclamés :
+      # ils appartiennent au Nginx de l'hôte, qui sert déjà d'autres sites.
+      - "${PUBLIC_PORT:-9090}:80"
+    volumes:
+      - ./nginx.ipgei.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../media:/var/www/media:ro
+      - static:/var/www/static:ro
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pg_data:
+  static:
+  logs:
