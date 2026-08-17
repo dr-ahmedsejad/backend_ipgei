@@ -122,8 +122,8 @@ nano .env
 Le dump est **déjà produit et vérifié** :
 
 ```
-dump-ipgei.sql.gz   1 392 492 octets
-sha256              968192ABC43376AFCBD0ADB1…
+dump-ipgei.sql.gz   765 647 octets
+sha256              947af4114e47a5a1dc28a2bb52de0b63…
 ```
 
 Il a été rechargé dans une base jetable, comparée table par table à la base
@@ -133,7 +133,20 @@ restaurée n'en est pas une.
 
 ```bash
 scp dump-ipgei.sql.gz iss@208.85.19.82:/opt/ipgei/deploy/
-sha256sum /opt/ipgei/deploy/dump-ipgei.sql.gz   # doit correspondre
+
+# ── CONTRÔLER L'ARCHIVE, PAS SEULEMENT SA TAILLE ────────────────────────
+# Leçon d'un échec réel : une première archive avait été compressée en
+# redirigeant la sortie sous PowerShell, qui réencode le flux et détruit le
+# binaire. Elle pesait un poids crédible, son empreinte était stable, et
+# l'import s'est cassé sur « not in gzip format ». Pire : `restart: always`
+# a relancé le conteneur, qui a trouvé un répertoire non vide et affiché
+# « Skipping initialization » — l'échec a disparu derrière un conteneur sain,
+# avec des tables créées par migrate et zéro ligne dedans.
+#
+# Sous Windows, compresser depuis Git Bash (`gzip -9 -c x.sql > x.sql.gz`),
+# jamais avec la redirection `>` de PowerShell.
+sha256sum /opt/ipgei/deploy/dump-ipgei.sql.gz   # 947af411…
+gzip -t   /opt/ipgei/deploy/dump-ipgei.sql.gz && echo "ARCHIVE VALIDE"
 ```
 
 Le compose le monte déjà. **Il doit être en place avant le premier `up`** : il
