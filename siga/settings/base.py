@@ -82,6 +82,10 @@ MIDDLEWARE = [
     'core.mirror.MirrorReadOnlyMiddleware',
     'core.middleware.AuditMiddleware',                          # après auth + axes
     'core.cache_middleware.cache_control_lookup_middleware',    # F-5 : Cache-Control sur lookups
+    # Rabat `Content-Disposition: attachment` sur `inline` pour les seules
+    # requetes fetch/XHR : sans quoi les gestionnaires de telechargement (IDM)
+    # detournent la reponse et tuent la requete du frontend. Voir le module.
+    'core.download_middleware.attachment_inline_pour_fetch_middleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

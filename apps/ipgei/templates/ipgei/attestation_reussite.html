@@ -1,0 +1,257 @@
+{% comment %}
+Attestation de réussite.
+
+Reprend À L'IDENTIQUE l'en-tête de l'attestation CNIM — double tutelle, État-
+Major, Groupe Polytechnique, emblème national, bloc « N° / date » —, parce que
+c'est l'en-tête officiel de l'institut : deux pièces émises le même jour avec
+deux bandeaux différents se liraient comme venant de deux établissements.
+
+Ce document-ci, en revanche, DIT LA MOYENNE : c'est sa raison d'être. La
+moyenne imprimée est la moyenne annuelle pondérée (S1×2 + S2×3)/5 en première
+année, (S3+S4)/2 en seconde — voir `services.PONDERATION_ANNUELLE`. C'est le
+nombre que l'étudiant produira devant une école, il doit être celui du jury.
+
+Signé par le DIRECTEUR, comme le CNIM : c'est lui qui atteste un résultat au
+dehors.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  @page { size: A4 portrait; margin: 0; }
+
+  /* ── Palette ─────────────────────────────────────────────────────────
+     Celle de l'épreuve validée, et celle du drapeau : le vert national de
+     l'institut, l'or et le rouge. Les valeurs sont écrites en clair — le
+     moteur de rendu (WebKit de wkhtmltopdf) ignore les variables CSS, une
+     couleur passée par `var()` sortirait en noir sans le dire.
+       vert    #006233   ·  or   #FFC400   ·  rouge #CD2A3E
+       vert sourd #2C5F45 pour le nom de l'institut
+     ─────────────────────────────────────────────────────────────────── */
+  body { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 11pt; color: #111; }
+  /* AUCUNE marge ici : elles sont posées par wkhtmltopdf (`OPTIONS_PDF_CNIM`).
+     Les poser des deux côtés les additionnait, et surtout une `.page` large de
+     210 mm dans une zone imprimable de 186 mm faisait RÉDUIRE la page entière
+     par le moteur, sans rien signaler — d'où un document rétréci, décalé, au
+     blanc plus large à droite qu'à gauche. Largeur libre : le contenu occupe
+     exactement la zone imprimable. */
+  .page { width: auto; padding: 0; }
+
+  /* ── Bandeau : tutelles à gauche, État à droite ─────────────────────── */
+  .entete { width: 100%; border-collapse: collapse; }
+  .entete td { vertical-align: top; }
+  /* Les deux colonnes se touchaient : les tutelles à gauche et l'État à droite
+     se lisaient comme un seul bloc de texte. Une gouttière les sépare, et les
+     corps sont remontés — l'en-tête d'un document officiel se lit à bout de
+     bras, pas à la loupe. */
+  /* MÊME corps des deux côtés : « Ministère de la Défense » et « RÉPUBLIQUE
+     ISLAMIQUE DE MAURITANIE » sont de même rang, une taille plus petite à
+     gauche donnait à lire une hiérarchie qui n'existe pas. Les deux colonnes
+     partagent donc 11 pt, et les devises 10 pt de part et d'autre. */
+  .tutelle {
+    width: 49%; text-align: center; font-size: 11pt; line-height: 1.3;
+    padding-right: 5mm;
+  }
+  .etat {
+    width: 51%; text-align: center; font-size: 11pt; line-height: 1.3;
+    padding-left: 5mm;
+  }
+  .ar { font-family: "Segoe UI", "Cairo", Tahoma, sans-serif; direction: rtl; }
+  .fr { font-weight: 700; }
+  .tutelle .bloc { margin-bottom: 3mm; }
+
+  /* Le filet est fait de trois cellules pleines, non d'un dégradé : ce moteur
+     ne rend pas `linear-gradient`, et la bande disparaissait en silence — le
+     document sortait sans une seule couleur. */
+  .filet-tricolore { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  .filet-tricolore td { height: 3px; font-size: 0; line-height: 0; width: 33.33%; }
+  .filet-vert  { background-color: #006233; }
+  .filet-or    { background-color: #FFC400; }
+  .filet-rouge { background-color: #CD2A3E; }
+
+  /* Marque de l'institut : le sceau, et son nom en vert à côté. Le sceau seul
+     porte son nom en anneau, illisible à 12 mm — c'est le texte qui le dit. */
+  .marque { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .marque td { vertical-align: middle; }
+  .marque .sceau { width: 26mm; text-align: right; padding-right: 3mm; }
+  .marque .sceau img { height: 19mm; }
+  .marque .nom {
+    text-align: left; font-size: 8pt; line-height: 1.3; color: #2C5F45;
+    font-weight: 700;
+  }
+  .marque .nom .ar { font-size: 8pt; font-weight: 400; }
+
+  /* ── Coin droit : numéro, date, mention du signataire ───────────────── */
+  .champs { width: 100%; border-collapse: collapse; margin-top: 5mm; font-size: 11pt; }
+  .champs td { padding: 2px 0; }
+  .champs .lab { font-weight: 700; white-space: nowrap; }
+  .champs .val {
+    border-bottom: 1px solid #333; min-width: 45mm; padding: 0 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* `nowrap` comme la mention française d'en face : les corps agrandis, « رقم
+     التحضيري » se coupait en deux lignes et la mention arabe ne faisait plus
+     face à la sienne. */
+  .champs .lab-ar {
+    text-align: right; white-space: nowrap; padding-left: 3mm;
+    font-family: "Segoe UI", "Cairo", Tahoma, sans-serif;
+  }
+
+  .signataire-haut { text-align: center; margin-top: 9mm; font-size: 12pt; }
+  .signataire-haut .trait { border-bottom: 1px solid #333; width: 42mm; margin: 4mm auto 0; }
+
+  /* ── Corps ──────────────────────────────────────────────────────────── */
+  /* Ni capitales ni interlettrage : le modele de l'institut porte « Attestation »
+     en bas de casse, gras et centre. */
+  .titre {
+    text-align: center; font-size: 14pt; font-weight: 700;
+    margin: 16mm 0 12mm;
+  }
+  /* Justifié, comme la piece que l'institut delivre.
+     Le CNIM, lui, reste au fer a gauche : la justification de ce moteur avait
+     colle « (IPGEI), autorise » sur une ligne trop pleine. Le risque existe donc
+     ici aussi — il se verifie en comparant le texte extrait du PDF a la version
+     non justifiee : un mot soude fait disparaitre une espace, et les deux
+     suites de mots cessent d'etre identiques. */
+  .texte { font-size: 11.5pt; line-height: 1.7; text-align: justify; }
+  .identite { margin: 8mm 0; font-size: 11.5pt; line-height: 2.1; }
+  .identite .cle { font-weight: 700; }
+  .signature-bas { margin-top: 18mm; text-align: right; font-weight: 700; font-size: 11.5pt; }
+  .qr { margin-top: 14mm; }
+  .qr img { width: 48px; height: 48px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <table class="entete">
+    <tr>
+      <td class="tutelle">
+        {% for ligne in tutelles %}
+        <div class="bloc">
+          <div class="ar">{{ ligne.ar }}</div>
+          <div class="fr">{{ ligne.fr }}</div>
+        </div>
+        {% endfor %}
+        <table class="marque">
+          <tr>
+            {% if logo_b64 %}
+            <td class="sceau"><img src="{{ logo_b64 }}" alt=""></td>
+            {% endif %}
+            {% comment %}
+            Pas de <br> forcé : la colonne s'est resserrée pour dégager la
+            gouttière, et la coupure imposée tombait au mauvais endroit.
+            {% endcomment %}
+            <td class="nom">
+              <div class="ar">المعهد التحضيري لمدارس المهندسين الكبرى</div>
+              Institut Préparatoire aux Grandes Écoles d&rsquo;Ingénieurs
+            </td>
+          </tr>
+        </table>
+      </td>
+
+      <td class="etat">
+        <div class="ar" style="font-weight:700;font-size:13pt;">الجمهورية الإسلامية الموريتانية</div>
+        <div class="ar" style="font-size:10pt;">شرف – إخاء – عدل</div>
+        <div class="fr" style="margin-top:4px;">RÉPUBLIQUE ISLAMIQUE DE MAURITANIE</div>
+        <div style="font-size:10pt;">Honneur - Fraternité - Justice</div>
+        <table class="filet-tricolore">
+          <tr>
+            <td class="filet-vert"></td>
+            <td class="filet-or"></td>
+            <td class="filet-rouge"></td>
+          </tr>
+        </table>
+
+        {% comment %}
+        Le numéro et la date sont IMPRIMÉS et non laissés en blanc : le document
+        est enregistré au registre, son numéro de série existe déjà. Les écrire
+        à la main reviendrait à tenir un second registre à côté du premier.
+        {% endcomment %}
+        <table class="champs">
+          <tr>
+            <td class="lab">N° IPGEI :</td>
+            <td class="val">{{ numero_serie }}</td>
+            <td class="lab-ar">: رقم التحضيري</td>
+          </tr>
+          <tr>
+            <td class="lab">{{ ville }}, le :</td>
+            <td class="val">{{ date_edition }}</td>
+            <td class="lab-ar">: {{ ville_ar }} في</td>
+          </tr>
+        </table>
+
+        {% comment %}
+        « المدير » ne veut dire qu'une chose : le directeur. Quand un autre
+        signe — un adjoint, par ordre —, le bandeau se réduit au trait : mieux
+        vaut une place vide à signer qu'une mention qui désigne quelqu'un
+        d'autre que la main qui signera.
+        {% endcomment %}
+        <div class="signataire-haut">
+          {% if signataire.est_directeur %}
+          <div class="ar">المدير</div>
+          <div class="fr">{{ signataire.titre }}</div>
+          {% endif %}
+          <div class="trait"></div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  {% comment %}
+  « Attestation », sans plus : c'est le titre de la piece que l'institut
+  delivre. « Attestation de reussite » est le nom du type au registre, pas
+  celui qui s'imprime — le papier remis a l'etudiant doit etre identique a
+  celui qu'il connait.
+  {% endcomment %}
+  <div class="titre">Attestation</div>
+
+  <div class="texte">
+    {% comment %}
+    Le nom du signataire ne figure PAS dans cette phrase : le modele de
+    l'institut ouvre sur la seule fonction — « Je soussigne, Directeur des
+    Etudes de l'IPGEI » —, et le nom n'apparait qu'au bas, au-dessus du trait.
+    L'y ajouter le ferait lire deux fois.
+    {% endcomment %}
+    Je soussigné, {{ signataire.titre }} de l&rsquo;{{ institution.nom_fr }} (IPGEI),
+    atteste par
+    la présente que {% if civilite %}{{ civilite }} {% endif %}<strong>{{ etudiant.nom_display }}</strong>{% if etudiant.date_naissance %},
+    né{{ e }} le {{ etudiant.date_naissance|date:"j F Y" }}{% if etudiant.lieu_naissance_fr %} à {{ etudiant.lieu_naissance_fr }}{% endif %}{% endif %},
+    a suivi avec assiduité sa {{ rang_lettres }} année de formation en
+    {% if formation and formation != code_niveau %}{{ formation }} ({{ code_niveau }}){% else %}{{ code_niveau }}{% endif %} au sein de l&rsquo;IPGEI, au titre de
+    l&rsquo;année universitaire {{ annee_universitaire }}.
+  </div>
+
+  {% comment %}
+  La moyenne se dit sur la même ligne que la décision, comme sur la pièce que
+  l'institut délivre : c'est le couple « admis, avec telle moyenne » qui fait
+  l'attestation, et les séparer inviterait à lire l'un sans l'autre.
+
+  Elle est absente quand aucune note ne permet de la calculer — mieux vaut une
+  attestation qui n'en porte pas qu'un « 0,00/20 » sous le nom d'un admis.
+  {% endcomment %}
+  <div class="texte" style="margin-top:6mm;">
+    {{ il_elle }} a été {{ suite }}{% if moyenne is not None %}, avec une moyenne
+    générale annuelle de <strong>{{ moyenne|floatformat:2 }}/20</strong>{% endif %}.
+  </div>
+
+  <div class="texte" style="margin-top:8mm;">
+    En foi de quoi, la présente attestation de réussite lui est délivrée
+    pour servir et valoir ce que de droit.
+  </div>
+
+  <div class="signature-bas">{{ signataire.nom }}</div>
+
+  {% comment %}
+  Le QR reste, discret : c'est le dispositif de vérification commun à toutes
+  les pièces IPGEI. L'original n'en porte pas, mais lui n'est pas vérifiable.
+  {% endcomment %}
+  {% if qr_b64 %}
+  <div class="qr"><img src="{{ qr_b64 }}" alt="Vérification"></div>
+  {% endif %}
+
+</div>
+</body>
+</html>

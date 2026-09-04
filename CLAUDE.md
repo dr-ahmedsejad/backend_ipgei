@@ -97,6 +97,18 @@ remplace la moyenne que s'il est meilleur.
   tenir sur une A4 paysage.
 - **PDF** : `wkhtmltopdf` + polices Microsoft sont dans l'image Docker. Forcer à
   la fois `width` et `height` sur un sceau non carré l'écrase.
+- **Documents lus en `fetch` + blob** : ne jamais leur laisser de
+  `Content-Disposition`. Les gestionnaires de téléchargement — Internet Download
+  Manager en tête, très répandu — s'y accrochent, et un simple
+  `inline; filename="….pdf"` suffit : ils en lisent l'extension, redemandent
+  l'URL pour leur compte, enregistrent le fichier et **tuent la requête de la
+  page**. Le symptôme trompe : Chrome affiche « Failed to fetch » doublé d'un
+  message CORS, alors que le serveur a répondu 200 avec les bons en-têtes et que
+  le fichier est bien arrivé — par IDM, pas par l'application. Signe distinctif :
+  la vue s'exécute **deux fois** par clic, une fois pour chacun.
+  `core/download_middleware.py` retire l'en-tête pour les seules requêtes
+  `Sec-Fetch-Mode: cors|same-origin` ; une navigation réelle (`navigate`) le
+  conserve, les téléchargements par lien direct restent donc inchangés.
 
 ## Mode miroir — `core/mirror.py`, `core/sync.py`
 

@@ -32,10 +32,11 @@ TYPE_RELEVE_ANNUEL   = 'ipgei_releve_annuel'
 TYPE_DECISION        = 'ipgei_decision_deliberation'
 TYPE_CNIM            = 'ipgei_attestation_cnim'
 TYPE_ATTESTATION     = 'ipgei_attestation_inscription'
+TYPE_REUSSITE        = 'ipgei_attestation_reussite'
 TYPE_RECU            = 'ipgei_recu_paiement'
 
 TYPES_IPGEI = [TYPE_RELEVE_SEMESTRE, TYPE_RELEVE_ANNUEL, TYPE_DECISION, TYPE_CNIM,
-               TYPE_ATTESTATION, TYPE_RECU]
+               TYPE_ATTESTATION, TYPE_REUSSITE, TYPE_RECU]
 
 # Préfixes de numérotation. Distincts de ceux du socle LMD pour qu'un numéro
 # identifie sans ambiguïté le document IPGEI dont il provient.
@@ -45,6 +46,7 @@ PREFIXES = {
     TYPE_DECISION:        'IDD',
     TYPE_CNIM:            'ICN',
     TYPE_ATTESTATION:     'IAI',
+    TYPE_REUSSITE:        'IAR',
     TYPE_RECU:            'IRP',
 }
 
@@ -54,6 +56,7 @@ TEMPLATES = {
     TYPE_DECISION:        'ipgei/decision_deliberation.html',
     TYPE_CNIM:            'ipgei/attestation_cnim.html',
     TYPE_ATTESTATION:     'ipgei/attestation_inscription.html',
+    TYPE_REUSSITE:        'ipgei/attestation_reussite.html',
     TYPE_RECU:            'ipgei/recu_paiement.html',
 }
 
@@ -429,7 +432,9 @@ def _rendre(type_document: str, contexte: dict) -> bytes:
         # ici aurait donné deux pièces jumelles dont l'une seule porte le NB.
         TYPE_RELEVE_ANNUEL:   'ipgei/_releve_footer.html',
     }
-    if type_document == TYPE_CNIM:
+    # L'attestation de reussite reprend l'en-tete du CNIM : elle en reprend donc
+    # aussi les marges, sans quoi le meme bandeau sortirait cadre autrement.
+    if type_document in (TYPE_CNIM, TYPE_REUSSITE):
         return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF_CNIM)
     if type_document not in PIEDS:
         return render_pdf_bytes(TEMPLATES[type_document], contexte, OPTIONS_PDF)
@@ -588,6 +593,126 @@ def generer_attestation_cnim(deliberation, inscription, *, utilisateur=None, bas
 
     pdf = generer_pdf(doc, _contexte_cnim(doc, inscription, ligne, base_url,
                                           signataire_impose=bool(signataire_id)))
+    return doc, pdf
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Attestation de réussite
+# ═════════════════════════════════════════════════════════════════════════════
+#: Ce que le jury a prononcé, dit dans la langue de l'attestation. Seules ces
+#: deux décisions sont une RÉUSSITE : les autres — réorienté, rattrapage,
+#: redoublant — n'ont rien à attester ici.
+SUITES_REUSSITE = {
+    LigneDeliberation.DECISION_ADMIS: 'admis en deuxième année',
+    LigneDeliberation.DECISION_CNIM:
+        "autorisé à participer au Concours National d'Ingénieurs de Mauritanie (CNIM)",
+}
+
+#: Le rang de l'année, en toutes lettres — « sa première année de formation ».
+RANGS_LETTRES = {1: 'première', 2: 'deuxième'}
+
+
+def _accord(etudiant) -> dict:
+    """
+    Civilité et accords, tirés du genre.
+
+    Une attestation nominative qui écrirait « admis » pour une étudiante se
+    remarque immédiatement, et se fait renvoyer. Le genre inconnu retombe sur
+    les formes en (e) — la seule qui ne se trompe jamais.
+    """
+    genre = (getattr(etudiant, 'genre', '') or '').upper()
+    if genre == 'F':
+        return {'civilite': 'Mlle', 'il_elle': 'Elle', 'e': 'e'}
+    if genre == 'M':
+        return {'civilite': 'M.', 'il_elle': 'Il', 'e': ''}
+    return {'civilite': '', 'il_elle': 'Il/Elle', 'e': '(e)'}
+
+
+def _contexte_reussite(doc, inscription, ligne: LigneDeliberation, base_url,
+                       *, signataire_impose: bool = False) -> dict:
+    """
+    Contexte de l'attestation de réussite.
+
+    La moyenne imprimée est la moyenne annuelle PONDÉRÉE, celle de
+    `services.moyenne_annuelle` — (S1×2 + S2×3)/5 en première année, (S3+S4)/2
+    en seconde. Une moyenne des matières prise d'un bloc donnerait un AUTRE
+    nombre, car les deux semestres n'ont ni le même nombre de matières ni le
+    même total de coefficients ; et c'est ce nombre-là que l'étudiant produira
+    devant une école.
+
+    `absents_a_zero=True` : c'est la règle du jury, et l'attestation dit ce que
+    le jury a retenu. Sans ce drapeau, une matière non notée serait écartée et
+    la moyenne attestée dépasserait celle qui a fondé la décision.
+
+    Signée par le DIRECTEUR, comme le CNIM : c'est lui qui atteste un résultat
+    au dehors, non le chef de service de la scolarité.
+    """
+    contexte = _contexte_commun(doc, inscription, base_url)
+    signataire = qui_signe_cnim(doc.institution, contexte['signataire'],
+                                impose=signataire_impose)
+
+    moyenne, _, _ = services.moyenne_annuelle(
+        inscription, inscription.annee_universitaire, absents_a_zero=True)
+
+    rang = services.rang_du_niveau(inscription.niveau, inscription.classe.institution)
+
+    contexte.update({
+        'titre':      'ATTESTATION DE RÉUSSITE',
+        'tutelles':   TUTELLES_CNIM,
+        'signataire': signataire,
+        'ligne':      ligne,
+        'moyenne':    moyenne,
+        'suite':      SUITES_REUSSITE.get(ligne.decision, ligne.get_decision_display()),
+        'rang_lettres': RANGS_LETTRES.get(rang, str(rang)),
+        # « Math Physique Sciences de l'Ingénieur », et non « MPSI » : le code
+        # seul ne dit rien a qui lit l'attestation hors de l'etablissement.
+        # MEME source que `libelle_classe`, sans quoi deux pieces du meme dossier
+        # nommeraient le cursus autrement.
+        'formation':  services.libelle_cursus(inscription.niveau,
+                                              inscription.classe.institution),
+        'code_niveau': inscription.niveau,
+        **_accord(inscription.etudiant),
+    })
+    return contexte
+
+
+def generer_attestation_reussite(deliberation, inscription, *, utilisateur=None,
+                                 base_url='', signataire_id=None):
+    """
+    L'attestation de réussite ne s'émet que sur une décision de RÉUSSITE.
+
+    Le refus nomme l'étudiant et la décision qui bloque : « Réorienté » sur un
+    écran de trente lignes laisserait l'agent sans savoir laquelle a déclenché
+    le refus, ni s'il faut corriger le jury ou changer de document.
+    """
+    ligne = _ligne_validee(deliberation, inscription)
+    if ligne.decision not in SUITES_REUSSITE:
+        etudiant = inscription.etudiant
+        qui = f'{etudiant.nom_display} ({etudiant.matricule})'
+        if not ligne.decision:
+            raise ValidationError(
+                f"{qui} n'a pas encore de décision de jury : sa réussite ne "
+                'peut être attestée avant que le jury ne se soit prononcé.')
+        raise ValidationError(
+            f"{qui} n'a pas de décision de réussite : le jury a prononcé "
+            f'« {ligne.get_decision_display()} ». Pour attester cette '
+            'décision-là, éditez la décision de délibération.')
+
+    doc = creer_document(inscription, TYPE_REUSSITE, utilisateur=utilisateur,
+                         signataire_id=signataire_id)
+
+    # Le registre doit nommer celui qui signe RÉELLEMENT — c'est lui que la page
+    # de vérification affiche. Même correction que sur le CNIM.
+    signataire = qui_signe_cnim(
+        doc.institution, {'nom': doc.signataire_nom, 'titre': doc.signataire_titre},
+        impose=bool(signataire_id))
+    if (signataire['nom'], signataire['titre']) != (doc.signataire_nom, doc.signataire_titre):
+        doc.signataire_nom   = signataire['nom']
+        doc.signataire_titre = signataire['titre']
+        doc.save(update_fields=['signataire_nom', 'signataire_titre'])
+
+    pdf = generer_pdf(doc, _contexte_reussite(doc, inscription, ligne, base_url,
+                                              signataire_impose=bool(signataire_id)))
     return doc, pdf
 
 

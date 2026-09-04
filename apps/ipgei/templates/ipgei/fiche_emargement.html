@@ -1,0 +1,170 @@
+{% comment %}
+Fiche d'émargement d'une épreuve — la feuille que le surveillant fait signer.
+
+Reprend la mise en page de la fiche de collecte (même bandeau d'institution,
+même cartouche, même tableau) : les deux feuilles circulent ensemble le jour de
+l'épreuve, et un cadrage différent se verrait.
+
+Quatre colonnes, dont deux vides : le candidat signe en ENTRANT et en SORTANT.
+C'est ce couple qui atteste la durée de présence, et un émargement unique ne
+dirait pas si le candidat a composé ou seulement pointé.
+
+Une fiche par matière, chacune sur sa page : le surveillant d'une salle ne tient
+que l'épreuve qu'il surveille.
+{% endcomment %}
+<style>
+  @page { size: A4 portrait; }
+  body { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 11px; color: #000; margin: 0; }
+
+  .fiche { page-break-after: always; }
+  .fiche:last-child { page-break-after: auto; }
+
+  .titre { text-align: center; font-size: 14px; font-weight: bold; margin: 10px 0 4px; }
+  .sous-titre { text-align: center; font-size: 10px; color: #555; margin-bottom: 14px; }
+
+  .infos { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .infos td { padding: 4px 6px; border: none; vertical-align: middle; }
+  .infos .lbl { font-weight: bold; width: 150px; white-space: nowrap; }
+
+  hr.fin { border: none; border-top: 1px solid #bbb; margin: 8px 0; }
+
+  /* Calibri sur le tableau et le bloc du surveillant : c'est la fonte du
+     modele Excel dont cette fiche reprend la mise en page. Carlito est son
+     clone aux memes metriques, pour l'image Docker ou Calibri manquerait. */
+  .etu, .surveillant { font-family: Calibri, Carlito, Arial, sans-serif; }
+  .etu { width: 100%; border-collapse: collapse; font-size: 16px; margin-top: 6px; }
+  /* En-tetes au meme rang que les donnees : plus petits, ils se lisaient comme
+     une legende alors qu'ils nomment les colonnes qu'on signe. */
+  .etu th {
+    background: #ececec; border: 1px solid #999; padding: 8px;
+    text-align: center; font-size: 16px; text-transform: uppercase; letter-spacing: .4px;
+  }
+  /* Hauteur imposée : on signe dans ces cases, au stylo. */
+  .etu td { border: 1px solid #bbb; padding: 7px 8px; vertical-align: middle; height: 36px; }
+  .etu tbody tr:nth-child(even) { background: #fafafa; }
+
+  .c-mat  { width: 125px; text-align: center; }
+  .c-sign { width: 120px; }
+  /* Le matricule reste gras et espace pour se lire chiffre a chiffre, mais
+     dans la meme fonte que le reste du tableau : le Courier de la fiche de
+     collecte jurerait au milieu du Calibri. */
+  .code { font-weight: bold; letter-spacing: .5px; }
+
+  .vide td { text-align: center; color: #888; padding: 20px; }
+
+  .surveillant { margin-top: 22px; width: 46%; }
+  .surveillant p { font-size: 10px; color: #555; margin: 0 0 26px; font-weight: bold; }
+  .surveillant .trait { border-bottom: 1px solid #888; }
+
+  .note-bas { font-size: 9.5px; color: #666; margin-top: 10px; font-style: italic; }
+</style>
+
+{% for fiche in fiches %}
+<div class="fiche">
+
+  {% include '_institution_header.html' %}
+
+  <div class="titre">Fiche d&rsquo;émargement — {{ type_note_label }}</div>
+  <div class="sous-titre">Année universitaire {{ annee_universitaire }}</div>
+
+  <table class="infos">
+    <tr>
+      <td class="lbl">{% if fiche.melange %}Classes :{% else %}Classe :{% endif %}</td>
+      <td>{{ classe_label }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Matière :</td><td>{{ fiche.matiere.intitule }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Semestre :</td><td>{{ semestre.code }}</td>
+    </tr>
+    {% comment %}
+    Groupe et salle sont saisis à l'édition : ils n'existent pas au modèle.
+    Omis, la ligne laisse un blanc à remplir au stylo plutôt que de disparaître —
+    une fiche sans salle indiquée ne se classe plus après l'épreuve.
+    {% endcomment %}
+    <tr>
+      <td class="lbl">Groupe d&rsquo;examen :</td>
+      <td>{% if fiche.groupe %}{{ fiche.groupe }}{% else %}&nbsp;&nbsp;____________________{% endif %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Salle d&rsquo;examen :</td>
+      <td>{% if fiche.salle_nom %}{{ fiche.salle_nom }}{% else %}&nbsp;&nbsp;____________________{% endif %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Effectif :</td>
+      <td>
+        {{ fiche.effectif }} candidat{{ fiche.effectif|pluralize }}
+        {% comment %}
+        Dire de combien la salle est un morceau : le surveillant sait alors que
+        d'autres candidats composent ailleurs, et la scolarite retrouve
+        l'ensemble sans compter les feuilles.
+        {% endcomment %}
+        {% if fiche.salle %}sur {{ fiche.effectif_matiere }} pour la matière{% endif %}
+      </td>
+    </tr>
+    {% comment %}
+    La date de l'épreuve reste manuscrite : la fiche s'imprime souvent la veille
+    ou l'avant-veille, et la date d'édition n'est pas celle de l'épreuve.
+    {% endcomment %}
+    <tr>
+      <td class="lbl">Date de l&rsquo;épreuve :</td>
+      <td>_____ / _____ / _______</td>
+    </tr>
+  </table>
+
+  <hr class="fin">
+
+  <table class="etu">
+    <thead>
+      <tr>
+        <th class="c-mat">Matricule</th>
+        <th>Nom et prénom</th>
+        <th class="c-sign">Entrée</th>
+        <th class="c-sign">Sortie</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ligne in fiche.lignes %}
+      <tr>
+        <td class="c-mat"><span class="code">{{ ligne.matricule }}</span></td>
+        <td>{{ ligne.nom }}</td>
+        <td class="c-sign">&nbsp;</td>
+        <td class="c-sign">&nbsp;</td>
+      </tr>
+      {% empty %}
+      <tr class="vide">
+        <td colspan="4">
+          {% if rattrapage %}
+          Aucun étudiant à rattraper dans cette matière.
+          {% else %}
+          Aucun étudiant inscrit dans cette classe.
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if rattrapage and fiche.seuil %}
+  {% comment %}
+  Dire pourquoi la liste est courte : sans cette mention, une feuille de six noms
+  pour une classe de trente passe pour une erreur d'édition.
+  {% endcomment %}
+  <p class="note-bas">
+    Liste restreinte aux étudiants dont la moyenne de la matière est inférieure
+    à {{ fiche.seuil }} / 20.
+  </p>
+  {% endif %}
+
+  <div class="surveillant">
+    <p>Nom et signature du surveillant</p>
+    <div class="trait"></div>
+  </div>
+
+</div>
+{% empty %}
+<p style="text-align:center;padding:40px;color:#888">
+  Aucune matière ne correspond aux critères demandés.
+</p>
+{% endfor %}

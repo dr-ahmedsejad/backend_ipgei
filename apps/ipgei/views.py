@@ -1425,7 +1425,8 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         # La feuille de notes d'une matière appartient d'abord à qui l'enseigne.
         if self.action in ('grille', 'saisie_collective', 'saisie_anonyme',
                            'grille_anonyme', 'saisie_anonyme_lot',
-                           'mes_feuilles', 'fiche_collecte'):
+                           'mes_feuilles', 'fiche_collecte',
+                           'fiche_emargement'):
             return [EnseignantDeLaMatiereOuRBAC()]
         return super().get_permissions()
 
@@ -1506,6 +1507,163 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
             reponse = HttpResponse(contenu, content_type='application/pdf')
             reponse['Content-Disposition'] = \
                 f'attachment; filename="collecte_{libelle}.pdf"'
+        return reponse
+
+    @action(detail=False, methods=['get'], url_path='fiche-emargement')
+    def fiche_emargement(self, request):
+        """
+        Fiche d'émargement : la feuille que le surveillant fait signer en salle.
+
+        Sur UNE classe : mêmes candidats, MÊME ORDRE que la fiche de collecte de
+        la même épreuve — le surveillant appelle les noms pendant que la
+        scolarité tient la collecte.
+
+        Sur PLUSIEURS (`classes=200,172`) : à l'examen la scolarité mélange les
+        classes, et les listes sont alors BRASSÉES pour que des camarades ne
+        composent pas côte à côte. Le brassage est reproductible — voir
+        `emargement.candidats` —, mais l'ordre cesse forcément d'être celui de
+        la collecte, qui reste, elle, classe par classe. En rattrapage, la fiche ne porte que les étudiants qui doivent
+        la matière : convoquer toute la classe ferait émarger des présents qui
+        n'avaient rien à repasser.
+
+        `salles` (ids séparés par des virgules, DANS L'ORDRE du choix) répartit
+        les candidats entre les salles retenues, au prorata de leur capacité :
+        une fiche par salle. Un identifiant peut porter le nombre de places
+        réellement ouvertes — « 8:30 » —, toujours inférieur ou égal à la
+        capacité du référentiel. Sans elles, `groupe` et `salle` restent des
+        mentions libres, seulement imprimées. Rien n'est persisté dans les deux
+        cas — la répartition se recalcule à l'identique à chaque édition.
+        """
+        from django.http import HttpResponse
+
+        from . import collecte as collecte_notes
+        from . import emargement as emargement_notes
+
+        semestre_id = request.query_params.get('semestre')
+        # `classes` (plusieurs, dans l'ordre) OU `classe` (une seule, forme
+        # historique). A l'examen la scolarite melange les classes : des
+        # etudiants de MPSI A composent avec ceux de MPSI B, pour que des
+        # camarades ne se retrouvent pas cote a cote.
+        brut_classes = request.query_params.get('classes') or ''
+        classe_id    = request.query_params.get('classe')
+        if not semestre_id or not (brut_classes.strip() or classe_id):
+            raise ValidationError('Paramètres requis : semestre, classe(s).')
+
+        semestre = SemestreIPGEI.objects.filter(pk=semestre_id).first()
+        if semestre is None:
+            raise ValidationError({'semestre': 'Semestre introuvable.'})
+
+        if brut_classes.strip():
+            try:
+                ids = [int(x) for x in brut_classes.split(',') if x.strip()]
+            except ValueError:
+                raise ValidationError(
+                    {'classes': 'Liste de classes invalide : identifiants attendus.'})
+            par_id = Classe.objects.in_bulk(ids)
+            manquants = [i for i in ids if i not in par_id]
+            if manquants:
+                raise ValidationError(
+                    {'classes': f'Classe introuvable : {manquants[0]}.'})
+            classes = [par_id[i] for i in ids]
+        else:
+            classe = Classe.objects.filter(pk=classe_id).first()
+            if classe is None:
+                raise ValidationError({'classe': 'Classe introuvable.'})
+            classes = [classe]
+
+        # Melanger des niveaux differents n'a pas de sens : ils ne composent pas
+        # la meme matiere, et la moitie de la feuille n'aurait rien a faire dans
+        # la salle. Le refus le dit plutot que d'editer une liste incoherente.
+        niveaux = {c.niveau_code for c in classes}
+        if len(niveaux) > 1:
+            raise ValidationError(
+                {'classes': 'Les classes mélangées doivent être du même niveau : '
+                            + ', '.join(sorted(niveaux)) + ' ne composent pas la '
+                            'même matière.'})
+        classe = classes[0]
+
+        type_note = (request.query_params.get('type_note') or 'EXAM').upper()
+        groupe    = request.query_params.get('groupe') or ''
+        salle     = request.query_params.get('salle') or ''
+
+        # Le melange est propre a l'EXAMEN. Un devoir surveille et un TP se
+        # composent en classe, avec l'enseignant de la matiere : y reunir deux
+        # classes n'aurait pas de sens, et la feuille ferait emarger des
+        # etudiants qui ne sont pas dans la salle.
+        if len(classes) > 1 and type_note not in ('EXAM', 'RATT'):
+            raise ValidationError(
+                {'classes': 'Le mélange des classes ne vaut que pour un examen : '
+                            'un devoir surveillé et un TP se composent en classe.'})
+
+        # `salles` : les salles RETENUES, dans l'ordre du choix. Fournies, elles
+        # remplacent les mentions libres et la liste se repartit entre elles.
+        # L'ordre est celui de la requete et non celui de la base : c'est lui
+        # qui decide quel groupe compose ou, et une reponse triee autrement
+        # deplacerait les candidats d'une edition a l'autre.
+        #
+        # Deux ecritures : « 8,9 » ouvre les salles a leur capacite du
+        # referentiel, « 8:30,9 » n'ouvre que 30 places dans la premiere. On
+        # peut ainsi condamner un rang ou espacer les candidats sans toucher au
+        # referentiel, qui dit la capacite PHYSIQUE de la salle.
+        retenues = []
+        brut = request.query_params.get('salles') or ''
+        if brut.strip():
+            from apps.salle.models import Salle
+            from . import emargement as emargement_notes
+
+            demandes = []
+            for morceau in brut.split(','):
+                morceau = morceau.strip()
+                if not morceau:
+                    continue
+                identifiant, _, places = morceau.partition(':')
+                try:
+                    demandes.append((int(identifiant),
+                                     int(places) if places.strip() else None))
+                except ValueError:
+                    raise ValidationError(
+                        {'salles': f'Salle invalide : « {morceau} ». Attendu : '
+                                   'un identifiant, éventuellement suivi de '
+                                   '« : » et du nombre de places.'})
+
+            par_id = Salle.objects.in_bulk([i for i, _ in demandes])
+            manquants = [i for i, _ in demandes if i not in par_id]
+            if manquants:
+                raise ValidationError(
+                    {'salles': f'Salle introuvable : {manquants[0]}.'})
+            retenues = [
+                {'salle': par_id[i],
+                 'capacite': self._executer(
+                     emargement_notes.places_retenues, par_id[i], places)}
+                for i, places in demandes
+            ]
+
+        matiere_id = request.query_params.get('matiere')
+        if matiere_id:
+            matiere = Matiere.objects.filter(pk=matiere_id).first()
+            if matiere is None:
+                raise ValidationError({'matiere': 'Matière introuvable.'})
+            if matiere.code_semestre != semestre.code:
+                raise ValidationError(
+                    {'matiere': f'{matiere.code} relève du semestre '
+                                f'{matiere.code_semestre}, pas de '
+                                f'{semestre.code}.'})
+            matieres = [matiere]
+        else:
+            matieres = collecte_notes.matieres_de(classe, semestre, type_note)
+            if not matieres:
+                raise ValidationError(
+                    'Aucune matière du semestre ne correspond : vérifiez la '
+                    'maquette du niveau de cette classe.')
+
+        contenu = self._executer(
+            emargement_notes.generer_pdf, semestre, classes, matieres,
+            type_note, groupe, salle, retenues)
+        nom_classes = '-'.join(c.nom for c in classes)
+        libelle = _nom_fichier(f'{nom_classes}_{semestre.code}_{type_note}')
+        reponse = HttpResponse(contenu, content_type='application/pdf')
+        reponse['Content-Disposition'] = (
+            f'attachment; filename="emargement_{libelle}.pdf"')
         return reponse
 
     @action(detail=False, methods=['post'], url_path='importer',
@@ -3754,6 +3912,17 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         from . import documents as docs_ipgei
         doc, pdf = self._executer(
             docs_ipgei.generer_attestation_cnim,
+            self._deliberation(request), self._inscription(request),
+            utilisateur=_utilisateur(request), base_url=self._base_url(),
+            signataire_id=self._signataire_id(request),
+        )
+        return self._reponse_pdf(doc, pdf)
+
+    @action(detail=False, methods=['post'], url_path='attestation-reussite')
+    def attestation_reussite(self, request):
+        from . import documents as docs_ipgei
+        doc, pdf = self._executer(
+            docs_ipgei.generer_attestation_reussite,
             self._deliberation(request), self._inscription(request),
             utilisateur=_utilisateur(request), base_url=self._base_url(),
             signataire_id=self._signataire_id(request),

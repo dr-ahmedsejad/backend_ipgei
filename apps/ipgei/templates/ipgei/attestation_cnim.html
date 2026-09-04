@@ -108,11 +108,14 @@ c'est lui qui autorise à concourir.
     text-align: center; font-size: 14pt; font-weight: 700;
     margin: 16mm 0 12mm; text-transform: uppercase; letter-spacing: .01em;
   }
-  /* Fer à gauche, et non justifié comme sur l'épreuve : la justification de ce
-     moteur écrase les espaces d'une ligne trop pleine, et « (IPGEI), autorise »
-     sortait collé. Une marge droite irrégulière se remarque à peine ; un mot
-     soudé au précédent se lit comme une faute. */
-  .texte { font-size: 11.5pt; line-height: 1.7; text-align: left; }
+  /* Justifié, comme la piece que l'institut delivre.
+     La justification avait ete abandonnee ici : sur une ligne trop pleine, ce
+     moteur ecrasait les espaces et « (IPGEI), autorise » sortait colle. Le
+     defaut se CONSTATE plutot qu'il ne se suppose — comparer la suite des mots
+     extraite du PDF a celle de la version au fer a gauche : un mot soude fait
+     disparaitre une espace, et les deux suites cessent d'etre identiques.
+     Verifie sur ce texte-ci : 83 mots de part et d'autre. */
+  .texte { font-size: 11.5pt; line-height: 1.7; text-align: justify; }
   .identite { margin: 8mm 0; font-size: 11.5pt; line-height: 2.1; }
   .identite .cle { font-weight: 700; }
   .signature-bas { margin-top: 18mm; text-align: right; font-weight: 700; font-size: 11.5pt; }
