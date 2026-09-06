@@ -10,6 +10,8 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
+from core.audit_helpers import write_audit
+from core.models import ACTION_BULK_CREATE
 from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.utils import timezone
@@ -562,6 +564,18 @@ def initialiser_notes(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) ->
         for m in matieres if m.id not in existantes
     ]
     Note.objects.bulk_create(nouvelles)
+    if nouvelles:
+        # `bulk_create` ne declenche AUCUN signal : la creation d'une note
+        # n'atteignait donc jamais le journal — 1 716 notes en base pour zero
+        # CREATE. Une ligne par operation, pas par note : ce qui compte est
+        # qu'une feuille de notes ait gagne des matieres, et lesquelles.
+        write_audit(
+            action=ACTION_BULK_CREATE, model_name='Note',
+            object_id=str(inscription.pk),
+            changes={'matieres': sorted(m.matiere.code for m in nouvelles)},
+            label=(f'{len(nouvelles)} matière(s) rattachée(s) — '
+                   f'{inscription.etudiant.matricule} / {semestre.code}'),
+        )
     return len(nouvelles)
 
 

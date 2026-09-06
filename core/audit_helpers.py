@@ -120,15 +120,24 @@ def write_audit(
     label: str = '',
     institution_id: int | None = None,
     keep_forever: bool = False,
+    user=None,
 ) -> None:
-    """Ecrit un AuditLog via transaction.on_commit (asynchrone, safe)."""
+    """
+    Ecrit un AuditLog via transaction.on_commit (asynchrone, safe).
+
+    `user` nomme l'auteur quand la requete ne peut pas le dire — la connexion,
+    par exemple : au moment ou on l'ecrit, la requete n'est pas encore
+    authentifiee, c'est precisement ce qu'elle est en train de devenir. Sans
+    lui, la colonne « Auteur » affichait « systeme » sur chaque connexion.
+    """
     ctx = get_request_context()
+    auteur = user if user is not None else ctx.get('user')
 
     def _do_write():
         try:
             from core.models import AuditLog
             AuditLog.objects.create(
-                user        = ctx.get('user'),
+                user        = auteur,
                 action      = action,
                 model_name  = model_name,
                 object_id   = str(object_id)[:50],

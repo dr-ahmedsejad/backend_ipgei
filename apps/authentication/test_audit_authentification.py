@@ -67,6 +67,10 @@ class AuditAuthentificationTest(TestCase):
         self.assertIsNotNone(trace, "la connexion réussie doit figurer au journal")
         self.assertEqual(trace.object_id, str(self.user.pk))
         self.assertIn('journal', trace.label)
+        # La requête n'est pas encore authentifiée quand on écrit cette ligne :
+        # sans auteur explicite, la colonne « Auteur » afficherait « système »
+        # sur chaque connexion.
+        self.assertEqual(trace.user_id, self.user.pk)
 
     def test_un_echec_de_connexion_reste_trace(self):
         """Il l'était déjà — la correction ne doit pas l'avoir cassé."""
@@ -131,3 +135,49 @@ class AuditAuthentificationTest(TestCase):
             reponse = self._appel('get', '/api/v1/ipgei/matieres/')
         self.assertEqual(reponse.status_code, 403,
                          "le journal ne doit pas transformer un 403 en 500")
+
+
+class AuditAuteurTest(TestCase):
+    """
+    Le journal doit dire QUI a agi, pas seulement quoi.
+
+    `AuditMiddleware` tourne après `AuthenticationMiddleware` — ce qui suffit à
+    l'authentification par SESSION. Mais l'API est en JWT, et DRF n'authentifie
+    qu'à l'entrée de la vue, bien après le middleware. L'auteur était donc lu
+    alors que la requête était encore anonyme : sur les 19 854 lignes de la base
+    réelle, 15 707 — quatre sur cinq — n'avaient aucun auteur. Le journal disait
+    qu'une note était passée de 8 à 12 sans dire par qui : inexploitable.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        Year.objects.create(annee='2024-2025', date_debut=date(2024, 9, 1),
+                            date_fin=date(2025, 7, 31), est_active=True)
+        cls.user = CustomUser.objects.create_user(
+            username='auteur', email='a@t.l', password=MDP, role='AA')
+
+    def setUp(self):
+        self.client = APIClient()
+        AuditLog.objects.all().delete()
+
+    def test_une_ecriture_par_l_api_porte_son_auteur(self):
+        self.client.force_authenticate(user=self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            reponse = self.client.patch(
+                '/api/v1/auth/profil/', {'name': 'Nom Modifié'}, format='json')
+        self.assertEqual(reponse.status_code, 200, reponse.data)
+
+        trace = AuditLog.objects.filter(model_name='CustomUser',
+                                        action='UPDATE').first()
+        self.assertIsNotNone(trace, 'la modification doit figurer au journal')
+        self.assertEqual(trace.user_id, self.user.pk,
+                         "le journal doit dire QUI a modifié, pas seulement quoi")
+
+    def test_une_ecriture_anonyme_reste_sans_auteur(self):
+        """Ne pas inventer un auteur là où il n'y en a pas."""
+        from core.audit_context import (
+            clear_request_context, get_request_context, set_request_context,
+        )
+        self.addCleanup(clear_request_context)
+        set_request_context()
+        self.assertIsNone(get_request_context()['user'])

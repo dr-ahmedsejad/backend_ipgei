@@ -28,6 +28,8 @@ from rest_framework.mixins import (CreateModelMixin, DestroyModelMixin,
 
 from apps.prof.models import Prof
 from apps.salle.models import Salle
+from core.audit_helpers import write_audit
+from core.models import ACTION_BULK_CREATE
 from core.mixins import InstitutionScopedMixin, SelectAllMixin
 from core.pagination import NoPagination, StandardPagination
 from rest_framework.permissions import BasePermission
@@ -1812,6 +1814,16 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
             ]
             if manquantes and not semestre.est_cloture:
                 Note.objects.bulk_create(manquantes, ignore_conflicts=True)
+                # Idem : sans signal, ouvrir une grille de saisie creait des
+                # lignes de notes qu'aucune trace ne rattachait a personne.
+                write_audit(
+                    action=ACTION_BULK_CREATE, model_name='Note',
+                    object_id=str(matiere.pk),
+                    changes={'classe_id': classe_id, 'matiere': matiere.code,
+                             'semestre': semestre.code},
+                    label=(f'{len(manquantes)} ligne(s) de notes ouverte(s) — '
+                           f'{matiere.code} / {semestre.code}'),
+                )
 
         notes = (
             Note.objects

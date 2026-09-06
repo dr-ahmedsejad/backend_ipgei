@@ -1288,6 +1288,26 @@ class Evaluation(models.Model):
     def __str__(self):
         return f'{self.get_type_evaluation_display()} {self.numero} : {self.valeur}'
 
+    def libelle_audit(self) -> str:
+        """
+        Le libellé lu dans le journal d'audit.
+
+        `__str__` sert l'affichage courant, où l'étudiant et la matière sont
+        déjà à l'écran. Au journal ils n'y sont pas : « Devoir surveillé 1 :
+        12.50 » ne dirait ni de qui ni dans quoi. Une seule requête, celle qui
+        remonte la note et ses deux libellés.
+        """
+        try:
+            note = (Note.objects
+                    .select_related('inscription__etudiant', 'matiere')
+                    .get(pk=self.note_id))
+            etudiant = note.inscription.etudiant
+            qui = f'{etudiant.matricule} {etudiant.nom}'.strip()
+            return (f'{self.get_type_evaluation_display()} {self.numero} : '
+                    f'{self.valeur} — {qui} / {note.matiere.code}')
+        except Exception:                                          # noqa: BLE001
+            return str(self)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 6. Délibération IPGEI

@@ -24,14 +24,15 @@ from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from core.audit_context import (
-    aggregate_active, get_request_context, pop_old_values, stash_old_values,
+    aggregate_active, get_request_context, mdp_deja_trace,
+    pop_old_values, stash_old_values,
 )
 from core.audit_helpers import (
     compute_diff, snapshot_instance, write_audit, write_audit_safe,
 )
 from core.models import (
     ACTION_CREATE, ACTION_DELETE, ACTION_LOGIN_FAILED, ACTION_LOGIN_SUCCESS,
-    ACTION_LOGOUT, ACTION_UPDATE,
+    ACTION_LOGOUT, ACTION_PASSWORD_CHANGED, ACTION_PASSWORD_RESET, ACTION_UPDATE,
 )
 
 logger = logging.getLogger('siga')
@@ -51,6 +52,12 @@ TRACKED_MODELS = [
     'ipgei.SeanceReelle',
     'ipgei.SeanceType',
     'ipgei.Note',
+    # `Note` ne porte que la MOYENNE recalculee ; la note reellement saisie
+    # vit dans `Evaluation` (DS 1, DS 2, examen...). Sans elle, le journal
+    # montrait une moyenne qui bouge sans jamais dire quelle note l'avait
+    # fait bouger, ni de combien — inexploitable en cas de litige. Une note
+    # effacee ne laissait, elle, aucune trace du tout.
+    'ipgei.Evaluation',
     'ipgei.Deliberation',
     'ipgei.LigneDeliberation',
     # Suivi pedagogique
@@ -122,6 +129,23 @@ def _handle_pre_save(sender, instance, **kwargs):
                      _model_label(instance), instance.pk, exc)
 
 
+def _libelle(instance) -> str:
+    """
+    Le libelle lu dans le journal. `__str__` sert l'affichage courant et
+    reste souvent trop court pour une trace : « Devoir surveille 1 : 12.50 »
+    ne dit ni de qui ni dans quelle matiere. Un modele peut donc proposer
+    `libelle_audit()`.
+    """
+    mieux = getattr(instance, 'libelle_audit', None)
+    if callable(mieux):
+        try:
+            return str(mieux())[:200]
+        except Exception as exc:                               # noqa: BLE001
+            logger.debug('libelle_audit a echoue sur %s: %s',
+                         _model_label(instance), exc)
+    return str(instance)[:200]
+
+
 def _handle_post_save(sender, instance, created, **kwargs):
     if aggregate_active():
         return
@@ -130,7 +154,7 @@ def _handle_post_save(sender, instance, created, **kwargs):
     diff = compute_diff(old, new) if not created else compute_diff(None, new)
     if not diff and not created:
         return  # rien n'a change : pas de log
-    label = str(instance)[:200]
+    label = _libelle(instance)
     write_audit_safe(
         ACTION_CREATE if created else ACTION_UPDATE,
         instance, changes=diff, label=label,
@@ -141,7 +165,7 @@ def _handle_post_delete(sender, instance, **kwargs):
     if aggregate_active():
         return
     snapshot = snapshot_instance(instance)
-    label = str(instance)[:200]
+    label = _libelle(instance)
     write_audit_safe(
         ACTION_DELETE, instance,
         changes={k: {'old': v, 'new': None} for k, v in snapshot.items()},
@@ -184,6 +208,7 @@ def audit_login_success(sender, request, user, **kwargs):
         object_id=str(user.pk),
         changes={},
         label=f'Connexion {user.username}',
+        user=user,
     )
 
 
@@ -197,6 +222,7 @@ def audit_logout(sender, request, user, **kwargs):
         object_id=str(user.pk),
         changes={},
         label=f'Déconnexion {user.username}',
+        user=user,
     )
 
 
@@ -211,3 +237,70 @@ def audit_login_failed(sender, credentials, request=None, **kwargs):
         label=f'Échec connexion {username}',
         keep_forever=True,  # securite : conserver indefiniment
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mot de passe — le filet que le diff generique ne peut pas tendre
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# `password` est dans BLACKLIST_FIELDS : aucun hachage ne doit atterrir au
+# journal. Effet de bord, le diff generique sur `CustomUser` ne voit JAMAIS un
+# changement de mot de passe. Une remise a zero depuis l'admin Django, un shell
+# ou un script ne laissait donc aucune trace — alors que c'est precisement le
+# geste qu'on vient chercher dans un journal.
+#
+# On compare le hachage avant/apres, sans jamais l'ecrire. Qui agit decide de
+# l'action : le titulaire lui-meme -> CHANGED, un tiers (ou personne, cas d'une
+# commande) -> RESET.
+
+_MDP = 'auth.password'
+
+
+def _mdp_pre_save(sender, instance, **kwargs):
+    if not instance.pk:
+        return                                    # creation : pas de « avant »
+    try:
+        ancien = (sender.objects.filter(pk=instance.pk)
+                  .values_list('password', flat=True).first())
+    except Exception as exc:                                       # noqa: BLE001
+        logger.debug('Lecture du hachage impossible pk=%s: %s', instance.pk, exc)
+        return
+    stash_old_values(_MDP, instance.pk, {'h': ancien})
+
+
+def _mdp_post_save(sender, instance, created, **kwargs):
+    if created:
+        return
+    avant = pop_old_values(_MDP, instance.pk)
+    if avant is None or avant.get('h') == instance.password:
+        return                                    # le mot de passe n'a pas bouge
+    if mdp_deja_trace(instance.pk):
+        return                                    # une vue a deja dit mieux
+
+    acteur = get_request_context().get('user')
+    par_le_titulaire = acteur is not None and acteur.pk == instance.pk
+    if par_le_titulaire:
+        write_audit(
+            action=ACTION_PASSWORD_CHANGED, model_name='CustomUser',
+            object_id=str(instance.pk), changes={},
+            label=f'Mot de passe modifié — {instance.username}',
+            keep_forever=True, user=acteur,
+        )
+        return
+    write_audit(
+        action=ACTION_PASSWORD_RESET, model_name='CustomUser',
+        object_id=str(instance.pk), changes={},
+        label=(f'Mot de passe réinitialisé — {instance.username} '
+               f'par {acteur.username if acteur is not None else "console/script"}'),
+        keep_forever=True, user=acteur,
+    )
+
+
+def _connecter_signaux_mot_de_passe():
+    from django.contrib.auth import get_user_model
+    modele = get_user_model()
+    pre_save.connect(_mdp_pre_save, sender=modele, dispatch_uid='audit_mdp_pre')
+    post_save.connect(_mdp_post_save, sender=modele, dispatch_uid='audit_mdp_post')
+
+
+_connecter_signaux_mot_de_passe()

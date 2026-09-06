@@ -31,7 +31,11 @@ class AuditMiddleware:
             user = None
 
         set_request_context(
+            # `user` ne vaut que pour l'authentification par SESSION. Pour le
+            # JWT, DRF n'authentifie qu'a l'entree de la vue : on transmet la
+            # requete, et l'auteur sera relu au moment d'ecrire la trace.
             user=user,
+            request=request,
             ip_address=ip or None,
             user_agent=request.META.get('HTTP_USER_AGENT', '')[:1000],
             request_id=request_id,

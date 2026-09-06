@@ -13,6 +13,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.exceptions import TokenError
 
+from core.audit_context import marquer_mdp_trace
 from core.audit_helpers import write_audit
 from core.models import ACTION_PASSWORD_CHANGED
 from core.permissions import IsAdmin, IsAdminOrIT, IsOwnerOrAdmin
@@ -210,15 +211,10 @@ class ChangePasswordView(generics.UpdateAPIView):
         request.user.set_password(serializer.validated_data['new_password'])
         request.user.save()
         logger.info('Password changed for user=%s', request.user.username)
-        # Le mot de passe est un hachage : le signal d'audit sur `CustomUser`
-        # n'en dit rien d'exploitable, et l'événement passait donc inaperçu.
-        # `keep_forever` : une trace de sécurité ne s'efface pas à la purge.
-        write_audit(
-            action=ACTION_PASSWORD_CHANGED, model_name='CustomUser',
-            object_id=str(request.user.pk), changes={},
-            label=f'Mot de passe modifié — {request.user.username}',
-            keep_forever=True,
-        )
+        # Aucune écriture d'audit ici : `core/signals.py` compare le hachage
+        # avant/après sur `CustomUser` et trace tout changement, d'où qu'il
+        # vienne — cette vue, l'admin Django, un shell. Un seul écrivain, donc
+        # une seule ligne par geste.
         return Response({'detail': 'Mot de passe modifié avec succès.'})
 
 
@@ -279,6 +275,11 @@ class FirstLoginView(generics.GenericAPIView):
             nouveau_username = etudiant.matricule
             user.username    = etudiant.matricule
 
+        # Avant le save : c'est lui qui declenche le signal. Le premier acces
+        # merite un libelle que le signal ne peut pas deviner — le mot de passe
+        # est pose ET l'identifiant passe du CNI au matricule. On revendique
+        # donc la trace ici, et le filet generique s'efface.
+        marquer_mdp_trace(user.pk)
         user.save()
         logger.info('First login password changed for user=%s → new_username=%s', user.pk, nouveau_username)
         # Premier accès : le mot de passe change ET le username passe du CNI au
