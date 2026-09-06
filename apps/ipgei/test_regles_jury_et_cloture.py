@@ -200,3 +200,66 @@ class PoserRangsTest(_Base):
         self.assertEqual((l2.rang_classe, l2.rang_promotion), (2, 3))
         self.assertEqual(effectifs, {'classes_du_niveau': 2, 'effectif_promotion': 3,
                                      'effectif_classe': 2})
+
+
+class AuditVerrouillageTest(_Base):
+    """
+    Verrouiller les notes est une modification, et elle doit se lire.
+
+    `notes_couvertes(deliberation).update(verrouillee=True)` est un
+    `QuerySet.update()` : il n'émet aucun signal. La validation du jury était
+    tracée, mais rien ne disait que N notes venaient de devenir non
+    modifiables. Le jour où quelqu'un demande pourquoi une note refuse d'être
+    corrigée, le journal doit pouvoir répondre.
+    """
+
+    def setUp(self):
+        from apps.authentication.models import CustomUser
+        self.jury = CustomUser.objects.create_user(
+            username='jury', email='j@t.l', password='Jury!2612mdp', role='admin')
+
+    def _delibere(self, portee):
+        from core.models import AuditLog
+
+        inscription = self._inscrit('750001')
+        self._note(inscription, self.math1, self.s1, '12')
+        delib = Deliberation.objects.create(
+            institution=self.inst, niveau='MPSI', classe=self.mpsi_a,
+            annee_universitaire=self.annee, portee=portee,
+            semestre=self.s1 if portee == Deliberation.PORTEE_SEMESTRE else None,
+            statut=Deliberation.STATUT_CALCULEE)
+        LigneDeliberation.objects.create(
+            deliberation=delib, inscription=inscription,
+            moyenne_generale=Decimal('12'),
+            decision=LigneDeliberation.DECISION_ADMIS,
+            # Sans decision automatique identique, le jury annuel exige un
+            # motif d'ajustement — hors sujet ici.
+            decision_auto=LigneDeliberation.DECISION_ADMIS)
+        AuditLog.objects.all().delete()
+        return delib
+
+    def _trace_verrouillage(self):
+        from core.models import ACTION_BULK_UPDATE, AuditLog
+        return (AuditLog.objects
+                .filter(model_name='Note', action=ACTION_BULK_UPDATE)
+                .first())
+
+    def test_un_jury_de_semestre_trace_le_verrouillage(self):
+        delib = self._delibere(Deliberation.PORTEE_SEMESTRE)
+        with self.captureOnCommitCallbacks(execute=True):
+            services.valider_deliberation(delib, self.jury)
+
+        trace = self._trace_verrouillage()
+        self.assertIsNotNone(trace, 'le verrouillage des notes doit figurer')
+        self.assertEqual(trace.changes['notes'], 1)
+        self.assertIn('verrouillée', trace.label)
+        self.assertTrue(trace.keep_forever,
+                        'figer des notes est une décision, pas un événement courant')
+
+    def test_un_jury_annuel_trace_aussi_le_verrouillage(self):
+        delib = self._delibere(Deliberation.PORTEE_ANNUELLE)
+        with self.captureOnCommitCallbacks(execute=True):
+            services.valider_deliberation(delib, self.jury)
+
+        self.assertIsNotNone(self._trace_verrouillage(),
+                             'les deux portées passent par le même verrou')

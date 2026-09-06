@@ -11,7 +11,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from core.audit_helpers import write_audit
-from core.models import ACTION_BULK_CREATE
+from core.models import ACTION_BULK_CREATE, ACTION_BULK_UPDATE
 from django.db import transaction
 from django.db.models import Count, Prefetch
 from django.utils import timezone
@@ -1388,7 +1388,19 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
     if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
         # Seul effet : figer les notes du semestre. Le bilan devient consultable
         # sans risque qu'une note bouge sous lui.
-        notes_couvertes(deliberation).update(verrouillee=True)
+        verrouillees = notes_couvertes(deliberation).update(verrouillee=True)
+        if verrouillees:
+            # `QuerySet.update()` n'emet aucun signal : sans ceci, rien ne dirait
+            # que ces notes viennent de devenir non modifiables.
+            write_audit(
+                action=ACTION_BULK_UPDATE, model_name='Note',
+                object_id=str(deliberation.pk),
+                changes={'verrouillee': {'old': False, 'new': True},
+                         'notes': verrouillees},
+                label=f'{verrouillees} note(s) verrouillée(s) par la délibération '
+                      f'{deliberation}'[:200],
+                keep_forever=True,
+            )
         deliberation.statut          = Deliberation.STATUT_VALIDEE
         deliberation.validee_par     = (utilisateur if getattr(
             utilisateur, 'is_authenticated', False) else None)
@@ -1433,7 +1445,19 @@ def valider_deliberation(deliberation: Deliberation, utilisateur) -> Deliberatio
             champs.append('nb_redoublements')
         inscription.save(update_fields=champs)
 
-    notes_couvertes(deliberation).update(verrouillee=True)
+    verrouillees = notes_couvertes(deliberation).update(verrouillee=True)
+    if verrouillees:
+        # `QuerySet.update()` n'emet aucun signal : sans ceci, rien ne dirait
+        # que ces notes viennent de devenir non modifiables.
+        write_audit(
+            action=ACTION_BULK_UPDATE, model_name='Note',
+            object_id=str(deliberation.pk),
+            changes={'verrouillee': {'old': False, 'new': True},
+                     'notes': verrouillees},
+            label=f'{verrouillees} note(s) verrouillée(s) par la délibération '
+                  f'{deliberation}'[:200],
+            keep_forever=True,
+        )
 
     deliberation.statut          = Deliberation.STATUT_VALIDEE
     deliberation.validee_par     = utilisateur if getattr(utilisateur, 'is_authenticated', False) else None
