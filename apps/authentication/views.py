@@ -3,6 +3,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.signals import user_logged_in, user_logged_out
 from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -12,6 +13,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.exceptions import TokenError
 
+from core.audit_helpers import write_audit
+from core.models import ACTION_PASSWORD_CHANGED
 from core.permissions import IsAdmin, IsAdminOrIT, IsOwnerOrAdmin
 from .services.rbac_service import (
     get_role_matrix, get_users_matrix, get_user_modules,
@@ -108,6 +111,17 @@ class LoginView(generics.GenericAPIView):
         response = Response({'user': data.pop('user')}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, data['access'], data['refresh'])
         logger.info('Login success for username=%s IP=%s', request.data.get('username'), ip)
+
+        # Le journal d'audit écoute `user_logged_in` — mais ce signal n'est émis
+        # que par `django.contrib.auth.login()`, qui ouvre une SESSION. Or on
+        # authentifie par JWT : aucune session, donc aucun signal, donc aucune
+        # trace des connexions RÉUSSIES. Les échecs, eux, passaient bien : ils
+        # viennent de `authenticate()`. Le journal ne montrait donc que les
+        # tentatives ratées — de quoi croire que personne ne se connecte jamais.
+        utilisateur = getattr(serializer, 'user', None)
+        if utilisateur is not None:
+            user_logged_in.send(sender=utilisateur.__class__,
+                                request=request, user=utilisateur)
         return response
 
 
@@ -116,6 +130,7 @@ class LogoutView(generics.GenericAPIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        utilisateur = request.user
         refresh_token = request.COOKIES.get(JWT_CONF.get('AUTH_COOKIE_REFRESH', 'refresh_token'))
         if refresh_token:
             try:
@@ -123,6 +138,12 @@ class LogoutView(generics.GenericAPIView):
                 token.blacklist()
             except TokenError:
                 pass
+
+        # Même raison qu'à la connexion : `user_logged_out` n'est émis que par
+        # `django.contrib.auth.logout()`. Révoquer un jeton n'est pas fermer une
+        # session, et la déconnexion ne laissait donc aucune trace.
+        user_logged_out.send(sender=utilisateur.__class__,
+                             request=request, user=utilisateur)
 
         response = Response({'detail': 'Déconnecté avec succès.'}, status=status.HTTP_200_OK)
         response.delete_cookie(JWT_CONF.get('AUTH_COOKIE', 'access_token'))
@@ -189,6 +210,15 @@ class ChangePasswordView(generics.UpdateAPIView):
         request.user.set_password(serializer.validated_data['new_password'])
         request.user.save()
         logger.info('Password changed for user=%s', request.user.username)
+        # Le mot de passe est un hachage : le signal d'audit sur `CustomUser`
+        # n'en dit rien d'exploitable, et l'événement passait donc inaperçu.
+        # `keep_forever` : une trace de sécurité ne s'efface pas à la purge.
+        write_audit(
+            action=ACTION_PASSWORD_CHANGED, model_name='CustomUser',
+            object_id=str(request.user.pk), changes={},
+            label=f'Mot de passe modifié — {request.user.username}',
+            keep_forever=True,
+        )
         return Response({'detail': 'Mot de passe modifié avec succès.'})
 
 
@@ -251,6 +281,15 @@ class FirstLoginView(generics.GenericAPIView):
 
         user.save()
         logger.info('First login password changed for user=%s → new_username=%s', user.pk, nouveau_username)
+        # Premier accès : le mot de passe change ET le username passe du CNI au
+        # matricule. Deux événements de sécurité en un, qui n'en laissaient aucun.
+        write_audit(
+            action=ACTION_PASSWORD_CHANGED, model_name='CustomUser',
+            object_id=str(user.pk),
+            changes={'username': nouveau_username},
+            label=f'Premier accès — mot de passe posé, identifiant {nouveau_username}',
+            keep_forever=True,
+        )
         return Response({
             'detail':          'Mot de passe modifié avec succès.',
             'nouveau_username': nouveau_username,

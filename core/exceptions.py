@@ -48,6 +48,30 @@ def _safe_user_message_for_5xx() -> str:
     return 'Une erreur interne est survenue. Veuillez réessayer ou contacter le support.'
 
 
+def _journaliser_refus(request_id, request, view, user_id):
+    """
+    Consigne un refus d'accès dans le journal d'audit.
+
+    Défensif de bout en bout : le journal ne doit jamais transformer un 403 en
+    500. Si l'écriture échoue, la réponse part quand même.
+    """
+    try:
+        from core.audit_helpers import write_audit
+        from core.models import ACTION_PERMISSION_DENIED
+
+        write_audit(
+            action=ACTION_PERMISSION_DENIED,
+            model_name=getattr(getattr(view, '__class__', None), '__name__', 'API'),
+            object_id=str(user_id),
+            changes={'module': getattr(view, 'required_module', '') or ''},
+            label=f'Accès refusé — {getattr(request, "method", "?")} '
+                  f'{getattr(request, "path", "?")[:120]}',
+            keep_forever=True,
+        )
+    except Exception:                                          # noqa: BLE001
+        logger.warning('Journalisation du refus impossible request_id=%s', request_id)
+
+
 def custom_exception_handler(exc, context):
     """Handler central des exceptions DRF + Django.
 
@@ -144,6 +168,13 @@ def custom_exception_handler(exc, context):
                 'error':      msg,
                 'request_id': request_id,
             }
+        # Un REFUS D'ACCES est un evenement de securite : c'est la trace d'une
+        # tentative sur un ecran qu'on ne detient pas. Le journal declarait
+        # l'action `PERMISSION_DENIED` sans que rien ne l'ecrive jamais.
+        # Seuls les refus d'un utilisateur IDENTIFIE sont retenus : un 403 sur
+        # un appel anonyme n'apprend rien et noierait le journal.
+        if code == 403 and user_id is not None:
+            _journaliser_refus(request_id, request, view, user_id)
         return response
 
     # ── Exception non geree par DRF (= bug applicatif) -> 500 masque ─────────
