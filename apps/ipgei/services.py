@@ -2030,6 +2030,35 @@ def _date_seance(semaine: SemaineIPGEI, jour) -> object:
     return semaine.date_debut + timedelta(days=decalage)
 
 
+def _occupation_ailleurs(classe, semaines):
+    """
+    Ce que les AUTRES classes retiennent déjà, semaine par semaine.
+
+    En un seul passage plutôt qu'une requête par case : dupliquer seize
+    semaines de trente séances en poserait un millier.
+
+    Une séance ANNULÉE libère son créneau — c'est la règle que le serializer
+    applique déjà, et deux règles divergentes seraient pires que pas de règle.
+    """
+    index = {}
+    voisines = (
+        SeanceReelle.objects
+        .filter(semaine__in=semaines, annulee=False)
+        .exclude(classe=classe)
+        .select_related('classe')
+        .values_list('semaine_id', 'jour_id', 'creneau_id', 'prof_id', 'salle_id',
+                     'classe__nom')
+    )
+    for semaine_id, jour_id, creneau_id, prof_id, salle_id, nom_classe in voisines:
+        case = index.setdefault((semaine_id, jour_id, creneau_id),
+                                {'profs': {}, 'salles': {}})
+        if prof_id is not None:
+            case['profs'].setdefault(prof_id, nom_classe)
+        if salle_id is not None:
+            case['salles'].setdefault(salle_id, nom_classe)
+    return index
+
+
 @transaction.atomic
 def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
     """
@@ -2044,6 +2073,8 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
         grille.seances.select_related('jour', 'creneau', 'matiere', 'prof', 'salle', 'sous_groupe')
     )
     creees = ignorees = remplacees = 0
+    conflits = []
+    occupation = _occupation_ailleurs(grille.classe, semaines)
 
     for semaine in semaines:
         if semaine.type_semaine != SemaineIPGEI.TYPE_COURS:
@@ -2056,6 +2087,25 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
                 'creneau':     modele.creneau,
                 'sous_groupe': modele.sous_groupe,
             }
+            # « Un enseignant, une salle » — la regle du serializer, que ce
+            # chemin contournait faute de passer par lui. On ECARTE la case
+            # plutot que d'interrompre : sur seize semaines, tout annuler pour
+            # une collision serait pire que la collision elle-meme. Ce qui a
+            # ete ecarte est rendu a l'appelant, qui doit le dire.
+            pris = occupation.get((semaine.pk, modele.jour_id, modele.creneau_id))
+            if pris is not None:
+                ou = (pris['profs'].get(modele.prof_id) if modele.prof_id else None)
+                quoi = str(modele.prof) if ou else None
+                if ou is None and modele.salle_id:
+                    ou = pris['salles'].get(modele.salle_id)
+                    quoi = str(modele.salle) if ou else None
+                if ou is not None:
+                    conflits.append(
+                        f'S{semaine.numero} {modele.jour} {modele.creneau} — '
+                        f'{quoi} déjà pris en {ou}'
+                    )
+                    continue
+
             existante = SeanceReelle.objects.filter(**filtre).first()
             if existante is not None:
                 if not ecraser or existante.origine != SeanceReelle.ORIGINE_GRILLE:
@@ -2075,7 +2125,14 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
             )
             creees += 1
 
-    return {'creees': creees, 'ignorees': ignorees, 'remplacees': remplacees}
+    return {
+        'creees': creees, 'ignorees': ignorees, 'remplacees': remplacees,
+        'conflits': len(conflits),
+        # Plafonne : une grille entiere en collision produirait des centaines de
+        # lignes, dont aucune ne serait lue. Les premieres suffisent a
+        # comprendre, le compte dit l'ampleur.
+        'details_conflits': conflits[:20],
+    }
 
 
 def semaines_du_lot(semaine_depart: SemaineIPGEI, nb_semaines: int):
