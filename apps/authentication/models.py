@@ -39,6 +39,10 @@ ROLE_CHOICES = [
     ('IT',                   'Informatique'),
     ('scolarite',            'Scolarité'),
     ('responsable_filiere',  'Responsable de filière'),
+    # IPGEI : chef de departement (ST, Langues) et coordinateur de matiere. Il
+    # repond de sa discipline — maquette, ponderation, suivi du niveau — non de
+    # l'emploi du temps, qui reste a la scolarite.
+    ('chef_departement',     'Chef de département'),
     ('jury_president',       'Président de jury'),
     ('etudiant',             'Étudiant'),
     ('enseignant',           'Enseignant'),

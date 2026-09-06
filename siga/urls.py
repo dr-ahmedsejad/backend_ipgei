@@ -8,6 +8,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
+from core.health import healthz
 from core.media_auth import MediaAuthView
 from core.mirror import instance_info
 from core.sync import SyncHistoryView, SyncPushView
@@ -15,6 +16,9 @@ from core.sync import SyncHistoryView, SyncPushView
 urlpatterns = [
     # Admin Django
     path('admin/', admin.site.urls),
+
+    # Sonde de santé (application + base) pour la supervision.
+    path('healthz/', healthz, name='healthz'),
 
     # Contrôle d'accès aux fichiers /media/ (sous-requête Nginx auth_request).
     path('internal/media-auth/', MediaAuthView.as_view(), name='media-auth'),

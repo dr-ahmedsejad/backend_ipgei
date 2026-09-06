@@ -92,9 +92,14 @@ def _moyenne_premiere_annee(inscription: InscriptionIPGEI):
         if services.rang_du_niveau(candidate.niveau,
                                    candidate.classe.institution) != 1:
             continue
-        moyenne, _, _ = services.moyenne_annuelle(
+        moyenne, _, notes = services.moyenne_annuelle(
             candidate, candidate.annee_universitaire, absents_a_zero=True)
-        if moyenne is not None:
+        # Absents comptés zéro, une année sans AUCUNE note vaut 0,00 — pas
+        # « rien » : la maquette pose ses coefficients même sans note, le
+        # diviseur n'est jamais nul, et le garde-fou de `_classement` ne voyait
+        # jamais passer un None. L'étudiant se retrouvait classé à (0 + S3) / 2.
+        # Une première année n'existe ici que si une note au moins y a été retenue.
+        if moyenne is not None and any(n.note_retenue is not None for n in notes):
             return moyenne, candidate.annee_universitaire
     return None, ''
 
@@ -115,6 +120,13 @@ def _classement(premiere, moyenne_s3):
 
 def lignes(annee_universitaire: str, niveau: str = '', institution=None,
            classe=None) -> list:
+    """Voir `_lignes` — sous cache du référentiel, relu sinon à chaque moyenne."""
+    with services.cache_referentiel():
+        return _lignes(annee_universitaire, niveau, institution, classe)
+
+
+def _lignes(annee_universitaire: str, niveau: str = '', institution=None,
+            classe=None) -> list:
     """
     Les étudiants à classer, du meilleur S3 au moins bon.
 
@@ -137,9 +149,17 @@ def lignes(annee_universitaire: str, niveau: str = '', institution=None,
         inscrits = inscrits.filter(classe__niveau__niveau=niveau)
     if classe:
         inscrits = inscrits.filter(classe_id=classe)
+    # Le paramètre était câblé depuis l'appelant… et jamais branché ici. Sans
+    # effet tant qu'il n'y a qu'une institution ; le jour où il y en a deux, la
+    # feuille les mélangerait et `.first()` pourrait retenir le S3 de l'autre.
+    if institution is not None:
+        inscrits = inscrits.filter(classe__institution=institution)
 
-    semestre = SemestreIPGEI.objects.filter(
-        code=CODE_SEMESTRE, annee_universitaire=annee_universitaire).first()
+    semestres = SemestreIPGEI.objects.filter(
+        code=CODE_SEMESTRE, annee_universitaire=annee_universitaire)
+    if institution is not None:
+        semestres = semestres.filter(institution=institution)
+    semestre = semestres.first()
 
     resultats = []
     for inscription in inscrits:

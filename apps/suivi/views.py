@@ -1154,6 +1154,11 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
     filterset_fields   = ['annee_universitaire', 'prof', 'numero_semaine', 'type_semestre']
     ordering_fields    = ['numero_semaine', 'date_suivie']
+    # Ordre PAR DÉFAUT : sans lui, PostgreSQL ne garantit rien d'une page à
+    # l'autre — une séance apparaissait en page 1 et en page 2, une autre sur
+    # aucune. `ordering_fields` n'offre que des options au client. Le `pk`
+    # final départage les ex æquo.
+    ordering           = ['-annee_universitaire', 'numero_semaine', 'pk']
     pagination_class   = StandardPagination
 
     def get_permissions(self):

@@ -556,8 +556,12 @@ class SemaineIPGEI(models.Model):
         numeros  = {s.numero for s in semaines if s.numero is not None}
         # Même portée que le calcul unitaire : on ne compare une semaine qu'aux
         # unités de SON niveau, S1 et S3 partageant leurs numéros de semaine.
+        # Une fois par SEMESTRE, pas par semaine : les unités ne dépendent que
+        # du semestre et de la classe. Appelé par semaine, cela coûtait deux
+        # requêtes chacune — 64 pour un semestre de 32 — et la promesse de
+        # « deux requêtes » ci-dessus était fausse.
         unites = set()
-        for semaine in semaines:
+        for semaine in {s.semestre_id: s for s in semaines}.values():
             unites.update(semaine._unites_du_semestre(classe))
         suivi = {}
         for (annee, type_semestre, numero, dept, jour, creneau, em, prof, type_seance) in (
@@ -970,6 +974,24 @@ class Matiere(models.Model):
         default=0, help_text='Heures de travaux pratiques sur le semestre.',
     )
     has_tp          = models.BooleanField(default=False, help_text='La matière comporte des TP notés.')
+    #: MÊME ENSEIGNEMENT qu'une autre matière, présenté en deux lignes.
+    #:
+    #: En S3, « Mathématiques » et « Mathématiques 2 » ne sont pas deux
+    #: matières : c'est un seul cours, un seul volume horaire, un seul
+    #: professeur — la scolarité le scinde parce que chaque ligne porte SON
+    #: examen et SON coefficient. Les devoirs surveillés et le TP, eux, sont
+    #: communs : les DS sont composés une fois (il peut y en avoir plusieurs)
+    #: et valent pour les deux, comme le TP.
+    #:
+    #: Cette clé désigne la matière PORTEUSE, celle où DS et TP se saisissent.
+    #: La rattachée les lit chez elle ; rien n'est saisi deux fois, donc rien
+    #: ne peut diverger. Seul l'examen reste propre à chacune.
+    partage_avec    = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='matieres_rattachees',
+        help_text="Même enseignement qu'une autre matière : les DS et le TP y "
+                  'sont saisis une seule fois. Seuls les examens diffèrent.',
+    )
     pct_ds          = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('30'))
     pct_tp          = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
     pct_exam        = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('70'))
@@ -979,6 +1001,19 @@ class Matiere(models.Model):
     # Contrepartie SIGA de la matiere : les vacations et le suivi raisonnent en
     # `EM`. Dernier miroir subsistant — les classes, elles, heritent desormais
     # de `Departement` et n'ont plus de copie a maintenir.
+    #: Le departement qui repond de la matiere. Deux a l'IPGEI, et c'est
+    #: l'axe du perimetre des chefs de departement : le chef de ST ne voit
+    #: que les matieres ST. Vide = aucun departement ne la revendique.
+    DEPARTEMENT_ST      = 'ST'
+    DEPARTEMENT_LANGUES = 'LANGUES'
+    DEPARTEMENT_CHOICES = [
+        (DEPARTEMENT_ST,      'Sciences et techniques'),
+        (DEPARTEMENT_LANGUES, 'Langues'),
+    ]
+    departement     = models.CharField(
+        max_length=10, choices=DEPARTEMENT_CHOICES, blank=True, default='',
+        help_text='Departement disciplinaire : ST ou Langues.',
+    )
     em_miroir       = models.OneToOneField(
         'em.EM', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='matiere_ipgei',
@@ -2055,3 +2090,35 @@ class AbsenceSeance(models.Model):
 
     def __str__(self):
         return f'{self.inscription.etudiant} — {self.get_statut_display()} ({self.seance})'
+
+
+class PerimetreResponsable(models.Model):
+    """
+    Ce dont un chef de departement ou un coordinateur repond.
+
+    Un chef porte un `departement` : toutes ses matieres sont a lui. Un
+    coordinateur porte des `matieres` nommees. Les deux peuvent se cumuler. Le
+    role RBAC est le meme pour tous (`chef_departement`) ; c'est ce perimetre,
+    et lui seul, qui dit lesquelles des matieres il voit et modifie.
+
+    Absent, le responsable ne voit rien : mieux vaut un ecran vide qu'un acces
+    a tout en attendant qu'on le configure.
+    """
+    utilisateur = models.OneToOneField(
+        'authentication.CustomUser', on_delete=models.CASCADE,
+        related_name='perimetre_ipgei',
+    )
+    departement = models.CharField(
+        max_length=10, choices=Matiere.DEPARTEMENT_CHOICES, blank=True, default='',
+    )
+    matieres    = models.ManyToManyField(
+        Matiere, blank=True, related_name='responsables',
+    )
+
+    class Meta:
+        db_table = 'ipgei_perimetre_responsable'
+        verbose_name = 'perimetre de responsable'
+        verbose_name_plural = 'perimetres de responsables'
+
+    def __str__(self):
+        return f'{self.utilisateur} — {self.departement or "matieres nommees"}'

@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 
-from .models import Cours, CoursPieceJointe, CoursReponse
+from .models import EXTENSIONS_PIECES, Cours, CoursPieceJointe, CoursReponse
 from .serializers import CoursSerializer, CoursReponseSerializer
 from . import services
 
@@ -93,6 +93,15 @@ class CoursViewSet(viewsets.ModelViewSet):
             if f.size > MAX_FICHIER_OCTETS:
                 return Response(
                     {'detail': f'Fichier « {f.name} » trop volumineux (max {MAX_FICHIER_MO} Mo).'},
+                    status=status.HTTP_400_BAD_REQUEST)
+            # Liste blanche CÔTÉ SERVEUR : celle du navigateur se contourne
+            # d'un appel API. Un .html ou un .exe déposé comme support de cours
+            # n'a rien à faire sous /media/.
+            extension = f.name.rsplit('.', 1)[-1].lower() if '.' in f.name else ''
+            if extension not in EXTENSIONS_PIECES:
+                return Response(
+                    {'detail': f'Fichier « {f.name} » refusé : type non autorisé '
+                               f'({", ".join(EXTENSIONS_PIECES)}).'},
                     status=status.HTTP_400_BAD_REQUEST)
 
         # Liens externes : JSON [{url, type?, libelle?}]

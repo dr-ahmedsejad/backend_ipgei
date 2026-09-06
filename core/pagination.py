@@ -5,7 +5,11 @@ from rest_framework.response import Response
 class StandardPagination(PageNumberPagination):
     page_size             = 10
     page_size_query_param = 'page_size'
-    max_page_size         = 200
+    # Le frontend demande jusqu'à 1 000 lignes (écrans d'affectation, listes
+    # déroulantes). À 200, le surplus était TRONQUÉ EN SILENCE : ni erreur, ni
+    # message — une année de 210 inscrits en perdait dix sur l'écran
+    # d'affectation. Le plafond couvre désormais la plus grande demande émise.
+    max_page_size         = 1000
 
     def get_paginated_response(self, data):
         return Response({

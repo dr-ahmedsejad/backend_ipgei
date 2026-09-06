@@ -33,6 +33,11 @@ services:
     image: postgres:18
     container_name: ipgei-db
     restart: always
+    # Rotation des journaux : sans plafond, quatre conteneurs en `restart:
+    # always` ecrivaient sans fin sur un VPS partage avec deux autres piles.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     environment:
       POSTGRES_DB:       ${DB_NAME:-ipgei}
       POSTGRES_USER:     ${DB_USER:-ipgei}
@@ -77,6 +82,11 @@ services:
     image: ipgei-backend
     container_name: ipgei-backend
     restart: always
+    # Rotation des journaux : sans plafond, quatre conteneurs en `restart:
+    # always` ecrivaient sans fin sur un VPS partage avec deux autres piles.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     depends_on:
       db:
         condition: service_healthy
@@ -142,6 +152,11 @@ services:
     image: ipgei-frontend
     container_name: ipgei-frontend
     restart: always
+    # Rotation des journaux : sans plafond, quatre conteneurs en `restart:
+    # always` ecrivaient sans fin sur un VPS partage avec deux autres piles.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     depends_on:
       - backend
 
@@ -150,6 +165,11 @@ services:
     image: nginx:alpine
     container_name: ipgei-nginx
     restart: always
+    # Rotation des journaux : sans plafond, quatre conteneurs en `restart:
+    # always` ecrivaient sans fin sur un VPS partage avec deux autres piles.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     ports:
       # 9090 sur l'hôte → 80 dans le conteneur. Ni 80 ni 443 ne sont réclamés :
       # ils appartiennent au Nginx de l'hôte, qui sert déjà d'autres sites.

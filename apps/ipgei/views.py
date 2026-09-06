@@ -34,6 +34,8 @@ from rest_framework.permissions import BasePermission
 
 from core.permissions import RBACPermission
 
+from .perimetre import PerimetreMatiereMixin
+
 from . import detail_notes, edt_pdf, pv, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
@@ -337,6 +339,20 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
             motif=request.data.get('motif') or 'Répartition entre classes',
         ))
 
+    @action(detail=False, methods=['post'], url_path='affecter-groupes')
+    def affecter_groupes(self, request):
+        """
+        Place plusieurs inscrits dans les sous-groupes de leur classe.
+
+        La classe ne bouge pas — c'est ce qui distingue ce geste de
+        `repartir`. Corps : `{affectations: [{inscription, sous_groupe|null}, …]}`.
+        """
+        return Response(self._executer(
+            services.affecter_sous_groupes,
+            request.data.get('affectations') or [],
+            utilisateur=_utilisateur(request),
+        ))
+
     @action(detail=False, methods=['post'], url_path='recalculer-frais')
     def recalculer_frais(self, request):
         """
@@ -363,7 +379,7 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
     required_module    = 'ipgei_inscriptions'
     queryset           = (
         InscriptionIPGEI.objects
-        .select_related('etudiant', 'classe', 'sous_groupe')
+        .select_related('etudiant', 'classe__niveau', 'sous_groupe')
     )
     filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class    = InscriptionIPGEIFilter
@@ -878,11 +894,14 @@ def _serialiser_releve_annuel(data: dict) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 # Matières
 # ═════════════════════════════════════════════════════════════════════════════
-class MatiereViewSet(InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
+class MatiereViewSet(PerimetreMatiereMixin, InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
     """Matières du cursus : coefficient, volume horaire, pondération DS/TP/examen."""
     serializer_class   = MatiereSerializer
     permission_classes = [RBACPermission]
     required_module    = 'ipgei_matieres'
+    # Un chef de departement ne voit que les matieres de son perimetre ; la
+    # ressource etant la matiere elle-meme, le filtre porte sur la cle.
+    perimetre_champ    = 'pk'
     queryset           = Matiere.objects.select_related('institution')
     filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields   = ['code_semestre', 'has_tp', 'actif', 'niveau_ref']
@@ -1055,7 +1074,11 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
     """
     serializer_class   = SessionEvaluationIPGEISerializer
     permission_classes = [RBACPermission]
-    required_module    = 'ipgei_notes'
+    # Module propre, et non `ipgei_notes` : ouvrir ou clore une campagne de
+    # saisie est un acte de SCOLARITE, pas de suivi pedagogique. Un chef de
+    # departement lit les notes de sa discipline — il n'a pas a decider quand
+    # l'etablissement entier saisit les siennes.
+    required_module    = 'ipgei_sessions'
     queryset           = (SessionEvaluationIPGEI.objects
                           .select_related('semestre', 'cloturee_par'))
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
@@ -1403,7 +1426,7 @@ class EnseignantDeLaMatiereOuRBAC(BasePermission):
         )
 
 
-class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
+class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
     """
     Notes par (étudiant × matière × semestre), avec DS et examens en nombre libre.
     """
@@ -1788,7 +1811,7 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
                 for i in inscriptions if i.id not in existantes
             ]
             if manquantes and not semestre.est_cloture:
-                Note.objects.bulk_create(manquantes)
+                Note.objects.bulk_create(manquantes, ignore_conflicts=True)
 
         notes = (
             Note.objects
@@ -1811,10 +1834,35 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         # Les deux campagnes s'ouvrent séparément : la grille dit laquelle
         # accepte des notes, pour que l'écran grise les bonnes colonnes plutôt
         # que de laisser saisir puis rejeter à l'enregistrement.
+        # Enseignement partagé : les DS et le TP se saisissent sur la matière
+        # porteuse. On renvoie SES lignes pour que la grille les affiche en
+        # lecture seule, plutôt que des colonnes vides qui inviteraient à
+        # ressaisir un devoir déjà noté.
+        partage = None
+        if matiere.partage_avec_id:
+            notes_porteuse = (
+                Note.objects
+                .filter(inscription__in=inscriptions, matiere_id=matiere.partage_avec_id,
+                        semestre=semestre)
+                .select_related('inscription__etudiant', 'matiere', 'semestre')
+                .prefetch_related('evaluations')
+            )
+            nb_ds_porteuse = 0
+            for n in notes_porteuse:
+                for e in n.evaluations.all():
+                    if e.type_evaluation == Evaluation.TYPE_DS:
+                        nb_ds_porteuse = max(nb_ds_porteuse, e.numero)
+            numeros['ds'] = nb_ds_porteuse
+            partage = {
+                'matiere': MatiereSerializer(matiere.partage_avec).data,
+                'notes':   NoteSerializer(notes_porteuse, many=True).data,
+            }
+
         sessions = services.sessions_du_semestre(semestre)
         return Response({
             'matiere':   MatiereSerializer(matiere).data,
             'semestre':  SemestreIPGEISerializer(semestre).data,
+            'partage':   partage,
             'nb_ds':     max(1, numeros['ds']),
             'nb_examens': max(1, numeros['exam']),
             'verrouillee': semestre.est_cloture,
@@ -1846,6 +1894,23 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         # contrôlée pour ce qu'elle contient réellement : envoyer des DS pendant
         # la seule campagne de rattrapage doit échouer, et l'inverse aussi.
         lignes = donnees['lignes']
+
+        # Enseignement partagé : les DS et le TP appartiennent à la porteuse.
+        # Les accepter ici créerait une seconde vérité pour une seule épreuve —
+        # on refuse en nommant l'écran où saisir, plutôt que d'ignorer en silence.
+        if matiere.partage_avec_id:
+            porte_un_ds = any(ev['type_evaluation'] == Evaluation.TYPE_DS
+                              for ligne in lignes
+                              for ev in (ligne.get('evaluations') or []))
+            if porte_un_ds or any('note_tp' in ligne for ligne in lignes):
+                porteuse = matiere.partage_avec
+                raise ValidationError(
+                    f'{matiere.code} suit le même enseignement que {porteuse.code} : '
+                    f'les devoirs surveillés et le TP se saisissent sur '
+                    f'{porteuse.code}, et valent pour les deux. '
+                    f"Seul l'examen se saisit ici."
+                )
+
         touche_normale = any(
             'note_tp' in ligne or ligne.get('evaluations') for ligne in lignes
         )
@@ -2135,6 +2200,9 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         semestre = SemestreIPGEI.objects.filter(pk=semestre_id).first()
         if semestre is None:
             raise ValidationError({'semestre': 'Semestre introuvable.'})
+        # Une année ou un semestre clos ne se recalcule plus : le jury a statué
+        # sur ces moyennes, et le recalcul réécrit aussi les pondérations figées.
+        self._executer(services.controler_recalcul, semestre)
         qs = Note.objects.filter(semestre=semestre)
         if request.data.get('classe'):
             qs = qs.filter(inscription__classe_id=request.data['classe'])
@@ -2145,29 +2213,41 @@ class NoteViewSet(_ErreurMetierMixin, ModelViewSet):
         return Response({'notes_recalculees': total})
 
 
-class EvaluationViewSet(ModelViewSet):
+class EvaluationViewSet(_ErreurMetierMixin, ModelViewSet):
     """DS et examens individuels — utile pour corriger une note isolée."""
     serializer_class   = EvaluationSerializer
     permission_classes = [RBACPermission]
     required_module    = 'ipgei_notes'
-    queryset           = Evaluation.objects.select_related('note__matiere')
+    queryset           = Evaluation.objects.select_related('note__matiere', 'note__semestre')
     filter_backends    = [DjangoFilterBackend]
     filterset_fields   = ['note', 'type_evaluation']
-    pagination_class   = NoPagination
+    # Table TRANSACTIONNELLE, pas un référentiel : 8 000 lignes et plus à
+    # chaque rentrée. `NoPagination` en renvoyait l'intégralité — 1,3 Mo —
+    # à quiconque oubliait un filtre.
+    pagination_class   = StandardPagination
 
     def perform_create(self, serializer):
+        self._garder(serializer.validated_data['note'])
         evaluation = serializer.save(saisie_par=_utilisateur(self.request))
         self._recalculer(evaluation.note)
 
     def perform_update(self, serializer):
+        self._garder(serializer.instance.note)
         evaluation = serializer.save()
         self._recalculer(evaluation.note)
 
     def perform_destroy(self, instance):
         note = instance.note
+        self._garder(note)
         instance.delete()
         if not note.verrouillee:
             self._recalculer(note)
+
+    def _garder(self, note):
+        # La saisie collective passe par `controler_saisie` ; la correction
+        # d'une évaluation isolée y échappait, et rouvrait de fait toute année
+        # close — le recalcul qui suit réécrit les moyennes de la classe.
+        self._executer(services.controler_recalcul, note.semestre)
 
     @staticmethod
     def _recalculer(note):
@@ -2989,7 +3069,7 @@ class GrilleTypeViewSet(_ErreurMetierMixin, ModelViewSet):
         return Response(resultat)
 
 
-class SeanceTypeViewSet(ModelViewSet):
+class SeanceTypeViewSet(PerimetreMatiereMixin, ModelViewSet):
     """Cases de la grille type."""
     serializer_class   = SeanceTypeSerializer
     permission_classes = [RBACPermission]
@@ -3002,7 +3082,7 @@ class SeanceTypeViewSet(ModelViewSet):
     pagination_class   = NoPagination
 
 
-class SeanceReelleViewSet(_ErreurMetierMixin, ModelViewSet):
+class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
     """
     Séances effectives d'une semaine. Support de l'édition unitaire et de
     l'édition « en lot » sur N semaines.

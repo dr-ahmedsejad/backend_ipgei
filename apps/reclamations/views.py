@@ -34,6 +34,20 @@ class ReclamationAdminViewSet(viewsets.ModelViewSet):
     filterset_fields   = ['statut', 'type_reclamation']
     search_fields      = ['etudiant__matricule', 'etudiant__nom', 'motif']
 
+    def get_queryset(self):
+        # Un chef de departement ou un coordinateur ne voit que les reclamations
+        # portant sur SES matieres. `get_object` passe par ici aussi : traiter une
+        # reclamation hors perimetre rend 404, sans garde supplementaire.
+        qs = super().get_queryset()
+        from apps.ipgei.perimetre import ems_autorises
+        em_ids = ems_autorises(self.request.user)
+        if em_ids is None:
+            return qs
+        return qs.filter(
+            models.Q(inscription_element__em__in=em_ids)
+            | models.Q(presence__suivi__em__in=em_ids)
+        ).distinct()
+
     def get_permissions(self):
         from rest_framework.permissions import IsAuthenticated
         if self.action in ('pour_enseignant', 'traiter'):

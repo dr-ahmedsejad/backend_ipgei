@@ -11,7 +11,16 @@ INBOX (voir portail-inbox) : ces tables sont EXCLUES de la sync (settings.SYNC_E
 FK vers une table miroir (em, institution, user) → on stocke des `*_id` bruts + snapshot.
 Les pièces jointes / réponses gardent leur FK vers Cours (inbox → inbox = autorisé).
 """
+from django.core.validators import FileExtensionValidator
 from django.db import models
+
+#: Types de pièces jointes acceptés — supports de cours : documents, images,
+#: audio/vidéo, archive. Vérifié côté serveur (le navigateur se contourne).
+EXTENSIONS_PIECES = [
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+    'txt', 'csv', 'md', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
+    'mp4', 'webm', 'mp3', 'm4a', 'zip',
+]
 
 
 TYPE_PIECE_CHOICES = [
@@ -56,7 +65,8 @@ class CoursPieceJointe(models.Model):
     cours   = models.ForeignKey(Cours, on_delete=models.CASCADE, related_name='pieces')
     type    = models.CharField(max_length=10, choices=TYPE_PIECE_CHOICES, default='fichier')
     url     = models.URLField(max_length=1000, blank=True, default='')       # lien / vidéo externe
-    fichier = models.FileField(upload_to='cours/%Y/%m/', null=True, blank=True)
+    fichier = models.FileField(upload_to='cours/%Y/%m/', null=True, blank=True,
+                               validators=[FileExtensionValidator(EXTENSIONS_PIECES)])
     libelle = models.CharField(max_length=255, blank=True, default='')
 
     date_creation = models.DateTimeField(auto_now_add=True)

@@ -76,7 +76,7 @@ def _format_depts_compact(sp):
     return ' / '.join(parts)
 
 
-def _compute_avancement_em(annee, type_semestre, semestre_id=None):
+def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
     """
     Calcule l'avancement complet (planification / realisation / %) pour tous les EMs.
     Utilise Suivie (toutes les seances = realisees) et MAX inter-departements atomiques.
@@ -88,15 +88,35 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None):
     # de son ancrage viderait donc l'ecran des qu'une classe est creee pour
     # l'annee suivante. Les heures REALISEES restent, elles, filtrees sur
     # l'annee demandee, plus bas.
+    #
+    # Et une matiere qui a PERDU son ancre — la classe qui la portait a ete
+    # supprimee, `SET_NULL` a fait le reste — ne doit pas disparaitre pour
+    # autant : elle reste dans la maquette. On la retient des lors que son
+    # NIVEAU a une classe active cette annee ; sans classe, elle ne concerne
+    # personne et reste hors ecran. C'est ce qui a vide l'ecran « pour tous,
+    # administrateur compris » apres une purge des annees precedentes.
     base_em = (
         EMModel.objects
         .filter(semestre__type_semestre=type_semestre)
         .filter(Q(departement__annee_universitaire=annee)
-                | Q(departement__classe_ipgei__isnull=False))
+                | Q(departement__classe_ipgei__isnull=False)
+                | Q(departement__isnull=True,
+                    # …et seulement si c'est bien le MIROIR d'une matiere IPGEI
+                    # active : le catalogue socle garde des EM orphelins (CHIM,
+                    # EPS…) sans matiere derriere, qui surgiraient sinon.
+                    matiere_ipgei__isnull=False, matiere_ipgei__actif=True,
+                    semestre__niveau_semestre__departements__annee_universitaire=annee,
+                    semestre__niveau_semestre__departements__classe_ipgei__isnull=False,
+                    semestre__niveau_semestre__departements__classe_ipgei__actif=True))
         .select_related('semestre')
     )
     if semestre_id:
         base_em = base_em.filter(semestre_id=semestre_id)
+    # Perimetre disciplinaire : un chef de departement ou un coordinateur ne voit
+    # que l'avancement de SES matieres. `ems` vaut None pour tous les autres —
+    # direction, scolarite —, qui gardent la vue complete.
+    if ems is not None:
+        base_em = base_em.filter(id__in=ems)
 
     # Dedoublonner par code_em (prendre le premier ID)
     first_ids = (
@@ -333,7 +353,9 @@ class AvancementEMView(APIView):
         semestre_id   = request.query_params.get('semestre_id')    # optionnel
         if not annee or not type_semestre:
             return Response({'error': 'annee_universitaire et type_semestre requis.'}, status=400)
-        return Response(_compute_avancement_em(annee, type_semestre, semestre_id))
+        from apps.ipgei.perimetre import ems_autorises
+        return Response(_compute_avancement_em(
+            annee, type_semestre, semestre_id, ems_autorises(request.user)))
 
 
 class AvancementProfsView(APIView):
@@ -1234,10 +1256,16 @@ class StatistiquesSemestresView(APIView):
         # ancrage vidait donc l'écran dès l'ouverture de l'année suivante :
         # aucun label, aucune barre, alors que des séances étaient pointées.
         # Les heures RÉALISÉES restent filtrées sur l'année demandée, plus bas.
-        # Même correctif que `_compute_avancement_em`, qui l'avait déjà reçu.
+        # Même correctif que `_compute_avancement_em`, qui l'avait déjà reçu —
+        # y compris la matière SANS ancre dont le niveau a une classe cette année.
         base_em = EM.objects.filter(semestre__type_semestre=type_semestre).filter(
             Q(departement__annee_universitaire=annee)
             | Q(departement__classe_ipgei__isnull=False)
+            | Q(departement__isnull=True,
+                matiere_ipgei__isnull=False, matiere_ipgei__actif=True,
+                semestre__niveau_semestre__departements__annee_universitaire=annee,
+                semestre__niveau_semestre__departements__classe_ipgei__isnull=False,
+                semestre__niveau_semestre__departements__classe_ipgei__actif=True)
         )
         sem_codes = (
             base_em
@@ -1464,7 +1492,9 @@ class AvancementEMPDFView(APIView):
         if not annee or not type_semestre:
             return Response({'error': 'annee_universitaire et type_semestre requis.'}, status=400)
 
-        items = _compute_avancement_em(annee, type_semestre, semestre_id)
+        from apps.ipgei.perimetre import ems_autorises
+        items = _compute_avancement_em(annee, type_semestre, semestre_id,
+                                       ems_autorises(request.user))
         if not items:
             return Response({'error': 'Aucune donnée.'}, status=404)
 

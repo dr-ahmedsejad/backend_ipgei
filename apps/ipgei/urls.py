@@ -1,4 +1,7 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
+
+from .perimetre import PerimetreResponsableView
 
 from .views import (
     AbsenceSeanceViewSet, ClassementS3ViewSet, ClasseViewSet, ConcoursCNIMViewSet,
@@ -52,4 +55,9 @@ router.register(r'signataires',     SignataireIPGEIViewSet,      basename='ipgei
 # Tableau de bord
 router.register(r'tableau-bord',    TableauBordIPGEIViewSet,     basename='ipgei-tableau-bord')
 
-urlpatterns = router.urls
+urlpatterns = router.urls + [
+    # Le perimetre disciplinaire d'un responsable : quel departement, quelles
+    # matieres. Pose par l'admin, lu par le RBAC a chaque requete.
+    path('perimetres/<int:user_id>/', PerimetreResponsableView.as_view(),
+         name='ipgei-perimetre'),
+]

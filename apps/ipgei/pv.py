@@ -105,7 +105,7 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
     Renvoie les effectifs classés, que le cartouche annonce : « 17ᵉ » ne se lit
     pas sans savoir sur combien.
     """
-    from .models import InscriptionIPGEI
+    from .models import InscriptionIPGEI, Note
 
     semestre = deliberation.semestre
     if semestre is None:
@@ -113,25 +113,41 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
 
     figees = {l.inscription_id: l.moyenne_generale for l in lignes
               if l.moyenne_generale is not None}
+
+    promotion = (InscriptionIPGEI.objects
+                 .filter(actif=True, annee_universitaire=deliberation.annee_universitaire)
+                 .select_related('classe__niveau', 'classe__institution'))
+    if deliberation.classe_id:
+        promotion = promotion.filter(classe__niveau_id=deliberation.classe.niveau_id)
+    else:
+        promotion = promotion.filter(classe__niveau__niveau=deliberation.niveau)
+    promotion = list(promotion)
+
+    # Les moyennes des autres classes se calculent comme `moyenne_semestrielle`
+    # le ferait — mêmes notes, même maquette, absents comptés zéro — mais en
+    # DEUX lectures pour toute la promotion au lieu de trois par élève : à 143
+    # inscrits, l'écran de jury mettait plus d'une seconde à s'ouvrir.
+    a_calculer = [i for i in promotion if figees.get(i.pk) is None]
+    notes_par_inscription = {}
+    for note in (Note.objects
+                 .filter(semestre=semestre, inscription__in=[i.pk for i in a_calculer])
+                 .select_related('matiere')):
+        notes_par_inscription.setdefault(note.inscription_id, []).append(note)
+    maquettes = {}
+
     moyennes = {}
-    for inscription in (InscriptionIPGEI.objects
-                        .filter(actif=True,
-                                annee_universitaire=deliberation.annee_universitaire,
-                                classe__niveau_id=deliberation.classe.niveau_id
-                                if deliberation.classe_id else None)
-                        .select_related('classe')
-                        if deliberation.classe_id else
-                        InscriptionIPGEI.objects
-                        .filter(actif=True,
-                                annee_universitaire=deliberation.annee_universitaire,
-                                classe__niveau__niveau=deliberation.niveau)
-                        .select_related('classe')):
-        valeur = figees.get(inscription.pk)
-        if valeur is None:
-            valeur, _, _ = services.moyenne_semestrielle(
-                inscription, semestre, absents_a_zero=True)
-        if valeur is not None:
-            moyennes[inscription.pk] = (Decimal(valeur), inscription.classe_id)
+    with services.cache_referentiel():
+        for inscription in promotion:
+            valeur = figees.get(inscription.pk)
+            if valeur is None:
+                cle = (inscription.classe.institution_id, inscription.niveau)
+                if cle not in maquettes:
+                    maquettes[cle] = services.maquette_du_semestre(inscription, semestre)
+                valeur, _, _ = services._agreger(
+                    notes_par_inscription.get(inscription.pk, []),
+                    absents_a_zero=True, maquette=maquettes[cle])
+            if valeur is not None:
+                moyennes[inscription.pk] = (Decimal(valeur), inscription.classe_id)
 
     for ligne in lignes:
         mienne = moyennes.get(ligne.inscription_id)

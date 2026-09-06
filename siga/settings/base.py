@@ -397,7 +397,12 @@ AXES_FAILURE_LIMIT        = config('AXES_FAILURE_LIMIT',    default=5,  cast=int
 AXES_COOLOFF_TIME         = timedelta(minutes=config('AXES_COOLOFF_MINUTES', default=15, cast=int))
 AXES_LOCK_OUT_AT_FAILURE  = True
 AXES_RESET_ON_SUCCESS     = True
-AXES_LOCKOUT_PARAMETERS   = ['ip_address']         # bloquer par IP uniquement
+# Deux verrous INDÉPENDANTS (liste de listes = l'un OU l'autre) : par IP, et
+# par compte. Par IP seule, un mot de passe courant essayé quatre fois sur
+# chaque compte de l'institut ne déclenchait jamais rien ; et si tout
+# l'établissement sort par une même IP publique, cinq fautes de frappe
+# d'étudiants différents bloquaient tout le monde un quart d'heure.
+AXES_LOCKOUT_PARAMETERS   = [['ip_address'], ['username']]
 AXES_HTTP_RESPONSE_CODE   = 429
 AXES_LOCKOUT_TEMPLATE     = None
 AXES_ENABLE_ADMIN         = True

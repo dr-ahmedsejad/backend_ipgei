@@ -1,4 +1,6 @@
 from django.urls import path
+
+from .par_groupe import AvancementGroupeView, SeancesRateesView
 from .views import (
     AvancementEMView, AvancementProfsView, AvancementProfDetailView,
     ChargeProfsPermanantsView, ChargePermanentsMensuelView,
@@ -13,6 +15,10 @@ from .views import (
 urlpatterns = [
     # ── Données JSON ─────────────────────────────────────────────────────────
     path('em/',                       AvancementEMView.as_view(),               name='avancement-em'),
+    # Meme donnee que 'em/', sans l'ecrasement par le maximum : le detail
+    # groupe par groupe, et les seances qu'un groupe n'a pas eues.
+    path('groupes/',                  AvancementGroupeView.as_view(),           name='avancement-groupes'),
+    path('groupes/seances-ratees/',   SeancesRateesView.as_view(),              name='avancement-seances-ratees'),
     path('profs/',                    AvancementProfsView.as_view(),            name='avancement-profs'),
     path('profs/detail/',             AvancementProfDetailView.as_view(),       name='avancement-profs-detail'),
     path('charge-permanents/',        ChargeProfsPermanantsView.as_view(),      name='charge-permanents'),

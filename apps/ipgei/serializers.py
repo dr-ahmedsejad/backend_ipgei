@@ -243,6 +243,12 @@ class MatiereSerializer(serializers.ModelSerializer):
     niveau_ref_code = serializers.CharField(source='niveau_ref.code', read_only=True, default='')
     # Total calcule : c'est la somme CM+TD+TP, jamais une valeur saisie.
     volume_horaire = serializers.IntegerField(read_only=True)
+    #: Enseignement partagé — voir `Matiere.partage_avec`. L'écran de saisie
+    #: s'en sert pour griser les colonnes DS et TP d'une matière rattachée.
+    partage_avec_code     = serializers.CharField(
+        source='partage_avec.code', read_only=True, default='')
+    partage_avec_intitule = serializers.CharField(
+        source='partage_avec.intitule', read_only=True, default='')
 
     class Meta:
         model  = Matiere
@@ -250,7 +256,8 @@ class MatiereSerializer(serializers.ModelSerializer):
             'id', 'institution', 'code', 'intitule', 'intitule_ar', 'code_semestre',
             'niveau', 'niveau_ref', 'niveau_ref_code',
             'coefficient', 'volume_cm', 'volume_td', 'volume_tp',
-            'volume_horaire', 'has_tp',
+            'volume_horaire', 'has_tp', 'departement',
+            'partage_avec', 'partage_avec_code', 'partage_avec_intitule',
             'pct_ds', 'pct_tp', 'pct_exam', 'ordre', 'actif',
         ]
 
@@ -281,6 +288,33 @@ class MatiereSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 f'La pondération doit totaliser 100 % (actuellement {total} %).'
             )
+
+        # ── Enseignement partagé ────────────────────────────────────────────
+        # Deux lignes de maquette pour un seul cours : elles doivent porter sur
+        # le même semestre et le même niveau, sinon « le même enseignement » ne
+        # veut rien dire. Une seule profondeur : A → B, jamais A → B → C, sans
+        # quoi il faudrait décider où le devoir est vraiment composé.
+        porteuse = valeur('partage_avec')
+        if porteuse is not None:
+            if self.instance is not None and porteuse.pk == self.instance.pk:
+                raise serializers.ValidationError({'partage_avec':
+                    'Une matière ne peut pas partager son enseignement avec elle-même.'})
+            if porteuse.partage_avec_id is not None:
+                raise serializers.ValidationError({'partage_avec':
+                    f'{porteuse.code} est déjà rattachée à une autre matière. '
+                    'Rattachez-vous directement à la matière porteuse.'})
+            if self.instance is not None and self.instance.matieres_rattachees.exists():
+                raise serializers.ValidationError({'partage_avec':
+                    "D'autres matières sont déjà rattachées à celle-ci : elle est "
+                    'porteuse, elle ne peut pas être rattachée à son tour.'})
+            if porteuse.code_semestre != valeur('code_semestre'):
+                raise serializers.ValidationError({'partage_avec':
+                    f'{porteuse.code} relève du semestre {porteuse.code_semestre} : '
+                    'un même enseignement se donne sur un seul semestre.'})
+            niveau_demande = valeur('niveau_ref')
+            if niveau_demande is not None and porteuse.niveau_ref_id != niveau_demande.pk:
+                raise serializers.ValidationError({'partage_avec':
+                    f'{porteuse.code} ne relève pas du même niveau.'})
 
         # Le niveau et le semestre doivent s'accorder : une matière de MPI — 2e
         # année — ne peut pas relever de S1. À défaut de niveau saisi, on prend

@@ -4,6 +4,8 @@ Règles métier IPGEI — calcul des notes, délibération, EDT et permutations.
 Toute la logique vit ici plutôt que dans les vues : les mêmes règles servent
 l'API, l'admin Django, les commandes de gestion et la génération de documents.
 """
+import threading
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -19,7 +21,8 @@ from .models import (
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
     MembreJuryIPGEI,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
-    SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI, StatutWorkflow,
+    SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI, SousGroupeTP,
+    StatutWorkflow,
 )
 
 CENT = Decimal('100')
@@ -68,14 +71,62 @@ def epreuves_tenues(matiere_id, semestre_id, classe_id) -> dict:
     dénominateur de TOUTE la classe. C'est pourquoi une saisie ne recalcule
     jamais une ligne seule, mais le groupe entier (`recalculer_groupe`).
     """
-    lignes = (
-        Evaluation.objects
-        .filter(note__matiere_id=matiere_id, note__semestre_id=semestre_id,
-                note__inscription__classe_id=classe_id)
-        .values('type_evaluation')
-        .annotate(n=Count('numero', distinct=True))
-    )
-    return {l['type_evaluation']: l['n'] for l in lignes}
+    def compter(mid, types):
+        lignes = (
+            Evaluation.objects
+            .filter(note__matiere_id=mid, note__semestre_id=semestre_id,
+                    note__inscription__classe_id=classe_id,
+                    type_evaluation__in=types)
+            .values('type_evaluation')
+            .annotate(n=Count('numero', distinct=True))
+        )
+        return {l['type_evaluation']: l['n'] for l in lignes}
+
+    porteuse_id = porteuse_de(matiere_id)
+    if porteuse_id == matiere_id:
+        return compter(matiere_id, [Evaluation.TYPE_DS, Evaluation.TYPE_EXAM])
+
+    # Enseignement partagé : les devoirs sont composés sous la matière porteuse.
+    # Les compter ici donnerait zéro et effacerait leur part de la moyenne.
+    epreuves = compter(matiere_id, [Evaluation.TYPE_EXAM])
+    epreuves.update(compter(porteuse_id, [Evaluation.TYPE_DS]))
+    return epreuves
+
+
+def porteuse_de(matiere_id):
+    """
+    Identifiant de la matière où se saisissent les DS et le TP de celle-ci.
+
+    Rend `matiere_id` lui-même quand la matière n'est rattachée à aucune autre —
+    le cas courant. Voir `Matiere.partage_avec`.
+    """
+    from .models import Matiere
+
+    partage = (Matiere.objects.filter(pk=matiere_id)
+               .values_list('partage_avec_id', flat=True).first())
+    return partage or matiere_id
+
+
+def note_porteuse(note):
+    """
+    La ligne de note où lire les DS et le TP de celle-ci, ou None.
+
+    None quand la matière n'est rattachée à rien — ou quand la porteuse n'a pas
+    encore de ligne pour cet étudiant : DS et TP sont alors simplement absents,
+    et `calculer_note` neutralise leur part. Il n'y a PAS de repli sur les
+    évaluations de la rattachée : un DS saisi là avant le rattachement ne doit
+    pas ressurgir, sans quoi deux étudiants n'auraient pas la même règle.
+    """
+    from .models import Note
+
+    if note.matiere.partage_avec_id is None:
+        return None
+    return (Note.objects
+            .filter(inscription_id=note.inscription_id,
+                    semestre_id=note.semestre_id,
+                    matiere_id=note.matiere.partage_avec_id)
+            .prefetch_related('evaluations')
+            .first())
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -165,6 +216,26 @@ def controler_saisie(semestre: SemestreIPGEI, *, rattrapage: bool = False) -> Se
             f'{semestre.code} — ouvrez-la avant de saisir.'
         )
     return session
+
+
+def controler_recalcul(semestre: SemestreIPGEI) -> None:
+    """
+    Vérifie qu'un recalcul de notes est encore permis ; lève sinon.
+
+    `controler_saisie` gardait la saisie, mais deux chemins recalculaient sans
+    lui : la correction d'une évaluation isolée et le recalcul de masse d'un
+    semestre. Or un recalcul réécrit les moyennes de toute la classe — et les
+    pondérations « figées » sur chaque note — donc, sur une année close, ce que
+    le jury a arrêté. Mêmes verrous que la saisie, hors état de campagne : un
+    recalcul n'est pas une campagne.
+    """
+    if annee_cloturee(semestre.annee_universitaire):
+        raise ValidationError(
+            f'Année universitaire {semestre.annee_universitaire} clôturée — '
+            'recalcul impossible.'
+        )
+    if semestre.est_cloture:
+        raise ValidationError('Semestre clôturé — recalcul impossible.')
 
 
 def plafond_effectif(semestre: SemestreIPGEI):
@@ -264,7 +335,8 @@ def _tracer_session(session: SessionEvaluationIPGEI, acte: str, utilisateur) -> 
 # Calcul d'une note de matière
 # ═════════════════════════════════════════════════════════════════════════════
 def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
-                  epreuves: dict = None, rattrapage_seulement: bool = False) -> Note:
+                  epreuves: dict = None, rattrapage_seulement: bool = False,
+                  partagee: Note = None) -> Note:
     """
     Recalcule une ligne de note et **fige la pondération** de la matière dedans.
 
@@ -310,8 +382,25 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
     if epreuves is None:
         epreuves = epreuves_tenues(note.matiere_id, note.semestre_id,
                                    note.inscription.classe_id)
+
+    matiere = note.matiere
+    # Enseignement partagé : DS et TP viennent de la matière porteuse — les
+    # devoirs sont composés une fois et valent pour les deux, le TP aussi ;
+    # seul l'examen est propre à cette ligne. `partagee` est fourni par
+    # `recalculer_notes`, qui charge les lignes porteuses en une requête.
+    if matiere.partage_avec_id is not None:
+        if partagee is None:
+            partagee = note_porteuse(note)
+        evaluations_ds = list(partagee.evaluations.all()) if partagee is not None else []
+        # La valeur partagée devient CELLE DE LA LIGNE : le relevé, le PV et
+        # l'écran de saisie disent alors tous la même chose, sans avoir à
+        # remonter jusqu'à la porteuse pour la lire.
+        note.note_tp = partagee.note_tp if partagee is not None else None
+    else:
+        evaluations_ds = evaluations
+
     moy_ds   = _moyenne_arithmetique(
-        [e.valeur for e in evaluations if e.type_evaluation == Evaluation.TYPE_DS],
+        [e.valeur for e in evaluations_ds if e.type_evaluation == Evaluation.TYPE_DS],
         epreuves.get(Evaluation.TYPE_DS, 0),
     )
     moy_exam = _moyenne_arithmetique(
@@ -319,7 +408,6 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
         epreuves.get(Evaluation.TYPE_EXAM, 0),
     )
 
-    matiere = note.matiere
     # Snapshot : à partir d'ici, on ne lit plus la matière — la pondération de
     # cette ligne est celle du jour du calcul, définitivement.
     note.pct_ds      = matiere.pct_ds
@@ -354,7 +442,7 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
     if sauvegarder:
         note.save(update_fields=[
             'moy_ds', 'moy_exam', 'moyenne', 'note_retenue',
-            'pct_ds', 'pct_tp', 'pct_exam', 'coefficient',
+            'pct_ds', 'pct_tp', 'pct_exam', 'coefficient', 'note_tp',
             'plafond_rattrapage_applique', 'date_calcul', 'date_modification',
         ])
     return note
@@ -387,16 +475,34 @@ def recalculer_notes(queryset, *, plafond_rattrapage=None,
     """
     total = 0
     qs = queryset if rattrapage_seulement else queryset.filter(verrouillee=False)
-    qs = (qs.select_related('matiere', 'inscription')
-            .prefetch_related('evaluations'))
+    notes = list(qs.select_related('matiere', 'inscription')
+                   .prefetch_related('evaluations'))
+
+    # Enseignement partagé : les lignes porteuses en UNE requête pour tout le
+    # lot, plutôt qu'une par élève — même motif que le cache des épreuves.
+    partagees = {}
+    besoins = [(n.inscription_id, n.semestre_id, n.matiere.partage_avec_id)
+               for n in notes if n.matiere.partage_avec_id]
+    if besoins:
+        partagees = {
+            (p.inscription_id, p.semestre_id, p.matiere_id): p
+            for p in Note.objects
+            .filter(inscription_id__in={b[0] for b in besoins},
+                    semestre_id__in={b[1] for b in besoins},
+                    matiere_id__in={b[2] for b in besoins})
+            .prefetch_related('evaluations')
+        }
+
     cache = {}
-    for note in qs:
+    for note in notes:
         cle = (note.matiere_id, note.semestre_id, note.inscription.classe_id)
         if cle not in cache:
             cache[cle] = epreuves_tenues(*cle)
         calculer_note(note, plafond_rattrapage=plafond_rattrapage,
                       epreuves=cache[cle],
-                      rattrapage_seulement=rattrapage_seulement)
+                      rattrapage_seulement=rattrapage_seulement,
+                      partagee=partagees.get((note.inscription_id, note.semestre_id,
+                                              note.matiere.partage_avec_id)))
         total += 1
     return total
 
@@ -410,9 +516,18 @@ def recalculer_groupe(matiere_id, semestre_id, classe_id, *, plafond_rattrapage=
     et change donc le diviseur de tout le monde. Ne recalculer que la ligne
     saisie laisserait les trente-neuf autres sur l'ancien diviseur, sans que
     rien ne le signale.
+
+    Les matières RATTACHÉES à celle-ci sont recalculées dans la foulée : elles
+    lisent ses DS et son TP, et personne n'irait rouvrir leur grille après avoir
+    saisi un devoir — elles resteraient sur d'anciennes valeurs.
     """
+    from .models import Matiere
+
+    ids = [matiere_id] + list(Matiere.objects
+                              .filter(partage_avec_id=matiere_id)
+                              .values_list('id', flat=True))
     return recalculer_notes(
-        Note.objects.filter(matiere_id=matiere_id, semestre_id=semestre_id,
+        Note.objects.filter(matiere_id__in=ids, semestre_id=semestre_id,
                             inscription__classe_id=classe_id),
         plafond_rattrapage=plafond_rattrapage,
     )
@@ -624,6 +739,29 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
 # ═════════════════════════════════════════════════════════════════════════════
 # Délibération
 # ═════════════════════════════════════════════════════════════════════════════
+_referentiel_local = threading.local()
+
+
+@contextmanager
+def cache_referentiel():
+    """
+    Mémorise les fiches `NiveauIPGEI` le temps d'un bloc.
+
+    Le référentiel fait deux lignes, mais chaque moyenne le relit — par
+    inscription, par semestre, par candidate de première année : 269 lectures
+    pour un classement de 23 lignes. Le cache ne vit que dans le bloc : rien
+    ne survit à la requête HTTP, rien ne peut devenir périmé.
+    """
+    if getattr(_referentiel_local, 'niveaux', None) is not None:
+        yield                                   # bloc imbriqué : celui du dessus tient
+        return
+    _referentiel_local.niveaux = {}
+    try:
+        yield
+    finally:
+        _referentiel_local.niveaux = None
+
+
 def niveau_ref(code: str, institution=None):
     """
     Fiche du référentiel correspondant à un code de niveau, ou None.
@@ -633,10 +771,18 @@ def niveau_ref(code: str, institution=None):
     """
     from .models import NiveauIPGEI
 
+    memo = getattr(_referentiel_local, 'niveaux', None)
+    cle  = (code, getattr(institution, 'pk', institution))
+    if memo is not None and cle in memo:
+        return memo[cle]
+
     requete = NiveauIPGEI.objects.filter(code=code)
     if institution is not None:
         requete = requete.filter(institution=institution)
-    return requete.first()
+    fiche = requete.first()
+    if memo is not None:
+        memo[cle] = fiche
+    return fiche
 
 
 def rang_du_niveau(code: str, institution=None) -> int:
@@ -2472,18 +2618,54 @@ def rang_annuel_classe(inscription: InscriptionIPGEI,
         note_retenue__isnull=False))
 
 
+def seuil_applicable(inscription: InscriptionIPGEI, annee_universitaire: str,
+                     semestre: SemestreIPGEI = None):
+    """
+    Le seuil qui juge un relevé : celui FIGÉ par le jury qui a statué sur ce
+    dossier, sinon le paramétrage courant.
+
+    Le PV lit `Deliberation.seuil_validation` ; le relevé lisait le paramètre
+    du jour. Tant que le seuil ne bougeait pas, les deux coïncidaient. Il a
+    bougé — 7,50 puis 9,00 — et un étudiant admis au jury recevait un relevé
+    qui le déclarait « non validé ». Deux pièces officielles de la même
+    scolarité se contredisaient, et c'est celle remise à l'élève qui avait tort.
+
+    Seule une délibération VALIDÉE fait foi : un jury calculé mais non signé
+    n'a encore rien décidé. En cas de second jury (rattrapage), le plus récent.
+    """
+    lignes = LigneDeliberation.objects.filter(
+        inscription=inscription,
+        deliberation__statut=Deliberation.STATUT_VALIDEE,
+    )
+    if semestre is not None:
+        lignes = lignes.filter(deliberation__portee=Deliberation.PORTEE_SEMESTRE,
+                               deliberation__semestre=semestre)
+    else:
+        lignes = lignes.filter(
+            deliberation__annee_universitaire=annee_universitaire,
+            deliberation__portee__in=[Deliberation.PORTEE_ANNUELLE,
+                                      Deliberation.PORTEE_RATTRAPAGE],
+        )
+    ligne = (lignes.select_related('deliberation')
+             .order_by('-deliberation__date_validation', '-deliberation__pk')
+             .first())
+    if ligne is not None:
+        return ligne.deliberation.seuil_validation
+    return ParametresIPGEI.pour(inscription.classe.institution).seuil_validation
+
+
 def releve_semestre(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) -> dict:
     """Données d'un relevé de semestre — consommées par l'API et le PDF."""
     moyenne, poids, notes = moyenne_semestrielle(inscription, semestre)
-    params = ParametresIPGEI.pour(semestre.institution)
+    seuil = seuil_applicable(inscription, semestre.annee_universitaire, semestre)
     return {
         'inscription': inscription,
         'semestre':    semestre,
         'notes':       sorted(notes, key=lambda n: (n.matiere.ordre, n.matiere.code)),
         'moyenne':     moyenne,
         'total_coefficients': poids,
-        'seuil':       params.seuil_validation,
-        'valide':      moyenne is not None and moyenne >= params.seuil_validation,
+        'seuil':       seuil,
+        'valide':      moyenne is not None and moyenne >= seuil,
         'absences':    bilan_absences(inscription, semestre),
         'stats_classe': statistiques_classe(inscription, semestre),
         'rang_general': rang_general_classe(inscription, semestre),
@@ -2506,7 +2688,7 @@ def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> di
     semestrielle et disparaît de l'annuelle se lit comme une omission.
     """
     moyenne, poids, notes = moyenne_annuelle(inscription, annee_universitaire)
-    params = ParametresIPGEI.pour(inscription.classe.institution)
+    seuil = seuil_applicable(inscription, annee_universitaire)
     par_semestre = {}
     for n in notes:
         par_semestre.setdefault(n.semestre.code, []).append(n)
@@ -2534,8 +2716,8 @@ def releve_annuel(inscription: InscriptionIPGEI, annee_universitaire: str) -> di
         'semestres':           semestres,
         'moyenne':             moyenne,
         'total_coefficients':  poids,
-        'seuil':               params.seuil_validation,
-        'valide':              moyenne is not None and moyenne >= params.seuil_validation,
+        'seuil':               seuil,
+        'valide':              moyenne is not None and moyenne >= seuil,
         'absences':            bilan_absences(inscription),
         # Les deux classements de l'ANNÉE : celui qui compte pour le passage et
         # pour le concours. Le rang d'un semestre isolé ne le préjuge pas.
@@ -2740,7 +2922,15 @@ def rattacher_inscrits(semestre: SemestreIPGEI) -> int:
     note correspondante — et rien ne le signalerait avant la délibération.
 
     Idempotent.
+
+    Un semestre clos — ou une année close — ne reçoit plus de ligne : une
+    matière créée après le jury injectait sinon une note vide, non verrouillée,
+    dans chaque dossier délibéré, et la moyenne recalculée tombait sous ce que
+    le PV signé affirme.
     """
+    if semestre.est_cloture or annee_cloturee(semestre.annee_universitaire):
+        return 0
+
     inscriptions = (
         InscriptionIPGEI.objects
         .filter(actif=True,
@@ -3118,3 +3308,68 @@ def repartir_inscriptions(mouvements: list, utilisateur=None,
                           'vers': cible.nom})
 
     return {'deplacees': len(deplacees), 'mouvements': deplacees}
+
+
+@transaction.atomic
+def affecter_sous_groupes(affectations: list, utilisateur=None) -> dict:
+    """
+    Place plusieurs inscrits dans les sous-groupes de LEUR classe, en une fois.
+
+    Distinct de `repartir_inscriptions`, qui change de CLASSE : ici la classe ne
+    bouge pas, seule la moitié change. C'est le geste de la rentrée, quand la
+    scolarité constitue ses groupes de TD — et celui d'après une répartition,
+    qui vide les sous-groupes puisqu'un groupe appartient à une classe.
+
+    Aucun `HistoriqueClasse` n'est écrit : ce journal retrace les changements de
+    CLASSE, et y consigner un déplacement interne le rendrait illisible — on n'y
+    distinguerait plus un vrai transfert d'un simple regroupement de TD.
+
+    `affectations` : `[{'inscription': id, 'sous_groupe': id | None}, …]`.
+    `sous_groupe` à `None` sort l'élève de son groupe sans le sortir de sa classe.
+
+    Tout passe ou rien : une répartition à moitié appliquée laisserait deux
+    groupes faux, et rien ne dirait lesquels.
+    """
+    if not affectations:
+        raise ValidationError('Aucune affectation demandée.')
+
+    inscriptions = {
+        i.pk: i for i in InscriptionIPGEI.objects
+        .filter(pk__in=[a.get('inscription') for a in affectations])
+        .select_related('classe', 'sous_groupe', 'etudiant')
+    }
+    groupes = {
+        g.pk: g for g in SousGroupeTP.objects
+        .filter(pk__in=[a.get('sous_groupe') for a in affectations
+                        if a.get('sous_groupe')])
+        .select_related('classe')
+    }
+
+    touchees = []
+    for affectation in affectations:
+        inscription = inscriptions.get(affectation.get('inscription'))
+        if inscription is None:
+            raise ValidationError(
+                f"Inscription introuvable : {affectation.get('inscription')}.")
+
+        cible_id = affectation.get('sous_groupe')
+        cible = groupes.get(cible_id) if cible_id else None
+        if cible_id and cible is None:
+            raise ValidationError(f'Sous-groupe introuvable : {cible_id}.')
+        # Un sous-groupe appartient à UNE classe : l'y placer un élève d'une
+        # autre le rendrait invisible de sa propre liste d'appel.
+        if cible is not None and cible.classe_id != inscription.classe_id:
+            raise ValidationError(
+                f'{inscription.etudiant} est en {inscription.classe.nom} ; '
+                f'{cible.groupe} appartient à {cible.classe.nom}.')
+
+        if inscription.sous_groupe_id == (cible.pk if cible else None):
+            continue
+        inscription.sous_groupe = cible
+        # `save()` complet, comme `_deplacer` : c'est lui qui fait suivre le
+        # département de l'étudiant, dont dépendent les listes d'appel.
+        inscription.save()
+        touchees.append({'etudiant': inscription.etudiant.matricule,
+                         'vers': cible.groupe if cible else None})
+
+    return {'affectees': len(touchees), 'mouvements': touchees}

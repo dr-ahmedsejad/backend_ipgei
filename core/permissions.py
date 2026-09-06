@@ -22,6 +22,20 @@ ACTION_MAP = {
     'export':         'exporter',
 }
 
+#: Repli quand l'action DRF n'est pas une action de ViewSet standard.
+#:
+#: Les 125 `@action` personnalisees de l'application — `saisie-collective`,
+#: `nouvelle`, `traiter`, `repartir`… — ne figurent pas dans ACTION_MAP. Elles
+#: retombaient donc sur « voir », et une simple permission de LECTURE suffisait
+#: a les appeler : un chef de departement autorise a consulter les notes
+#: atteignait `notes/saisie-collective/` en POST. Le verbe HTTP tranche, faute
+#: de nom connu — c'est lui qui dit si la requete ecrit.
+METHODE_ACTION = {
+    'GET': 'voir', 'HEAD': 'voir', 'OPTIONS': 'voir',
+    'POST': 'modifier', 'PUT': 'modifier', 'PATCH': 'modifier',
+    'DELETE': 'supprimer',
+}
+
 RBAC_CACHE_TTL = 300  # 5 minutes
 
 
@@ -56,7 +70,9 @@ class RBACPermission(BasePermission):
             )
             return False
 
-        action_code = ACTION_MAP.get(getattr(view, 'action', ''), 'voir')
+        action_drf = getattr(view, 'action', '') or ''
+        action_code = (ACTION_MAP[action_drf] if action_drf in ACTION_MAP
+                       else METHODE_ACTION.get(request.method, 'voir'))
 
         return _has_access(user, module_code, action_code)
 
