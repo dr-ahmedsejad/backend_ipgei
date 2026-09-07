@@ -1254,6 +1254,29 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
             )
         resultats.append((inscription, moyenne, poids, notes))
 
+    # Le périmètre d'un jury peut avoir changé depuis le dernier calcul : un
+    # transfert, ou la répartition du second semestre appliquée d'un coup. Les
+    # lignes de ceux qui n'en font plus partie doivent PARTIR.
+    #
+    # `update_or_create` ne fait que rafraîchir celles des présents : sans ce
+    # retrait, le jury portait sa nouvelle composition ET l'ancienne. Un même
+    # étudiant figurait dans deux classes, son PV le comptait deux fois, et
+    # l'effectif de chaque classe était faux.
+    #
+    # Une ligne dont PROCÈDE une inscription de l'année suivante n'est jamais
+    # retirée : elle est la trace de la décision qui l'a créée. Le cas ne
+    # devrait pas se présenter — le passage suppose un jury validé, et un jury
+    # validé refuse le recalcul dès l'entrée — mais on ne fait pas disparaître
+    # un chaînage sur une supposition.
+    presents = {r[0].pk for r in resultats}
+    (LigneDeliberation.objects
+     .filter(deliberation=deliberation)
+     .exclude(inscription_id__in=presents)
+     .exclude(pk__in=InscriptionIPGEI.objects
+              .filter(issue_de__isnull=False)
+              .values_list('issue_de_id', flat=True))
+     .delete())
+
     # Rang : les étudiants sans moyenne restent non classés plutôt que derniers.
     classables = sorted(
         [r for r in resultats if r[1] is not None], key=lambda r: r[1], reverse=True,

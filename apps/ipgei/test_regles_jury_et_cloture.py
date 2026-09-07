@@ -263,3 +263,120 @@ class AuditVerrouillageTest(_Base):
 
         self.assertIsNotNone(self._trace_verrouillage(),
                              'les deux portées passent par le même verrou')
+
+
+class RecalculPerimetreTest(_Base):
+    """
+    Un recalcul retire les lignes de ceux qui ont quitté le périmètre du jury.
+
+    `calculer_deliberation` rafraîchissait la ligne de chaque inscrit ACTUEL,
+    mais ne retirait jamais celle d'un parti. Tant que personne ne change de
+    classe entre deux calculs — le cas ordinaire — rien ne se voyait. Appliquer
+    la répartition du second semestre puis recalculer donnait 299 lignes pour
+    154 étudiants, certains présents dans DEUX classes à la fois : leur PV les
+    comptait deux fois, et l'effectif de chaque classe était faux.
+    """
+
+    def _jury(self, classe=None):
+        return Deliberation.objects.create(
+            institution=self.inst, niveau='MPSI', classe=classe or self.mpsi_a,
+            annee_universitaire=self.annee, portee=Deliberation.PORTEE_ANNUELLE,
+            seuil_validation=Decimal('10'), statut=Deliberation.STATUT_CALCULEE)
+
+    def _avec_notes(self, matricule, valeur, classe=None):
+        inscription = self._inscrit(matricule, classe)
+        self._note(inscription, self.math1, self.s1, valeur)
+        self._note(inscription, self.math2, self.s2, valeur)
+        return inscription
+
+    def test_un_parti_perd_sa_ligne_au_recalcul(self):
+        reste  = self._avec_notes('760001', '12')
+        partant = self._avec_notes('760002', '14')
+        jury = self._jury()
+        services.calculer_deliberation(jury)
+        self.assertEqual(jury.lignes.count(), 2)
+
+        partant.classe = self.mpsi_b
+        partant.save()
+        services.calculer_deliberation(jury)
+
+        self.assertEqual(jury.lignes.count(), 1,
+                         "la ligne de celui qui a changé de classe doit partir")
+        self.assertEqual(jury.lignes.get().inscription_id, reste.pk)
+
+    def test_un_etudiant_ne_figure_jamais_dans_deux_jurys(self):
+        """Le symptôme observé : compté deux fois, dans deux classes."""
+        migrant = self._avec_notes('760003', '11')
+        self._avec_notes('760004', '13')
+        jury_a = self._jury(self.mpsi_a)
+        jury_b = self._jury(self.mpsi_b)
+        services.calculer_deliberation(jury_a)
+
+        migrant.classe = self.mpsi_b
+        migrant.save()
+        services.calculer_deliberation(jury_a)
+        services.calculer_deliberation(jury_b)
+
+        lignes = LigneDeliberation.objects.filter(inscription=migrant)
+        self.assertEqual(lignes.count(), 1,
+                         'un étudiant ne siège que dans le jury de SA classe')
+        self.assertEqual(lignes.get().deliberation_id, jury_b.pk)
+
+    def test_les_rangs_se_recalculent_sur_les_seuls_restants(self):
+        self._avec_notes('760005', '18')          # le meilleur, il s'en va
+        second = self._avec_notes('760006', '12')
+        jury = self._jury()
+        services.calculer_deliberation(jury)
+        self.assertEqual(jury.lignes.get(inscription=second).rang, 2)
+
+        parti = InscriptionIPGEI.objects.get(etudiant__matricule='760005')
+        parti.classe = self.mpsi_b
+        parti.save()
+        services.calculer_deliberation(jury)
+
+        self.assertEqual(jury.lignes.get(inscription=second).rang, 1,
+                         'le second devient premier quand le premier part')
+        # Sans le retrait, la ligne du parti garde son rang 1 et le jury en
+        # compte DEUX : un classement à deux premiers.
+        rangs = list(jury.lignes.values_list('rang', flat=True))
+        self.assertEqual(len(rangs), len(set(rangs)),
+                         'deux lignes ne peuvent pas porter le même rang')
+
+    def test_une_ligne_dont_procede_une_inscription_est_conservee(self):
+        """
+        Elle est la trace de la décision qui a créé le dossier suivant.
+
+        Le cas ne devrait pas se présenter — le passage suppose un jury validé,
+        et un jury validé refuse le recalcul — mais on ne fait pas disparaître
+        un chaînage sur une supposition.
+        """
+        chaine = self._avec_notes('760007', '15')
+        jury = self._jury()
+        services.calculer_deliberation(jury)
+        ligne = jury.lignes.get(inscription=chaine)
+
+        suite = Classe.objects.create(nom='MP A', institution=self.inst,
+                                      annee_universitaire='2026-2027',
+                                      niveau=self.socle_mp, groupe='A')
+        InscriptionIPGEI.objects.create(
+            etudiant=chaine.etudiant, classe=suite,
+            annee_universitaire='2026-2027', issue_de=ligne)
+
+        chaine.classe = self.mpsi_b
+        chaine.save()
+        services.calculer_deliberation(jury)
+
+        self.assertTrue(LigneDeliberation.objects.filter(pk=ligne.pk).exists(),
+                        "une ligne qui a fait naître une inscription reste")
+
+    def test_sans_mouvement_le_recalcul_ne_retire_rien(self):
+        self._avec_notes('760008', '12')
+        self._avec_notes('760009', '14')
+        jury = self._jury()
+        services.calculer_deliberation(jury)
+        avant = set(jury.lignes.values_list('pk', flat=True))
+
+        services.calculer_deliberation(jury)
+
+        self.assertEqual(set(jury.lignes.values_list('pk', flat=True)), avant,
+                         'un recalcul à périmètre constant ne touche à rien')
