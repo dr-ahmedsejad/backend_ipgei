@@ -4,7 +4,10 @@ from datetime import datetime
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.signals import user_logged_in, user_logged_out
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import generics, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -34,6 +37,44 @@ from .serializers import (
 )
 
 logger = logging.getLogger('siga')
+
+#: Alphabet du mot de passe engendré. Les caractères ambigus en sont exclus —
+#: O et 0, l et 1, I — parce qu'un mot de passe réinitialisé se transmet
+#: souvent à l'oral ou sur un papier, et qu'une confusion coûte un aller-retour.
+_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+_PONCTUATION = '!@#$%&*?'
+
+
+def engendrer_mot_de_passe(longueur: int = 12) -> str:
+    """
+    Un mot de passe provisoire, solide et dictable.
+
+    `secrets` et non `random` : le second est prévisible à partir de ses
+    sorties, ce qui suffit à deviner les mots de passe engendrés ensuite.
+
+    La composition est forcée — une majuscule, une minuscule, un chiffre, un
+    signe — plutôt que laissée au hasard : sans cela, un tirage sur douze
+    caractères peut ne contenir aucun chiffre et se faire refuser par les
+    validateurs de Django, après quoi l'administrateur ne comprend pas
+    pourquoi.
+    """
+    import secrets
+
+    obligatoires = [
+        secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ'),
+        secrets.choice('abcdefghijkmnopqrstuvwxyz'),
+        secrets.choice('23456789'),
+        secrets.choice(_PONCTUATION),
+    ]
+    reste = [secrets.choice(_ALPHABET) for _ in range(max(0, longueur - 4))]
+    caracteres = obligatoires + reste
+    # Mélange par tirages successifs : `secrets` n'a pas de `shuffle`, et
+    # `random.shuffle` réintroduirait le générateur prévisible qu'on écarte.
+    melange = []
+    while caracteres:
+        melange.append(caracteres.pop(secrets.randbelow(len(caracteres))))
+    return ''.join(melange)
+
 User = get_user_model()
 
 JWT_CONF = settings.SIMPLE_JWT
@@ -421,6 +462,61 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ('update', 'partial_update'):
             return UserUpdateSerializer
         return UserSerializer
+
+    @action(detail=True, methods=['post'], url_path='reinitialiser-mot-de-passe',
+            throttle_classes=[AdminActionThrottle])
+    def reinitialiser_mot_de_passe(self, request, pk=None):
+        """
+        Pose un nouveau mot de passe sur un compte, à la demande d'un admin.
+
+        Le mot de passe peut être FOURNI — l'administrateur le choisit et le
+        communique — ou ENGENDRÉ, auquel cas il est rendu une seule fois dans la
+        réponse. Il n'est stocké nulle part en clair et ne peut pas être relu :
+        si l'administrateur le perd, il refait l'opération.
+
+        `doit_changer_mdp` est posé : le compte devra en choisir un autre à sa
+        prochaine connexion. Sans cela, un mot de passe connu de deux personnes
+        le resterait indéfiniment.
+
+        Un administrateur ne réinitialise pas SON PROPRE mot de passe par ici :
+        `change-password` existe pour cela, et exige l'ancien. Passer par ce
+        chemin permettrait d'en changer sans le connaître — une porte ouverte
+        sur un poste laissé déverrouillé.
+
+        La trace est écrite par le signal de `core/signals.py`, qui compare le
+        hachage avant/après : elle dit QUI a réinitialisé le compte de QUI, et
+        se conserve indéfiniment.
+        """
+        utilisateur = self.get_object()
+
+        if utilisateur.pk == request.user.pk:
+            raise ValidationError(
+                "Pour votre propre compte, utilisez « Changer mon mot de passe » : "
+                "il exige l'ancien, et c'est ce qui le rend sûr."
+            )
+
+        fourni = (request.data.get('nouveau_mot_de_passe') or '').strip()
+        if fourni:
+            try:
+                validate_password(fourni, utilisateur)
+            except DjangoValidationError as exc:
+                raise ValidationError({'nouveau_mot_de_passe': list(exc.messages)})
+            mot_de_passe = fourni
+        else:
+            mot_de_passe = engendrer_mot_de_passe()
+
+        utilisateur.set_password(mot_de_passe)
+        utilisateur.doit_changer_mdp = True
+        utilisateur.save(update_fields=['password', 'doit_changer_mdp'])
+
+        logger.info('Password reset for user=%s by=%s',
+                    utilisateur.username, request.user.username)
+        return Response({
+            'detail': f'Mot de passe réinitialisé pour {utilisateur.username}.',
+            # Rendu UNE fois. Il n'est lisible nulle part ailleurs.
+            'mot_de_passe': mot_de_passe if not fourni else None,
+            'doit_changer_mdp': True,
+        })
 
     @action(detail=True, methods=['post'], url_path='toggle-active')
     def toggle_active(self, request, pk=None):
