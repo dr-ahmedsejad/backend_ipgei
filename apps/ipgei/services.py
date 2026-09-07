@@ -580,7 +580,7 @@ def initialiser_notes(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) ->
 
 
 def moyenne_semestrielle(inscription: InscriptionIPGEI, semestre: SemestreIPGEI,
-                         *, absents_a_zero: bool = False):
+                         *, absents_a_zero: bool = False, arrondi: bool = True):
     """
     Moyenne pondérée par les coefficients sur un semestre.
     Renvoie (moyenne, total_coefficients, [notes]).
@@ -598,10 +598,12 @@ def moyenne_semestrielle(inscription: InscriptionIPGEI, semestre: SemestreIPGEI,
     return _agreger(
         notes, absents_a_zero=absents_a_zero,
         maquette=maquette_du_semestre(inscription, semestre) if absents_a_zero else None,
+        arrondi=arrondi,
     )
 
 
-def _agreger(notes, *, absents_a_zero: bool = False, maquette=None):
+def _agreger(notes, *, absents_a_zero: bool = False, maquette=None,
+             arrondi: bool = True):
     """
     Agrège des lignes de note en moyenne pondérée par coefficient.
 
@@ -640,7 +642,11 @@ def _agreger(notes, *, absents_a_zero: bool = False, maquette=None):
 
     if poids == 0:
         return None, Decimal('0'), notes
-    return _arrondi(cumul / poids), poids, notes
+    moyenne = cumul / poids
+    # `arrondi=False` rend la valeur EXACTE. Elle ne sert qu'à ce qui
+    # compare — le rang, et l'agrégation annuelle — jamais à ce qui
+    # affiche ou stocke : les champs sont à deux décimales.
+    return (_arrondi(moyenne) if arrondi else moyenne), poids, notes
 
 
 def maquette_du_semestre(inscription: InscriptionIPGEI, semestre):
@@ -688,7 +694,7 @@ PONDERATION_ANNUELLE = {
 
 
 def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
-                     *, absents_a_zero: bool = False):
+                     *, absents_a_zero: bool = False, arrondi: bool = True):
     """
     Moyenne annuelle : la moyenne PONDÉRÉE DES MOYENNES SEMESTRIELLES.
 
@@ -735,8 +741,11 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
         lot = [n for n in notes if n.semestre.code == code]
         attendues = ([m for m in maquette if m.code_semestre == code]
                      if maquette is not None else None)
+        # SANS arrondir : combiner des semestres déjà arrondis au centième
+        # effaçait des écarts réels de l'ordre du millième, et fabriquait des
+        # ex æquo qui n'existaient pas.
         moyenne_semestre, _, _ = _agreger(lot, absents_a_zero=absents_a_zero,
-                                          maquette=attendues)
+                                          maquette=attendues, arrondi=False)
         if moyenne_semestre is None:
             # Semestre muet : il compte zéro pour le jury — une année à moitié
             # faite ne vaut pas une année réussie — et s'efface ailleurs.
@@ -746,8 +755,10 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
         cumul += Decimal(moyenne_semestre) * poids
         poids_retenu += poids
 
-    moyenne = _arrondi(cumul / poids_retenu) if poids_retenu else None
-    return moyenne, poids_matieres, notes
+    if not poids_retenu:
+        return None, poids_matieres, notes
+    moyenne = cumul / poids_retenu
+    return (_arrondi(moyenne) if arrondi else moyenne), poids_matieres, notes
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1243,15 +1254,23 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     # étudiant n'ayant composé que dans trois matières obtenait la moyenne de
     # ces trois-là et passait devant ceux qui avaient tout rendu.
     resultats = []
+    # La même moyenne, non arrondie. Elle ne sert qu'au classement : deux
+    # étudiants séparés d'un millième sont deux étudiants, et les arrondir
+    # d'abord fabriquait une égalité que l'ordre alphabétique tranchait ensuite.
+    exactes = {}
     for inscription in inscriptions:
         if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
-            moyenne, poids, notes = moyenne_semestrielle(
-                inscription, deliberation.semestre, absents_a_zero=True)
+            exacte, poids, notes = moyenne_semestrielle(
+                inscription, deliberation.semestre, absents_a_zero=True,
+                arrondi=False)
         else:
-            moyenne, poids, notes = moyenne_annuelle(
+            exacte, poids, notes = moyenne_annuelle(
                 inscription, deliberation.annee_universitaire,
-                absents_a_zero=True,
+                absents_a_zero=True, arrondi=False,
             )
+        # Ce qu'on stocke et ce qu'on compare au seuil reste au centième.
+        moyenne = _arrondi(exacte)
+        exactes[inscription.pk] = exacte
         resultats.append((inscription, moyenne, poids, notes))
 
     # Le périmètre d'un jury peut avoir changé depuis le dernier calcul : un
@@ -1279,7 +1298,8 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
 
     # Rang : les étudiants sans moyenne restent non classés plutôt que derniers.
     classables = sorted(
-        [r for r in resultats if r[1] is not None], key=lambda r: r[1], reverse=True,
+        [r for r in resultats if r[1] is not None],
+        key=lambda r: exactes[r[0].pk], reverse=True,
     )
     rangs = {r[0].id: i + 1 for i, r in enumerate(classables)}
 
