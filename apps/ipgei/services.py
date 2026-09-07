@@ -1254,10 +1254,6 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     # étudiant n'ayant composé que dans trois matières obtenait la moyenne de
     # ces trois-là et passait devant ceux qui avaient tout rendu.
     resultats = []
-    # La même moyenne, non arrondie. Elle ne sert qu'au classement : deux
-    # étudiants séparés d'un millième sont deux étudiants, et les arrondir
-    # d'abord fabriquait une égalité que l'ordre alphabétique tranchait ensuite.
-    exactes = {}
     for inscription in inscriptions:
         if deliberation.portee == Deliberation.PORTEE_SEMESTRE:
             exacte, poids, notes = moyenne_semestrielle(
@@ -1268,9 +1264,11 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
                 inscription, deliberation.annee_universitaire,
                 absents_a_zero=True, arrondi=False,
             )
-        # Ce qu'on stocke et ce qu'on compare au seuil reste au centième.
+        # La moyenne se calcule sans arrondir les semestres — sinon un écart
+        # réel de quelques millièmes disparaît avant d'être vu — puis
+        # s'arrondit ici, une seule fois. C'est cette valeur qui est publiée,
+        # comparée au seuil, et sur laquelle se partagent les rangs.
         moyenne = _arrondi(exacte)
-        exactes[inscription.pk] = exacte
         resultats.append((inscription, moyenne, poids, notes))
 
     # Le périmètre d'un jury peut avoir changé depuis le dernier calcul : un
@@ -1296,12 +1294,16 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
               .values_list('issue_de_id', flat=True))
      .delete())
 
-    # Rang : les étudiants sans moyenne restent non classés plutôt que derniers.
-    classables = sorted(
-        [r for r in resultats if r[1] is not None],
-        key=lambda r: exactes[r[0].pk], reverse=True,
-    )
-    rangs = {r[0].id: i + 1 for i, r in enumerate(classables)}
+    # Rang TASSÉ : les ex æquo partagent leur rang, et le suivant prend le rang
+    # d'après — deux cinquièmes, puis un sixième. Le partage se fait sur la
+    # moyenne PUBLIÉE : deux étudiants qui lisent 12,50 sur leur PV sont ex
+    # æquo, et leur donner deux rangs différents serait incompréhensible.
+    #
+    # Les étudiants sans moyenne restent non classés plutôt que derniers.
+    distinctes = sorted({r[1] for r in resultats if r[1] is not None},
+                        reverse=True)
+    place = {valeur: i + 1 for i, valeur in enumerate(distinctes)}
+    rangs = {r[0].id: place[r[1]] for r in resultats if r[1] is not None}
 
     # Une décision de passage engage l'ANNÉE : un jury de semestre, simple bilan
     # intermédiaire, n'en propose pas.

@@ -11,9 +11,13 @@ Constaté sur le PV signé de 2025-2026 : deux rangs faux en MPSIA, entre deux
 étudiants dont les moyennes exactes valaient 8,6538 et 8,6549. Après
 correction, les 154 rangs concordent.
 
+Depuis, la scolarité a arrêté sa règle : le partage se lit sur la moyenne
+PUBLIÉE. Deux étudiants qui affichent la même moyenne sont donc ex æquo, quelles
+que soient les décimales que le calcul a vues — et l'alphabet ne départage plus
+rien.
+
 Ce que le test fige :
-  1. deux étudiants séparés de moins d'un centième sont classés dans le bon
-     ordre, même quand l'alphabet dit l'inverse ;
+  1. même moyenne publiée, même rang ;
   2. la valeur STOCKÉE et AFFICHÉE reste au centième — rien ne change pour qui
      lit un bulletin ;
   3. la DÉCISION continue de se comparer au seuil sur la valeur arrondie ;
@@ -111,21 +115,34 @@ class ArrondiEtRangTest(TestCase):
             seuil_validation=Decimal('10'))
 
     # ── 1. Le classement ────────────────────────────────────────────────────
-    def test_un_ecart_au_millieme_departage_vraiment(self):
+    def test_meme_moyenne_publiee_donc_meme_rang(self):
+        """
+        Leurs valeurs exactes diffèrent au millième, mais leur moyenne PUBLIÉE
+        est la même : ils sont ex æquo, et le PV doit le dire.
+
+        C'est la règle arrêtée par la scolarité — le partage se lit sur la
+        moyenne générale, celle que l'étudiant a sous les yeux.
+        """
         meilleur, second = self._les_deux()
         services.calculer_deliberation(self._jury())
 
-        self.assertEqual(LigneDeliberation.objects.get(inscription=meilleur).rang, 1,
-                         'le meilleur au millième doit être premier')
-        self.assertEqual(LigneDeliberation.objects.get(inscription=second).rang, 2)
+        a = LigneDeliberation.objects.get(inscription=meilleur)
+        b = LigneDeliberation.objects.get(inscription=second)
+        self.assertEqual(a.moyenne_generale, b.moyenne_generale)
+        self.assertEqual(a.rang, b.rang, 'même moyenne publiée, même rang')
+        self.assertEqual(a.rang, 1)
 
-    def test_deux_lignes_ne_portent_pas_le_meme_rang(self):
-        self._les_deux()
+    def test_le_rang_ne_depend_plus_de_l_ordre_alphabetique(self):
+        """
+        Le meilleur au millième porte un nom qui le mettrait DERNIER dans
+        l'ordre du modèle. Avant, ce nom décidait de son rang.
+        """
+        meilleur, second = self._les_deux()
         services.calculer_deliberation(self._jury())
 
-        rangs = list(LigneDeliberation.objects.values_list('rang', flat=True))
-        self.assertEqual(len(rangs), len(set(rangs)),
-                         'un faux ex æquo produisait deux fois le même rang')
+        rangs = {l.inscription_id: l.rang for l in LigneDeliberation.objects.all()}
+        self.assertEqual(rangs[meilleur.pk], rangs[second.pk],
+                         "l'alphabet ne départage plus rien")
 
     def test_le_semestriel_arrondi_est_bien_le_meme_pour_les_deux(self):
         """Sans quoi le test ne prouverait rien : c'est là qu'était le piège."""
@@ -183,3 +200,127 @@ class ArrondiEtRangTest(TestCase):
         self.assertEqual(ligne.moyenne_generale, Decimal('7.50'))
         self.assertEqual(ligne.decision, LigneDeliberation.DECISION_ADMIS,
                          'le seuil se compare à la moyenne publiée')
+
+
+class RangTasseTest(TestCase):
+    """
+    Les ex æquo partagent leur rang, et le suivant prend le rang d'après.
+
+    Règle de la scolarité : deux cinquièmes, puis un SIXIÈME — pas un septième.
+    Le partage porte sur la moyenne générale publiée, celle que lit l'étudiant.
+
+    Deux mécanismes calculaient le rang, et ni l'un ni l'autre ne suivait cette
+    règle : le jury énumérait 1, 2, 3 sans jamais partager — le départage
+    retombant en silence sur l'ordre alphabétique — et le PV de semestre
+    comptait les étudiants strictement meilleurs, ce qui partage bien mais
+    saute ensuite.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.inst = Institution.objects.create(acronyme='TST', nom='Institut Test',
+                                              est_principale=True)
+        cls.socle = Niveau.objects.create(niveau='MPSI')
+        cls.ref = NiveauIPGEI.objects.create(institution=cls.inst, code='MPSI',
+                                             libelle='MPSI', rang=1)
+        cls.annee = '2025-2026'
+        cls.s1 = SemestreIPGEI.objects.create(
+            institution=cls.inst, code='S1', annee_universitaire=cls.annee,
+            date_debut=date(2025, 10, 6))
+        cls.s2 = SemestreIPGEI.objects.create(
+            institution=cls.inst, code='S2', annee_universitaire=cls.annee,
+            date_debut=date(2026, 1, 26))
+        cls.m1 = Matiere.objects.create(
+            institution=cls.inst, code='M1', intitule='M1', code_semestre='S1',
+            niveau_ref=cls.ref, coefficient=Decimal(1))
+        cls.m2 = Matiere.objects.create(
+            institution=cls.inst, code='M2', intitule='M2', code_semestre='S2',
+            niveau_ref=cls.ref, coefficient=Decimal(1))
+        cls.classe = Classe.objects.create(
+            nom='MPSI A', institution=cls.inst, annee_universitaire=cls.annee,
+            niveau=cls.socle, groupe='A')
+
+    def _inscrit(self, matricule, moyenne):
+        """La même note aux deux semestres : la moyenne annuelle la vaut."""
+        etudiant = Etudiant.objects.create(matricule=matricule, nom=matricule)
+        inscription = InscriptionIPGEI.objects.create(
+            etudiant=etudiant, classe=self.classe,
+            annee_universitaire=self.annee)
+        for matiere, semestre in ((self.m1, self.s1), (self.m2, self.s2)):
+            Note.objects.create(inscription=inscription, matiere=matiere,
+                                semestre=semestre,
+                                note_retenue=Decimal(moyenne),
+                                coefficient=matiere.coefficient)
+        return inscription
+
+    def _jury(self):
+        jury = Deliberation.objects.create(
+            institution=self.inst, niveau='MPSI', classe=self.classe,
+            annee_universitaire=self.annee,
+            portee=Deliberation.PORTEE_ANNUELLE,
+            seuil_validation=Decimal('10'))
+        services.calculer_deliberation(jury)
+        return jury
+
+    def _rangs(self):
+        return {l.inscription.etudiant.matricule: l.rang
+                for l in LigneDeliberation.objects.select_related(
+                    'inscription__etudiant')}
+
+    def test_deux_ex_aequo_partagent_leur_rang(self):
+        self._inscrit('700001', '15.00')
+        self._inscrit('700002', '12.50')
+        self._inscrit('700003', '12.50')
+        self._jury()
+
+        rangs = self._rangs()
+        self.assertEqual(rangs['700001'], 1)
+        self.assertEqual(rangs['700002'], 2)
+        self.assertEqual(rangs['700003'], 2, 'même moyenne, même rang')
+
+    def test_le_suivant_prend_le_rang_d_apres_et_ne_saute_pas(self):
+        """Deux cinquièmes, puis un SIXIÈME — c'est toute la règle."""
+        for matricule, moyenne in (('700010', '18.00'), ('700011', '16.00'),
+                                   ('700012', '14.00'), ('700013', '12.50'),
+                                   ('700014', '12.50'), ('700015', '10.00')):
+            self._inscrit(matricule, moyenne)
+        self._jury()
+
+        rangs = self._rangs()
+        self.assertEqual(rangs['700013'], 4)
+        self.assertEqual(rangs['700014'], 4, 'les deux quatrièmes')
+        self.assertEqual(rangs['700015'], 5,
+                         'le suivant est cinquième, pas sixième')
+
+    def test_trois_ex_aequo_comptent_pour_un_seul_rang(self):
+        for matricule, moyenne in (('700020', '17.00'), ('700021', '11.00'),
+                                   ('700022', '11.00'), ('700023', '11.00'),
+                                   ('700024', '9.00')):
+            self._inscrit(matricule, moyenne)
+        self._jury()
+
+        rangs = self._rangs()
+        self.assertEqual({rangs['700021'], rangs['700022'], rangs['700023']}, {2})
+        self.assertEqual(rangs['700024'], 3)
+
+    def test_le_partage_se_lit_sur_la_moyenne_publiee(self):
+        """
+        Deux étudiants qui lisent 12,50 sur leur PV sont ex æquo, quelles que
+        soient les décimales que le calcul a vues.
+        """
+        self._inscrit('700030', '12.50')
+        self._inscrit('700031', '12.50')
+        self._jury()
+
+        lignes = LigneDeliberation.objects.all()
+        self.assertEqual({l.moyenne_generale for l in lignes},
+                         {Decimal('12.50')})
+        self.assertEqual({l.rang for l in lignes}, {1})
+
+    def test_sans_ex_aequo_les_rangs_restent_consecutifs(self):
+        for matricule, moyenne in (('700040', '15.00'), ('700041', '14.00'),
+                                   ('700042', '13.00')):
+            self._inscrit(matricule, moyenne)
+        self._jury()
+
+        self.assertEqual(sorted(self._rangs().values()), [1, 2, 3])

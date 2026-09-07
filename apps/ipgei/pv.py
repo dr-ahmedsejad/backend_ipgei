@@ -149,16 +149,20 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
             if valeur is not None:
                 moyennes[inscription.pk] = (Decimal(valeur), inscription.classe_id)
 
+    # Rang TASSÉ, comme au jury : compter les étudiants strictement meilleurs
+    # partageait bien les ex æquo, mais SAUTAIT ensuite — deux cinquièmes puis
+    # un septième. On compte les MOYENNES strictement meilleures, pas les
+    # étudiants, et le suivant prend le rang d'après.
     for ligne in lignes:
         mienne = moyennes.get(ligne.inscription_id)
         if mienne is None:
             ligne.rang_classe = ligne.rang_promotion = None
             continue
         valeur, classe_id = mienne
-        ligne.rang_classe = 1 + sum(
-            1 for v, c in moyennes.values() if c == classe_id and v > valeur)
-        ligne.rang_promotion = 1 + sum(
-            1 for v, _ in moyennes.values() if v > valeur)
+        ligne.rang_classe = 1 + len(
+            {v for v, c in moyennes.values() if c == classe_id and v > valeur})
+        ligne.rang_promotion = 1 + len(
+            {v for v, _ in moyennes.values() if v > valeur})
 
     classes = {c for _, c in moyennes.values()}
     return {
