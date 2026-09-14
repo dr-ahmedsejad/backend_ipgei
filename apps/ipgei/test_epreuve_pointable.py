@@ -304,6 +304,69 @@ class EpreuvePointableTest(TestCase):
             type_seance_fk__type_seance='CM').first()
         self.assertEqual(SuiviePointageSerializer(pointage).data['horaire_reel'], '')
 
+    def test_l_epreuve_figure_sur_les_fiches_de_suivi(self):
+        """
+        Les fiches — individuelle comme collective — exigeaient une SALLE. Une
+        épreuve n'en a pas : le devoir disparaissait de la feuille où on le
+        pointe, alors que c'est la seule qui circule le jour de l'examen.
+        """
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from apps.suivi.views import SuiviePointageViewSet
+
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        from django.contrib.auth import get_user_model
+        admin = get_user_model().objects.get(username='gen')
+
+        # L'ÉCRAN — l'action `fiches`.
+        vue = SuiviePointageViewSet.as_view({'get': 'fiches'})
+        demande = APIRequestFactory().get('/x/', {
+            'annee_universitaire': '2025-2026', 'numero_semaine': 7,
+            'type_semestre': 'I', 'id_semestre': 'S3'})
+        force_authenticate(demande, user=admin)
+        reponse = vue(demande)
+        self.assertEqual(reponse.status_code, 200)
+        types = [f['type_seance'] for jour in reponse.data
+                 for f in jour.get('fiches', [])]
+        self.assertIn('EF', types, "l'épreuve doit figurer à l'écran")
+
+        # LES DEUX PDF — ils partagent `_build_fiches_par_jour`, qui portait la
+        # même condition et devait donc être corrigé lui aussi.
+        jours = SuiviePointageViewSet()._build_fiches_par_jour(
+            '2025-2026', 7, 'I', 'S3')
+        types_pdf = [f['type_seance'] for jour in jours
+                     for f in jour.get('fiches', [])]
+        self.assertIn('EF', types_pdf, "l'épreuve doit figurer sur les PDF")
+
+    def test_les_lignes_vides_restent_ecartees_des_fiches(self):
+        """
+        Ce que la condition visait vraiment : la génération pose une ligne sur
+        chaque créneau libre, sans EM. Les laisser entrer noierait la feuille
+        sous des lignes vides.
+        """
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from apps.suivi.views import SuiviePointageViewSet
+
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        from django.contrib.auth import get_user_model
+        admin = get_user_model().objects.get(username='gen')
+
+        vue = SuiviePointageViewSet.as_view({'get': 'fiches'})
+        demande = APIRequestFactory().get('/x/', {
+            'annee_universitaire': '2025-2026', 'numero_semaine': 7,
+            'type_semestre': 'I', 'id_semestre': 'S3'})
+        force_authenticate(demande, user=admin)
+        fiches = [f for jour in vue(demande).data for f in jour.get('fiches', [])]
+
+        self.assertTrue(fiches, "au moins la ligne de l'épreuve")
+        self.assertTrue(all(f['em_intitule'] for f in fiches),
+                        'aucune ligne sans module ne doit passer')
+
     def test_la_ligne_de_suivi_satisfait_le_filtre_du_remplissage(self):
         """
         L'écran écarte toute ligne sans type, sans intitulé de module, ou de

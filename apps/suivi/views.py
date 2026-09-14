@@ -1658,7 +1658,18 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         filiere_utile = filiere_distingue()
         result = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
-            if not (sp.em_id and sp.salle_id):
+            # L'EM suffit. Exiger AUSSI une salle écartait les épreuves, qui
+            # n'en ont pas : le surveillant relève de la vacation, et la
+            # répartition en salles se décide sur les fiches, plus tard. Le
+            # devoir disparaissait donc de la feuille où on le pointe.
+            #
+            # Ce que la condition visait reste écarté : les lignes vides que la
+            # génération pose sur chaque créneau libre n'ont pas d'EM.
+            #
+            # Une séance qui aurait un EM mais pas de salle s'affiche désormais
+            # avec « — », comme elle le fait déjà dans « Remplissage ». Une
+            # séance qui existe a sa place sur la feuille.
+            if not sp.em_id:
                 continue
             ts_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             if not ts_label:
@@ -1711,7 +1722,18 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         filiere_utile = filiere_distingue()
         rows = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
-            if not (sp.em_id and sp.salle_id):
+            # L'EM suffit. Exiger AUSSI une salle écartait les épreuves, qui
+            # n'en ont pas : le surveillant relève de la vacation, et la
+            # répartition en salles se décide sur les fiches, plus tard. Le
+            # devoir disparaissait donc de la feuille où on le pointe.
+            #
+            # Ce que la condition visait reste écarté : les lignes vides que la
+            # génération pose sur chaque créneau libre n'ont pas d'EM.
+            #
+            # Une séance qui aurait un EM mais pas de salle s'affiche désormais
+            # avec « — », comme elle le fait déjà dans « Remplissage ». Une
+            # séance qui existe a sa place sur la feuille.
+            if not sp.em_id:
                 continue
             ts_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             if not ts_label:
