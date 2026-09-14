@@ -435,6 +435,33 @@ class EpreuvePointableTest(TestCase):
                          self.semaine.etat_coherence_pour(self.mp_a))
         self.assertEqual(en_lot[self.semaine.pk], self.semaine.ETAT_DIVERGENT)
 
+    def test_le_PDF_ne_porte_aucune_mention_quand_tout_va_bien(self):
+        """
+        « Suivi généré et à jour » ne dit rien de plus que l'absence de
+        réserve, et alourdissait d'une ligne de jargon un document distribué
+        aux étudiants. Seules les deux réserves restent.
+        """
+        from apps.ipgei import edt_pdf
+
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+        self.semaine.refresh_from_db()
+
+        self.assertEqual(self.semaine.etat_coherence_pour(), self.semaine.ETAT_ALIGNE)
+        self.assertEqual(edt_pdf.contexte_semaine(self.semaine)['etat_semaine'], '')
+
+    def test_le_PDF_porte_la_reserve_quand_il_y_en_a_une(self):
+        """L'inverse : ce qui doit suivre le document imprimé le suit encore."""
+        from apps.ipgei import edt_pdf
+
+        self._epreuve(minutes=240)
+        self.semaine.refresh_from_db()          # aucun suivi → prévisionnel
+
+        contexte = edt_pdf.contexte_semaine(self.semaine)
+        self.assertEqual(contexte['etat_semaine'],
+                         'Prévisionnel — suivi non généré')
+        self.assertFalse(contexte['est_divergent'])
+
     def test_les_fiches_portent_l_horaire_reel_de_l_epreuve(self):
         """
         Le créneau seul annonçait « 08h00-09h30 » pour un examen qui court

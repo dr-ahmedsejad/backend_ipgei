@@ -233,10 +233,15 @@ def contexte_semaine(semaine):
     """
     Numéro, bornes et **état** de la semaine.
 
-    L'état figure sur le document : un emploi du temps imprimé circule détaché
-    de l'écran qui l'a produit, et rien ne disait s'il correspondait encore au
-    suivi. « Prévisionnel » et « modifié après génération » ne s'opposent pas
-    de la même façon à ce qui a été pointé, donc payé.
+    L'état ne figure sur le document QUE s'il apporte une réserve :
+    « prévisionnel », ou « modifié après la génération du suivi ». Un emploi du
+    temps imprimé circule détaché de l'écran qui l'a produit, et ces deux-là
+    doivent le suivre — ils ne s'opposent pas de la même façon à ce qui a été
+    pointé, donc payé.
+
+    « Suivi généré et à jour » ne dit rien de plus que l'absence de réserve :
+    c'est le cas NORMAL, et l'écrire sur chaque tirage ajoutait une ligne de
+    jargon à un document distribué aux étudiants.
     """
     if semaine is None:
         return {'semaine': '', 'debut': '', 'fin': '', 'semestre_nom': '',
@@ -246,6 +251,7 @@ def contexte_semaine(semaine):
         'debut':        _date_fr(semaine.date_debut),
         'fin':          _date_fr(semaine.date_fin),
         'semestre_nom': f'Semestre {semaine.semestre.code}' if semaine.semestre_id else '',
-        'etat_semaine': semaine.libelle_coherence,
+        'etat_semaine': ('' if semaine.etat_coherence == semaine.ETAT_ALIGNE
+                         else semaine.libelle_coherence),
         'est_divergent': semaine.etat_coherence == semaine.ETAT_DIVERGENT,
     }
