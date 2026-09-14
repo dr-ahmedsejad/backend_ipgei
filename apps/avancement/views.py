@@ -37,6 +37,50 @@ def _ts_label(s) -> str:
     return ''
 
 
+def _dates_epreuves_declarees(em, annee) -> dict:
+    """
+    Les dates des épreuves DÉCLARÉES de cet EM qui sont passées, par type.
+
+    Depuis que l'épreuve est un objet à part — sa durée ne tombe pas sur la
+    grille de 1h30, elle convoque plusieurs classes, elle n'a ni salle ni
+    enseignant —, elle ne produit plus de séance, donc plus de pointage. Sans
+    cette source, un DS programmé et passé compterait zéro dans l'avancement.
+
+    Ce qui la rend tenue est sa DATE PASSÉE : le pointage « Fait » ne vaut que
+    pour une séance, et l'attendre ici n'en rendrait jamais aucune.
+
+    Les semestres saisis avant ce modèle n'ont, eux, que des séances — d'où la
+    cohabitation des deux sources chez l'appelant. La clé étant la date dans
+    les deux cas, une épreuve présente des deux côtés n'est comptée qu'une fois.
+    """
+    resultat = {'DS': set(), 'EF': set(), 'ER': set()}
+
+    # `matiere_ipgei` est l'envers du miroir `Matiere.em_miroir`. Absent sur un
+    # EM du socle qui ne reflète aucune matière de la maquette — CHIM, EPS,
+    # hérités d'avant le fork : il n'a alors aucune épreuve, et c'est juste.
+    matiere = getattr(em, 'matiere_ipgei', None)
+    if matiere is None:
+        return resultat
+
+    from django.utils import timezone
+
+    from apps.ipgei.models import EpreuveIPGEI
+
+    # Pas de filtre sur le semestre : une matière n'appartient qu'à un seul, il
+    # est donc déjà fixé par `matiere_id`. L'ajouter ne pourrait que retrancher
+    # à tort, les deux couches ne nommant pas leurs semestres de la même façon.
+    qs = EpreuveIPGEI.objects.filter(
+        matiere_id=matiere.pk,
+        date__lte=timezone.localdate(),
+        session__semestre__annee_universitaire=annee,
+    )
+
+    for type_epreuve, date_epreuve in qs.values_list('type_epreuve', 'date'):
+        if type_epreuve in resultat:
+            resultat[type_epreuve].add(date_epreuve)
+    return resultat
+
+
 def _dep_key(s):
     """Cle departement non vide pour un Suivie (FK uniquement)."""
     if s.departement_id:
@@ -148,7 +192,17 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
         if semestre_id:
             sp_qs = sp_qs.filter(semestre_id=semestre_id)
 
-        ds_fait = exam_fait = rat_fait = False
+        # COMBIEN d'épreuves de chaque type ont eu lieu, et non « y en a-t-il
+        # eu une ». Un semestre porte couramment deux ou trois DS ; la croix
+        # posée dès le premier laissait croire l'évaluation faite, et rien ne
+        # disait qu'il en manquait deux.
+        #
+        # Ce qui identifie UNE épreuve est le couple (type, DATE), non la
+        # séance : une épreuve de niveau se tient dans plusieurs classes le
+        # même jour, donc sur plusieurs séances et plusieurs pointages. C'est
+        # déjà la clé retenue par `ipgei.secretariat.epreuves_tenues`, et
+        # compter les séances afficherait ici « 5 DS » là où il y en a eu un.
+        dates_epreuve = {'DS': set(), 'EF': set(), 'ER': set()}
 
         # L'avancement d'une matiere est la progression du groupe LE PLUS
         # AVANCE, pas la somme des groupes : un TP dedouble sur G1 et G2 fait
@@ -172,15 +226,15 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
             label = _ts_label(s)
             duree = s.duree_creneau or 0
 
+            if label in dates_epreuve and s.date_suivie:
+                dates_epreuve[label].add(s.date_suivie)
+
             if label == 'EF':
-                exam_fait = True
                 continue
             if label == 'ER':
-                rat_fait = True
                 continue
             if label == 'DS':
                 famille = 'TD'
-                ds_fait = True
             elif label in FAMILY_FAM:
                 famille = FAMILY_FAM[label]
             else:
@@ -201,6 +255,14 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
             for famille in ('CM', 'TD', 'TP', 'PR')
         }
 
+        # Les épreuves DÉCLARÉES au calendrier, en plus de celles déduites du
+        # pointage. Depuis qu'une épreuve n'est plus une séance, elle ne
+        # produit aucun pointage : sans cette seconde source, un DS programmé
+        # et passé compterait zéro. La clé est la même — la date —, si bien
+        # qu'une épreuve présente des deux côtés n'est comptée qu'une fois.
+        for type_epreuve, dates in _dates_epreuves_declarees(em, annee).items():
+            dates_epreuve[type_epreuve].update(dates)
+
         def pct(real_val, plan_val):
             return round((real_val / plan_val) * 100) if plan_val > 0 else 0
 
@@ -220,9 +282,15 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
             'pct_TD':    pct(real['TD'], em.TD),
             'pct_TP':    pct(real['TP'], em.TP),
             'pct_PR':    pct(real['PR'], em.PR),
-            'ds_fait':   ds_fait,
-            'exam_fait': exam_fait,
-            'rat_fait':  rat_fait,
+            # Le NOMBRE d'épreuves tenues. Les anciens drapeaux restent
+            # servis : le PDF et les écrans se lisent aussi bien avec, et
+            # `> 0` reste la question qu'on leur posait.
+            'nb_ds':     len(dates_epreuve['DS']),
+            'nb_exam':   len(dates_epreuve['EF']),
+            'nb_rat':    len(dates_epreuve['ER']),
+            'ds_fait':   bool(dates_epreuve['DS']),
+            'exam_fait': bool(dates_epreuve['EF']),
+            'rat_fait':  bool(dates_epreuve['ER']),
         })
 
     return result
@@ -279,29 +347,31 @@ def _compute_avancement_prof(annee, prof_id, semestre_id=None):
             vac_qs = vac_qs.filter(em__semestre_id=semestre_id)
 
         totaux = {'CM': 0.0, 'TD': 0.0, 'TP': 0.0, 'PR': 0.0}
-        flags  = {'DS': False, 'EF': False, 'ER': False}
+        # Ici on compte ce que CE professeur a assuré, non ce que la matière a
+        # connu : les épreuves déclarées au calendrier n'y entrent pas — elles
+        # n'ont pas de surveillant, qui relève de la vacation. Clé par date,
+        # comme ailleurs : une épreuve tenue dans cinq classes reste une.
+        dates_epreuve = {'DS': set(), 'EF': set(), 'ER': set()}
 
         for s in sp_qs:
             label = _ts_label(s)
             duree = s.duree_creneau or 0
+            if label in dates_epreuve and s.date_suivie:
+                dates_epreuve[label].add(s.date_suivie)
             if label in FAMILY_FAM:
                 totaux[FAMILY_FAM[label]] += duree
             elif label == 'DS':
                 totaux['TD'] += duree
-                flags['DS'] = True
-            elif label == 'EF':
-                flags['EF'] = True
-            elif label == 'ER':
-                flags['ER'] = True
 
         for v in vac_qs:
             label = v.type.type_seance if v.type else ''
             duree = v.duree or 0
+            if label in dates_epreuve and v.date:
+                dates_epreuve[label].add(v.date)
             if label in FAMILY_FAM:
                 totaux[FAMILY_FAM[label]] += duree
             elif label == 'DS':
                 totaux['TD'] += duree
-                flags['DS'] = True
 
         def pct(real_val, plan_val):
             return round((real_val / plan_val) * 100) if plan_val > 0 else 0
@@ -328,9 +398,12 @@ def _compute_avancement_prof(annee, prof_id, semestre_id=None):
             'pct_TP':      pct(totaux['TP'], em.TP),
             'pct_PR':      pct(totaux['PR'], em.PR),
             'total_eq_CM': round(eq_cm, 2),
-            'ds_fait':     flags['DS'],
-            'exam_fait':   flags['EF'],
-            'rat_fait':    flags['ER'],
+            'nb_ds':       len(dates_epreuve['DS']),
+            'nb_exam':     len(dates_epreuve['EF']),
+            'nb_rat':      len(dates_epreuve['ER']),
+            'ds_fait':     bool(dates_epreuve['DS']),
+            'exam_fait':   bool(dates_epreuve['EF']),
+            'rat_fait':    bool(dates_epreuve['ER']),
         })
 
     return result, totaux_globaux

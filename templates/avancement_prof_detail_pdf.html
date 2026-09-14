@@ -185,9 +185,9 @@
             </td>
 
             {# Évaluations #}
-            <td class="{% if row.ds_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.ds_fait %}X{% else %}—{% endif %}</td>
-            <td class="{% if row.exam_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.exam_fait %}X{% else %}—{% endif %}</td>
-            <td class="{% if row.rat_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.rat_fait %}X{% else %}—{% endif %}</td>
+            <td class="{% if row.ds_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.ds_fait %}{{ row.nb_ds }}{% else %}—{% endif %}</td>
+            <td class="{% if row.exam_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.exam_fait %}{{ row.nb_exam }}{% else %}—{% endif %}</td>
+            <td class="{% if row.rat_fait %}flag-ok{% else %}flag-none{% endif %}">{% if row.rat_fait %}{{ row.nb_rat }}{% else %}—{% endif %}</td>
         </tr>
         {% endfor %}
 
