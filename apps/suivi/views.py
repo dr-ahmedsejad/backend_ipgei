@@ -747,6 +747,18 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         except Exception:
             logger.exception('Archivage EDT IPGEI de la semaine %s impossible', numero_sem)
 
+        # IPGEI : rendre aux epreuves leur VRAIE duree. La generation ci-dessus
+        # lit `duree_creneau` sur le creneau — 1h30 — alors qu'un examen dure
+        # 2h, 3h ou 4h et n'est ancre que sur le PREMIER creneau qu'il recouvre.
+        # Sans cette reprise, il compterait 1h30 de surveillance, et l'ecran de
+        # remplissage annoncerait un horaire qui n'est pas le sien.
+        try:
+            from apps.ipgei.miroir import corriger_durees_epreuves
+            corriger_durees_epreuves(annee, type_semestre, numero_sem)
+        except Exception:
+            logger.exception('Duree des epreuves IPGEI, semaine %s : reprise '
+                             'impossible', numero_sem)
+
         # IPGEI : reporter l'emargement des seances dans le registre du socle.
         # Une absence est souvent pointee AVANT que le suivi de la semaine
         # n'existe — c'est le cas d'une epreuve pointee le jour meme. Les

@@ -382,6 +382,70 @@ def _lignes_epreuves(convocations, annee_universitaire, type_semestre):
     return lignes
 
 
+@transaction.atomic
+def corriger_durees_epreuves(annee_universitaire: str, type_semestre: str,
+                             numero_semaine) -> int:
+    """
+    Rend aux lignes de Suivi d'une épreuve leur VRAIE durée.
+
+    La génération lit `duree_creneau` sur le créneau : 1h30, toujours. Or une
+    épreuve dure 2h, 3h ou 4h, et sa ligne est ancrée sur le PREMIER créneau
+    qu'elle recouvre — le reste de son intervalle n'existe nulle part dans le
+    Suivi. Une épreuve de 4h y comptait donc 1h30 de surveillance, et l'écran
+    de remplissage annonçait « 08h00-09h30 » pour un examen qui court
+    jusqu'à midi.
+
+    Appelé APRÈS la génération : c'est elle qui crée les lignes, et elle ne
+    connaît qu'`Emplois`, où aucune durée ne se range.
+
+    L'appariement se fait sur (EM, jour, créneau d'ancrage, type) dans la
+    semaine — le quadruplet qui a servi à projeter la ligne. `update()` plutôt
+    que `save()` : ce dernier réécraserait `duree_creneau` depuis le créneau,
+    ce qu'il fait sans condition malgré son commentaire.
+
+    Renvoie le nombre de lignes corrigées.
+    """
+    from apps.suivi.models import Suivie, SuiviePointage
+
+    convocations = _convocations_de_la_semaine(
+        annee_universitaire, type_semestre, numero_semaine)
+    if not convocations:
+        return 0
+
+    from apps.parametres.models import Creneau
+    creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
+    NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+
+    total = 0
+    for convocation in convocations:
+        epreuve = convocation.epreuve
+        ancre = next((c for c in creneaux if epreuve.recouvre(c)), None)
+        if ancre is None or epreuve.matiere_id is None:
+            continue
+        em_id = epreuve.matiere.em_miroir_id
+        if em_id is None:
+            continue
+
+        heures = epreuve.duree_minutes / 60.0
+        filtre = dict(
+            annee_universitaire=annee_universitaire,
+            numero_semaine=int(numero_semaine),
+            type_semestre=type_semestre,
+            em_id=em_id,
+            creneau_fk=ancre,
+            type_seance_fk__type_seance=epreuve.type_epreuve,
+            jour_fk__jour__iexact=NOMS[epreuve.date.weekday()],
+        )
+        total += Suivie.objects.filter(**filtre).update(duree_creneau=heures)
+        total += SuiviePointage.objects.filter(**filtre).update(duree_creneau=heures)
+
+    if total:
+        logger.info("Suivi : durée réelle rendue à %s ligne(s) d'épreuve "
+                    '(semaine %s, %s %s)',
+                    total, numero_semaine, annee_universitaire, type_semestre)
+    return total
+
+
 def rematerialiser_emplois(annee_universitaire: str, type_semestre: str,
                            numero_semaine=None) -> int:
     """

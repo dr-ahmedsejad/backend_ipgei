@@ -243,6 +243,67 @@ class EpreuvePointableTest(TestCase):
         self.assertTrue(pointages.exists(), "l'épreuve doit être pointable")
         self.assertEqual(pointages.first().commentaire, 'Non fait')
 
+    def test_la_ligne_de_suivi_porte_la_VRAIE_duree(self):
+        """
+        La génération lit `duree_creneau` sur le créneau : 1h30, toujours. Une
+        épreuve de 4h y comptait donc 1h30 de surveillance, et l'écran
+        annonçait « 08h00-09h30 » pour un examen qui court jusqu'à midi.
+        """
+        from apps.suivi.models import Suivie, SuiviePointage
+
+        self._epreuve(minutes=240)                       # 08h00 → 12h00
+        self._generer_le_suivi()
+
+        suivie = Suivie.objects.get(type_seance_fk__type_seance='EF')
+        self.assertEqual(suivie.duree_creneau, 4.0)
+
+        pointage = SuiviePointage.objects.get(type_seance_fk__type_seance='EF')
+        self.assertEqual(pointage.duree_creneau, 4.0)
+
+    def test_les_seances_ordinaires_gardent_la_duree_de_leur_creneau(self):
+        """La reprise ne doit toucher QUE les épreuves."""
+        from apps.suivi.models import Suivie
+
+        SeanceReelle.objects.create(
+            classe=self.mp_a, semaine=self.semaine, jour=Jour.objects.first(),
+            creneau=Creneau.objects.first(), matiere=self.matiere,
+            type_seance=Seance.objects.get(type_seance='CM'))
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        self.assertEqual(
+            Suivie.objects.get(type_seance_fk__type_seance='CM').duree_creneau, 1.5)
+
+    def test_l_horaire_reel_se_lit_sur_le_pointage(self):
+        """Ce que l'écran de remplissage affiche dans la colonne « Créneau »."""
+        from apps.suivi.models import SuiviePointage
+        from apps.suivi.serializers import SuiviePointageSerializer
+
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        pointage = SuiviePointage.objects.get(type_seance_fk__type_seance='EF')
+        donnees = SuiviePointageSerializer(pointage).data
+        self.assertEqual(donnees['horaire_reel'], '08h00 → 12h00')
+
+    def test_une_seance_ordinaire_n_a_pas_d_horaire_reel(self):
+        """
+        Vide quand la durée colle au créneau : réécrire « 08h00 → 09h30 »
+        partout alourdirait la colonne sans rien apprendre.
+        """
+        from apps.suivi.models import SuiviePointage
+        from apps.suivi.serializers import SuiviePointageSerializer
+
+        SeanceReelle.objects.create(
+            classe=self.mp_a, semaine=self.semaine, jour=Jour.objects.first(),
+            creneau=Creneau.objects.first(), matiere=self.matiere,
+            type_seance=Seance.objects.get(type_seance='CM'))
+        self._generer_le_suivi()
+
+        pointage = SuiviePointage.objects.filter(
+            type_seance_fk__type_seance='CM').first()
+        self.assertEqual(SuiviePointageSerializer(pointage).data['horaire_reel'], '')
+
     def test_la_ligne_de_suivi_satisfait_le_filtre_du_remplissage(self):
         """
         L'écran écarte toute ligne sans type, sans intitulé de module, ou de
