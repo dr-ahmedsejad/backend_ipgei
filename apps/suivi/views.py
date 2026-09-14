@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
+from core.horaire import horaire_affiche
 from core.libelle_dept import filiere_distingue, format_depts_compact
 from core.permissions import RBACPermission, EDTDepartementPermission
 from core.mixins import AuditMixin, InstitutionScopedMixin, DepartementScopedMixin
@@ -1690,7 +1691,12 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 'id':           sp.pk,
                 'jour':         jour_label,
                 'date_suivie':  str(sp.date_suivie) if sp.date_suivie else None,
-                'creneau':      sp.creneau_fk.creneau if sp.creneau_fk_id and sp.creneau_fk else '',
+                # L'horaire REEL : une epreuve est ancree sur le PREMIER creneau
+                # qu'elle recouvre, et le creneau seul annoncerait « 08h00-09h30 »
+                # pour un examen qui court jusqu'a midi.
+                'creneau':      horaire_affiche(
+                    sp.creneau_fk.creneau if sp.creneau_fk_id and sp.creneau_fk else '',
+                    sp.duree_creneau),
                 'prof_nom':     sp.prof.nom if sp.prof else '',
                 'em_intitule':  sp.em.intitule if sp.em else '',
                 'type_seance':  ts_label,
@@ -1757,7 +1763,12 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
             rows.append({
                 'jour':        jour_label,
                 'date_suivie': str(sp.date_suivie) if sp.date_suivie else None,
-                'creneau':     sp.creneau_fk.creneau if sp.creneau_fk_id and sp.creneau_fk else '',
+                # L'horaire REEL : une epreuve est ancree sur le PREMIER creneau
+                # qu'elle recouvre, et le creneau seul annoncerait « 08h00-09h30 »
+                # pour un examen qui court jusqu'a midi.
+                'creneau':     horaire_affiche(
+                    sp.creneau_fk.creneau if sp.creneau_fk_id and sp.creneau_fk else '',
+                    sp.duree_creneau),
                 'prof_nom':    sp.prof.nom if sp.prof else '',
                 'tel_prof':    str(sp.prof.telephone) if (sp.prof and sp.prof.telephone) else '',
                 'em_intitule': sp.em.intitule if sp.em else '',

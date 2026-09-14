@@ -340,6 +340,59 @@ class EpreuvePointableTest(TestCase):
                      for f in jour.get('fiches', [])]
         self.assertIn('EF', types_pdf, "l'épreuve doit figurer sur les PDF")
 
+    def test_les_fiches_portent_l_horaire_reel_de_l_epreuve(self):
+        """
+        Le créneau seul annonçait « 08h00-09h30 » pour un examen qui court
+        jusqu'à midi — sur la feuille que le surveillant a en main.
+
+        L'écran et les deux PDF passent par des chemins différents ; le
+        calcul, lui, vient d'un seul endroit (`core.horaire`). Les deux sont
+        vérifiés, sans quoi la correction aurait pu ne valoir que pour l'un.
+        """
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from django.contrib.auth import get_user_model
+        from apps.suivi.views import SuiviePointageViewSet
+
+        self._epreuve(minutes=240)                       # 08h00 → 12h00
+        self._generer_le_suivi()
+        admin = get_user_model().objects.get(username='gen')
+
+        vue = SuiviePointageViewSet.as_view({'get': 'fiches'})
+        demande = APIRequestFactory().get('/x/', {
+            'annee_universitaire': '2025-2026', 'numero_semaine': 7,
+            'type_semestre': 'I', 'id_semestre': 'S3'})
+        force_authenticate(demande, user=admin)
+        ecran = [f for jour in vue(demande).data for f in jour.get('fiches', [])]
+        self.assertEqual([f['creneau'] for f in ecran], ['08h00 - 12h00'])
+
+        pdf = [f for jour in SuiviePointageViewSet()._build_fiches_par_jour(
+                   '2025-2026', 7, 'I', 'S3')
+               for f in jour.get('fiches', [])]
+        self.assertEqual([f['creneau'] for f in pdf], ['08h00 - 12h00'])
+
+    def test_une_seance_ordinaire_garde_le_libelle_de_son_creneau(self):
+        """
+        L'horaire réel ne s'affiche que là où il apprend quelque chose : une
+        séance d'1h30 sur un créneau d'1h30 garde son libellé d'origine.
+        """
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from django.contrib.auth import get_user_model
+        from apps.suivi.views import SuiviePointageViewSet
+
+        SeanceReelle.objects.create(
+            classe=self.mp_a, semaine=self.semaine, jour=Jour.objects.first(),
+            creneau=Creneau.objects.first(), matiere=self.matiere,
+            salle=None, type_seance=Seance.objects.get(type_seance='CM'))
+        self._generer_le_suivi()
+
+        from apps.suivi.models import SuiviePointage
+        from apps.suivi.serializers import SuiviePointageSerializer
+
+        cm = SuiviePointage.objects.get(type_seance_fk__type_seance='CM')
+        self.assertEqual(SuiviePointageSerializer(cm).data['horaire_reel'], '')
+
     def test_une_SEANCE_sans_salle_reste_ecartee_des_fiches(self):
         """
         L'exception est nommément limitée aux épreuves. Une séance de cours

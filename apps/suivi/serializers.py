@@ -46,26 +46,6 @@ class SuiviePointageSerializer(serializers.ModelSerializer):
     #: la duree colle au creneau, c'est-a-dire pour toutes les seances.
     horaire_reel = serializers.SerializerMethodField()
 
-    def get_horaire_reel(self, obj) -> str:
-        from apps.ipgei.models import _bornes_creneau
-
-        creneau = obj.creneau_fk
-        duree   = obj.duree_creneau
-        if creneau is None or not duree:
-            return ''
-        bornes = _bornes_creneau(creneau.creneau or '')
-        if bornes is None:
-            return ''
-        debut, fin_creneau = bornes
-        # Une tolerance d'une minute : `duree_creneau` est un flottant, et
-        # 1.5 h ne retombe pas toujours exactement sur 90 minutes.
-        if abs((fin_creneau - debut) - duree * 60) < 1:
-            return ''
-
-        fin = min(debut + int(round(duree * 60)), 23 * 60 + 59)
-        return (f'{debut // 60:02d}h{debut % 60:02d} - '
-                f'{fin // 60:02d}h{fin % 60:02d}')
-
     class Meta:
         model  = SuiviePointage
         fields = '__all__'
@@ -80,6 +60,12 @@ class SuiviePointageSerializer(serializers.ModelSerializer):
             return sorted(d.nom for d in obj.departements.all() if d.nom)
         except Exception:
             return []
+
+    def get_horaire_reel(self, obj) -> str:
+        from core.horaire import horaire_reel
+
+        creneau = obj.creneau_fk
+        return horaire_reel(creneau.creneau if creneau else '', obj.duree_creneau)
 
 
 class ChargeInstitutionSerializer(serializers.ModelSerializer):
