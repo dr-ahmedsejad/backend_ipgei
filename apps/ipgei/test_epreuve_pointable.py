@@ -24,7 +24,7 @@ from apps.emplois.models import Emplois
 from apps.ipgei.miroir import projeter_semaine_reelle
 from apps.ipgei.models import (
     Classe, EpreuveClasse, EpreuveIPGEI, Matiere, NiveauIPGEI, SeanceReelle,
-    SemestreIPGEI, SessionEvaluationIPGEI,
+    SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI,
 )
 from apps.parametres.models import Creneau, Institution, Jour, Niveau, Seance
 
@@ -339,6 +339,101 @@ class EpreuvePointableTest(TestCase):
         types_pdf = [f['type_seance'] for jour in jours
                      for f in jour.get('fiches', [])]
         self.assertIn('EF', types_pdf, "l'épreuve doit figurer sur les PDF")
+
+    # ── La cohérence de la semaine ───────────────────────────────────────────
+    def test_une_semaine_qui_porte_une_epreuve_reste_ALIGNEE(self):
+        """
+        Le défaut le plus sournois de toute cette affaire. L'épreuve produit
+        une ligne de `Suivie` — c'est ce qui la rend pointable — mais aucune
+        `SeanceReelle`. Elle figurait donc dans l'empreinte du SUIVI et
+        manquait à celle de l'EMPLOI DU TEMPS : les deux ne pouvaient plus
+        jamais s'égaler, et la semaine se déclarait éternellement
+        « modifiée après la génération du suivi ».
+
+        Rien n'avait bougé. Le message poussait à régénérer un suivi qui allait
+        bien — exactement le faux positif que l'empreinte par CONTENU, et non
+        par horodatage, avait été écrite pour éviter.
+        """
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        self.semaine.refresh_from_db()
+        self.assertEqual(self.semaine.etat_coherence_pour(self.mp_a),
+                         self.semaine.ETAT_ALIGNE)
+
+    def test_les_deux_empreintes_designent_la_meme_case(self):
+        """
+        La projection et l'empreinte doivent ancrer l'épreuve sur le MÊME
+        créneau. Elles partagent `ancrage_epreuve` pour cette raison ; ce test
+        constate l'égalité plutôt que de la supposer.
+        """
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        self.semaine.refresh_from_db()
+        self.assertEqual(self.semaine._empreinte_edt(self.mp_a),
+                         self.semaine._empreinte_suivi(self.mp_a))
+
+    def test_une_semaine_sans_suivi_reste_previsionnelle(self):
+        """Déclarer une épreuve ne publie rien : tant que le suivi n'est pas
+        généré, la semaine reste prévisionnelle."""
+        self._epreuve(minutes=240)
+        self.semaine.refresh_from_db()
+        self.assertEqual(self.semaine.etat_coherence_pour(self.mp_a),
+                         self.semaine.ETAT_PREVISIONNEL)
+
+    def test_deplacer_l_epreuve_APRES_le_suivi_rend_la_semaine_divergente(self):
+        """
+        L'envers du test précédent, et la raison d'être du signal : changer le
+        créneau d'une épreuve après la génération DOIT se voir. Sans quoi on
+        aurait échangé un faux positif permanent contre un silence.
+        """
+        from datetime import time as heure
+
+        epreuve = self._epreuve(minutes=240)             # 08h00, trois créneaux
+        self._generer_le_suivi()
+
+        epreuve.heure_debut = heure(15, 10)              # l'après-midi
+        epreuve.save(update_fields=['heure_debut'])
+
+        self.semaine.refresh_from_db()
+        self.assertEqual(self.semaine.etat_coherence_pour(self.mp_a),
+                         self.semaine.ETAT_DIVERGENT)
+
+    def test_le_calcul_EN_LOT_dit_la_meme_chose_que_l_unitaire(self):
+        """
+        Deux implémentations du même verdict : l'unitaire sert le PDF, celle en
+        lot sert les écrans de liste — et c'est elle que l'API des semaines
+        appelle. Elles se sont déjà séparées : le PDF disait « aligné » quand
+        la liste disait encore « modifié après la génération du suivi ».
+
+        L'écart est invisible à l'usage — personne ne regarde les deux à la
+        fois — et c'est ce qui le rend durable.
+        """
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+        self.semaine.refresh_from_db()
+
+        en_lot = SemaineIPGEI.etats_en_lot([self.semaine], self.mp_a)
+        self.assertEqual(en_lot[self.semaine.pk],
+                         self.semaine.etat_coherence_pour(self.mp_a))
+        self.assertEqual(en_lot[self.semaine.pk], self.semaine.ETAT_ALIGNE)
+
+    def test_les_deux_calculs_s_accordent_aussi_sur_la_divergence(self):
+        """Le même accord dans l'autre sens : une épreuve déplacée après le
+        suivi doit être vue par les deux."""
+        from datetime import time as heure
+
+        epreuve = self._epreuve(minutes=240)
+        self._generer_le_suivi()
+        epreuve.heure_debut = heure(15, 10)
+        epreuve.save(update_fields=['heure_debut'])
+        self.semaine.refresh_from_db()
+
+        en_lot = SemaineIPGEI.etats_en_lot([self.semaine], self.mp_a)
+        self.assertEqual(en_lot[self.semaine.pk],
+                         self.semaine.etat_coherence_pour(self.mp_a))
+        self.assertEqual(en_lot[self.semaine.pk], self.semaine.ETAT_DIVERGENT)
 
     def test_les_fiches_portent_l_horaire_reel_de_l_epreuve(self):
         """

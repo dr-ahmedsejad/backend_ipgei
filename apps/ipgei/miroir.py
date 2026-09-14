@@ -341,27 +341,28 @@ def _lignes_epreuves(convocations, annee_universitaire, type_semestre):
     """
     from apps.parametres.models import Creneau, Jour, Seance
 
+    from .models import ancrage_epreuve
+
     if not convocations:
         return []
 
     creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
-    # `date.weekday()` rend 0 pour lundi ; le référentiel `Jour` est libellé en
-    # toutes lettres et son ordre n'est pas garanti — le nom est la seule
-    # correspondance stable entre une date et une ligne de la grille.
-    NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
     jours = {j.jour.lower(): j for j in Jour.objects.all()}
     types = {s.type_seance: s for s in Seance.objects.all()}
 
     lignes = []
     for convocation in convocations:
         epreuve = convocation.epreuve
-        ancre = next((c for c in creneaux if epreuve.recouvre(c)), None)
-        jour  = jours.get(NOMS[epreuve.date.weekday()])
+        # Le MÊME résolveur que `SemaineIPGEI._empreinte_edt` : c'est ce qui
+        # garantit que la ligne projetée ici sera reconnue là-bas. Deux calculs
+        # séparés se seraient séparés, et la semaine se serait déclarée
+        # éternellement divergente.
+        jour, ancre = ancrage_epreuve(epreuve, creneaux, jours)
         type_seance = types.get(epreuve.type_epreuve)
-        if ancre is None or jour is None or type_seance is None:
+        if ancre is None or type_seance is None:
             logger.warning(
-                'Épreuve %s non projetée : créneau=%s jour=%s type=%s',
-                epreuve.pk, bool(ancre), bool(jour), bool(type_seance))
+                'Épreuve %s non projetée : créneau/jour=%s type=%s',
+                epreuve.pk, bool(ancre), bool(type_seance))
             continue
 
         matiere = epreuve.matiere
@@ -412,14 +413,20 @@ def corriger_durees_epreuves(annee_universitaire: str, type_semestre: str,
     if not convocations:
         return 0
 
-    from apps.parametres.models import Creneau
+    from apps.parametres.models import Creneau, Jour
+
+    from .models import ancrage_epreuve
+
     creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
-    NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+    jours = {j.jour.lower(): j for j in Jour.objects.all()}
 
     total = 0
     for convocation in convocations:
         epreuve = convocation.epreuve
-        ancre = next((c for c in creneaux if epreuve.recouvre(c)), None)
+        # Le même résolveur que la projection : la ligne à corriger est celle
+        # qu'elle a posée, et la retrouver ailleurs qu'où elle est ne
+        # corrigerait rien.
+        jour, ancre = ancrage_epreuve(epreuve, creneaux, jours)
         if ancre is None or epreuve.matiere_id is None:
             continue
         em_id = epreuve.matiere.em_miroir_id
@@ -434,7 +441,7 @@ def corriger_durees_epreuves(annee_universitaire: str, type_semestre: str,
             em_id=em_id,
             creneau_fk=ancre,
             type_seance_fk__type_seance=epreuve.type_epreuve,
-            jour_fk__jour__iexact=NOMS[epreuve.date.weekday()],
+            jour_fk=jour,
         )
         total += Suivie.objects.filter(**filtre).update(duree_creneau=heures)
         total += SuiviePointage.objects.filter(**filtre).update(duree_creneau=heures)

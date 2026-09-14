@@ -448,15 +448,55 @@ class SemaineIPGEI(models.Model):
         #
         # Les deux côtés désignent désormais la MÊME ligne de référentiel : le
         # type se compare directement, sans traduction.
-        return {
-            (sous_groupe or classe, jour, creneau, em, prof, type_seance)
-            for sous_groupe, classe, jour, creneau, em, prof, type_seance
+        empreinte = {
+            (sous_groupe or classe_id, jour, creneau, em, prof, type_seance)
+            for sous_groupe, classe_id, jour, creneau, em, prof, type_seance
             in self.seances.filter(annulee=False, type_seance__is_special=False,
                                    **({'classe': classe} if classe else {})).values_list(
                 'sous_groupe_id', 'classe_id', 'jour_id', 'creneau_id',
                 'matiere__em_miroir_id', 'prof_id', 'type_seance__type_seance',
             )
         }
+        empreinte |= self._empreinte_epreuves(classe)
+        return empreinte
+
+    def _empreinte_epreuves(self, classe=None) -> set:
+        """
+        Les ÉPREUVES de la semaine, dans la même forme que les séances.
+
+        Sans elles, une semaine qui en porte une se déclarait éternellement
+        « divergente » : l'épreuve produit une ligne de `Suivie` — c'est ce qui
+        la rend pointable — mais aucune `SeanceReelle`. Elle figurait donc dans
+        l'empreinte du suivi et manquait à celle de l'emploi du temps, et les
+        deux ne pouvaient plus jamais s'égaler.
+
+        Le professeur est NUL, comme sur la ligne projetée : une épreuve n'en a
+        pas. L'ancrage vient de `ancrage_epreuve`, le même que la projection
+        utilise — les deux doivent désigner la même case.
+        """
+        from apps.parametres.models import Creneau, Jour
+
+        convocations = EpreuveClasse.objects.filter(
+            epreuve__date__gte=self.date_debut, epreuve__date__lte=self.date_fin,
+            **({'classe': classe} if classe else
+               {'classe_id__in': self._unites_du_semestre()}),
+        ).select_related('epreuve__matiere')
+        if not convocations:
+            return set()
+
+        creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
+        jours = {j.jour.lower(): j for j in Jour.objects.all()}
+
+        empreinte = set()
+        for convocation in convocations:
+            epreuve = convocation.epreuve
+            jour, creneau = ancrage_epreuve(epreuve, creneaux, jours)
+            if jour is None:
+                continue
+            em_id = epreuve.matiere.em_miroir_id if epreuve.matiere_id else None
+            empreinte.add((convocation.classe_id, jour.pk, creneau.pk, em_id,
+                           None, epreuve.type_epreuve))
+        return empreinte
 
     def _unites_du_semestre(self, classe=None) -> list:
         """
@@ -554,6 +594,17 @@ class SemaineIPGEI(models.Model):
         ):
             edt[sid].add((sous_groupe or classe_id, jour, creneau, em, prof, type_seance))
 
+        # Les ÉPREUVES, sans quoi ce calcul et le calcul unitaire donneraient
+        # des verdicts opposés sur la même semaine — l'un lu par les écrans de
+        # liste, l'autre par le PDF. Elles produisent une ligne de `Suivie`
+        # mais aucune `SeanceReelle` : les omettre ici déclare divergente toute
+        # semaine qui en porte une.
+        #
+        # UNE passe pour tout le lot, comme le reste : appeler l'empreinte
+        # unitaire par semaine aurait rendu fausse la promesse de deux
+        # requêtes, sur l'écran de liste où elle a été écrite.
+        cls._ajouter_epreuves_en_lot(edt, semaines, classe)
+
         # Côté suivi : une passe sur les lignes des années et périodes visées.
         annees   = {s.semestre.annee_universitaire for s in semaines}
         numeros  = {s.numero for s in semaines if s.numero is not None}
@@ -590,6 +641,49 @@ class SemaineIPGEI(models.Model):
             else:
                 etats[semaine.pk] = cls.ETAT_ALIGNE
         return etats
+
+    @classmethod
+    def _ajouter_epreuves_en_lot(cls, edt: dict, semaines, classe=None) -> None:
+        """
+        Verse les épreuves de toutes les semaines dans leurs empreintes, en une
+        passe. Modifie `edt` sur place.
+
+        L'appartenance à une semaine se décide sur la DATE : les épreuves sont
+        lues une fois sur l'intervalle qui couvre tout le lot, puis réparties.
+        """
+        from apps.parametres.models import Creneau, Jour
+
+        bornes = [(s.pk, s.date_debut, s.date_fin) for s in semaines
+                  if s.date_debut and s.date_fin]
+        if not bornes:
+            return
+
+        unites = set()
+        for semaine in {s.semestre_id: s for s in semaines}.values():
+            unites.update(semaine._unites_du_semestre(classe))
+
+        convocations = list(EpreuveClasse.objects.filter(
+            epreuve__date__gte=min(b[1] for b in bornes),
+            epreuve__date__lte=max(b[2] for b in bornes),
+            classe_id__in=unites,
+        ).select_related('epreuve__matiere'))
+        if not convocations:
+            return
+
+        creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
+        jours = {j.jour.lower(): j for j in Jour.objects.all()}
+
+        for convocation in convocations:
+            epreuve = convocation.epreuve
+            jour, creneau = ancrage_epreuve(epreuve, creneaux, jours)
+            if jour is None:
+                continue
+            em_id = epreuve.matiere.em_miroir_id if epreuve.matiere_id else None
+            trace = (convocation.classe_id, jour.pk, creneau.pk, em_id,
+                     None, epreuve.type_epreuve)
+            for pk, debut, fin in bornes:
+                if debut <= epreuve.date <= fin:
+                    edt.setdefault(pk, set()).add(trace)
 
     @property
     def libelle_coherence(self) -> str:
@@ -1414,6 +1508,44 @@ class EpreuveIPGEI(_IntervalleEpreuve, models.Model):
     def intitule_affiche(self) -> str:
         """Ce que la case porte. L'archive expose la même chose, sans FK."""
         return self.matiere.intitule if self.matiere_id else self.type_epreuve
+
+
+#: Les jours dans l'ordre de `date.weekday()`. Le référentiel `Jour` est
+#: libellé en toutes lettres et son ordre n'est pas garanti : le nom est la
+#: seule correspondance stable entre une date et une ligne de grille.
+JOURS_SEMAINE = ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi',
+                 'dimanche')
+
+
+def ancrage_epreuve(epreuve, creneaux, jours):
+    """
+    Le couple (jour, créneau) où la ligne de suivi d'une épreuve se pose.
+
+    UN SEUL ENDROIT où ce choix est fait. Il sert à deux calculs qui doivent
+    tomber d'accord, faute de quoi une semaine qui porte une épreuve se déclare
+    éternellement divergente :
+
+      * `miroir._lignes_epreuves`, qui PROJETTE l'épreuve dans `Emplois`, d'où
+        naîtra sa ligne de `Suivie` ;
+      * `SemaineIPGEI._empreinte_edt`, qui doit RETROUVER cette même ligne pour
+        la reconnaître dans l'emploi du temps.
+
+    L'ancrage se fait sur le PREMIER créneau recouvert : un examen de 4h en
+    couvre trois, et une ligne par créneau demanderait trois pointages pour une
+    seule épreuve.
+
+    Rend `(None, None)` quand l'épreuve ne recouvre aucun créneau — logée dans
+    une pause — ou que le jour est introuvable : elle n'a alors aucune case où
+    se poser, ni dans l'une ni dans l'autre empreinte.
+
+    `creneaux` et `jours` sont passés par l'appelant, qui boucle : les relire à
+    chaque épreuve ferait deux requêtes par ligne.
+    """
+    creneau = next((c for c in creneaux if epreuve.recouvre(c)), None)
+    jour = jours.get(JOURS_SEMAINE[epreuve.date.weekday()])
+    if creneau is None or jour is None:
+        return None, None
+    return jour, creneau
 
 
 def _bornes_creneau(libelle: str):
