@@ -13,6 +13,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from core.horaire import horaire_affiche
+from core.types_seance import TYPES_EPREUVE
 from core.libelle_dept import filiere_distingue, format_depts_compact
 from core.permissions import RBACPermission, EDTDepartementPermission
 from core.mixins import AuditMixin, InstitutionScopedMixin, DepartementScopedMixin
@@ -1153,13 +1154,6 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
-
-
-#: Les types de seance qui sont des EPREUVES. Elles n'ont ni salle ni
-#: surveillant : la repartition en salles se decide sur les fiches, et le
-#: surveillant releve de la vacation. Les feuilles de presence les admettent
-#: donc sans salle, ce qu'elles refusent a une seance de cours.
-TYPES_EPREUVE = ('DS', 'EF', 'ER')
 
 
 class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, viewsets.ModelViewSet):

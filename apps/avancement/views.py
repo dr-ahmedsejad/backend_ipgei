@@ -18,6 +18,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.vacation.models import Vacation
 from core.libelle_dept import filiere_distingue, format_depts_compact
+from core.types_seance import TYPES_SURVEILLANCE
 from core.permissions import RBACPermission
 from apps.suivi.models import Suivie, SuiviePointage, ChargeInstitution
 from apps.emplois.models import Emplois
@@ -540,7 +541,7 @@ def _compute_charge_permanents(annee, prof_ids=None):
             elif label == 'TD':   totaux['TD_total']            += duree
             elif label == 'TP':   totaux['TP_total']            += duree
             elif label == 'PR':   totaux['PR_total']            += duree
-            elif label in ('DS', 'EF', 'ER', 'SURVEILLANCE'):
+            elif label in TYPES_SURVEILLANCE:
                                   totaux['Surveillance_total']  += duree
             elif label == 'ENCADREMENT': totaux['Encadrement_total'] += duree
             elif label in ('MISSION', 'MISSIONS'): totaux['Mission_total'] += duree
@@ -700,7 +701,7 @@ def _compute_charge_permanents_mensuel(annee, year, month, prof_ids=None):
         elif label_u == 'TD':   totaux['TD_total']            += duree
         elif label_u == 'TP':   totaux['TP_total']            += duree
         elif label_u == 'PR':   totaux['PR_total']            += duree
-        elif label_u in ('DS', 'EF', 'ER', 'SURVEILLANCE'):
+        elif label_u in TYPES_SURVEILLANCE:
                                 totaux['Surveillance_total']  += duree
         elif label_u == 'ENCADREMENT': totaux['Encadrement_total'] += duree
         elif label_u in ('MISSION', 'MISSIONS'): totaux['Mission_total'] += duree

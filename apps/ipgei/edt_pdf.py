@@ -20,6 +20,7 @@ from collections import defaultdict
 from django.utils.formats import date_format
 
 from apps.parametres.models import Creneau, Jour
+from core.types_seance import TYPES_EPREUVE
 
 logger = logging.getLogger('siga')
 
@@ -123,7 +124,7 @@ def construire_grille(seances, *, axe='classe', epreuves=()):
                 # Devoir, examen final et rattrapage : les trois creneaux
                 # qu'un etudiant ne peut pas manquer. Ils partagent le meme
                 # traitement visuel.
-                'est_evaluation': type_affiche in ('DS', 'EF', 'ER'),
+                'est_evaluation': type_affiche in TYPES_EPREUVE,
                 # Une séance spéciale n'a rien d'autre à montrer que son nom :
                 # ni matière, ni intervenant, ni salle. Le badge de type ferait
                 # doublon avec le seul texte de la case.

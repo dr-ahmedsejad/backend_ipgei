@@ -30,6 +30,8 @@ from django.utils import timezone
 from core.pdf_renderer import render_pdf_bytes
 from core.pdf_utils import get_institution_context
 
+from core.types_seance import TYPES_EPREUVE       # noqa: F401  (ré-exporté)
+
 from .collecte import OPTIONS_PDF, _entete_excel, _logo_reduit
 from .models import AnonymatIPGEI
 
@@ -38,12 +40,6 @@ logger = logging.getLogger('siga')
 TEMPLATE_LISTE      = 'ipgei/anonymat_liste.html'
 TEMPLATE_REPARTITION = 'ipgei/anonymat_repartition.html'
 
-
-#: Types de séance qui sont des ÉPREUVES au référentiel du socle. Une absence
-#: relevée sur l'une d'elles est une absence à la copie ; celle d'un cours ne
-#: l'est pas. « EF » vaut EXAMEN FINAL, « DS » devoir surveillé, « ER »
-#: épreuve de rattrapage.
-TYPES_EPREUVE = ('EF', 'DS', 'ER')
 
 #: Ce qu'écrit le Suivi quand la séance a EU LIEU. Le pointage vit sur
 #: `SuiviePointage`, pas sur `Suivie` — cette dernière garde « Non fait »

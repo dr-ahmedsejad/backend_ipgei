@@ -11,6 +11,8 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from core.types_seance import TYPES_SURVEILLANCE
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from core.permissions import RBACPermission, EDTDepartementPermission
@@ -212,7 +214,7 @@ def _compute_fiches_mensuelles(annee, month, year):
     def _bucket_type(raw_type: str) -> str | None:
         t = (raw_type or '').upper()
         if t in ('CM', 'TD', 'TP', 'PR'): return t
-        if t in ('DS', 'EF', 'ER', 'SURVEILLANCE'): return 'Surveillance'
+        if t in TYPES_SURVEILLANCE: return 'Surveillance'
         if t == 'ENCADREMENT': return 'Encadrement'
         if t in ('MISSION', 'MISSIONS'): return 'Mission'
         return None

@@ -7,6 +7,7 @@
 # from django_filters.rest_framework import DjangoFilterBackend
 # from rest_framework.filters import SearchFilter
 # from core.permissions import RBACPermission
+from core.types_seance import TYPES_EPREUVE
 # from core.mixins import AuditMixin, SelectAllMixin
 # from core.pagination import StandardPagination
 # from .models import Etudiant, Presence, SeuilAbsence
@@ -1070,7 +1071,7 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
                 'type_seance':  type_label,
                 # DS / ER / EF = examen/surveillance → fiche signée par le
                 # surveillant (pas le professeur) et sans « Objet du cours ».
-                'is_surveillance': type_label in ('DS', 'ER', 'EF'),
+                'is_surveillance': type_label in TYPES_EPREUVE,
                 'numero_semaine': s.numero_semaine,
                 'em_code':      s.em.code if s.em_id and hasattr(s.em, 'code') else '',
                 'em_intitule':  s.em.intitule if s.em_id else '—',
