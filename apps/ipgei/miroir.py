@@ -235,8 +235,14 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
       * les séances annulées ne sont pas projetées — il n'y a ni cours à
         pointer, ni heure à payer.
 
-    Renvoie le nombre de lignes projetées, 0 si la semaine n'a aucune séance
-    réelle (l'appelant retombe alors sur la grille type).
+    Les ÉPREUVES de la semaine y sont projetées aussi, sans quoi elles
+    resteraient impointables : le Suivi ne lit que `Emplois`, et une épreuve
+    n'est pas une séance. Une ligne par (épreuve, classe convoquée), ANCRÉE SUR
+    LE PREMIER créneau qu'elle recouvre — une ligne par créneau couvert aurait
+    demandé trois pointages pour un seul examen, et gonflé ses heures d'autant.
+
+    Renvoie le nombre de lignes projetées, 0 si la semaine n'a ni séance réelle
+    ni épreuve (l'appelant retombe alors sur la grille type).
     """
     # `SemestreIPGEI.type_semestre` est une propriété dérivée du code, pas un
     # champ : le filtre doit passer par les codes (S1/S3 impairs, S2/S4 pairs).
@@ -253,12 +259,16 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
         .select_related('classe', 'matiere', 'prof', 'salle',
                         'jour', 'creneau', 'sous_groupe')
     )
-    if not seances:
+    convocations = _convocations_de_la_semaine(
+        annee_universitaire, type_semestre, numero_semaine)
+
+    if not seances and not convocations:
         return 0
 
     # Le remplacement couvre les classes concernées ET leurs sous-groupes : une
     # séance déplacée d'un groupe à l'autre laisserait sinon un résidu.
-    classes = {s.classe_id for s in seances}
+    classes = ({s.classe_id for s in seances}
+               | {c.classe_id for c in convocations})
     unites = set(classes) | set(
         SousGroupeTP.objects.filter(classe_id__in=classes).values_list('pk', flat=True)
     )
@@ -287,8 +297,89 @@ def projeter_semaine_reelle(annee_universitaire: str, type_semestre: str,
             jour_fk=seance.jour,
             institution=seance.classe.institution,
         ))
+    lignes.extend(_lignes_epreuves(convocations, annee_universitaire, type_semestre))
+
     Emplois.objects.bulk_create(lignes)
     return len(lignes)
+
+
+def _convocations_de_la_semaine(annee_universitaire, type_semestre, numero_semaine):
+    """Les couples (épreuve, classe) qui tombent dans cette semaine."""
+    from .models import EpreuveClasse, SemaineIPGEI
+
+    codes = [code for code, (_, t) in SEMESTRES.items() if t == type_semestre]
+    semaine = (SemaineIPGEI.objects
+               .filter(numero=numero_semaine,
+                       semestre__annee_universitaire=annee_universitaire,
+                       semestre__code__in=codes)
+               .first())
+    if semaine is None:
+        return []
+    return list(
+        EpreuveClasse.objects
+        .filter(epreuve__date__gte=semaine.date_debut,
+                epreuve__date__lte=semaine.date_fin)
+        .select_related('epreuve__matiere', 'classe')
+    )
+
+
+def _lignes_epreuves(convocations, annee_universitaire, type_semestre):
+    """
+    Les épreuves, projetées dans `Emplois` pour devenir pointables.
+
+    NI ENSEIGNANT NI SALLE : ils restent vides, comme partout ailleurs. Le
+    surveillant relève de la vacation, et la salle se décide sur les fiches de
+    répartition. L'écran de remplissage les affiche « — », ce qui est exact.
+
+    L'ancrage se fait sur le PREMIER créneau recouvert. Un examen de 4h en
+    couvre trois : autant de lignes aurait demandé trois pointages pour une
+    seule épreuve, et compté 4h30 de surveillance au lieu de 4h.
+
+    Une épreuve logée hors créneau — dans la pause de 13h00 à 15h10 — n'est pas
+    projetée : elle n'a aucune case où se pointer. Le cas est rare et vaut mieux
+    qu'une ligne accrochée à un créneau arbitraire.
+    """
+    from apps.parametres.models import Creneau, Jour, Seance
+
+    if not convocations:
+        return []
+
+    creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
+    # `date.weekday()` rend 0 pour lundi ; le référentiel `Jour` est libellé en
+    # toutes lettres et son ordre n'est pas garanti — le nom est la seule
+    # correspondance stable entre une date et une ligne de la grille.
+    NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+    jours = {j.jour.lower(): j for j in Jour.objects.all()}
+    types = {s.type_seance: s for s in Seance.objects.all()}
+
+    lignes = []
+    for convocation in convocations:
+        epreuve = convocation.epreuve
+        ancre = next((c for c in creneaux if epreuve.recouvre(c)), None)
+        jour  = jours.get(NOMS[epreuve.date.weekday()])
+        type_seance = types.get(epreuve.type_epreuve)
+        if ancre is None or jour is None or type_seance is None:
+            logger.warning(
+                'Épreuve %s non projetée : créneau=%s jour=%s type=%s',
+                epreuve.pk, bool(ancre), bool(jour), bool(type_seance))
+            continue
+
+        matiere = epreuve.matiere
+        em = (matiere.em_miroir or synchroniser_matiere(matiere)) if matiere else None
+        lignes.append(Emplois(
+            annee_universitaire=annee_universitaire,
+            type_semestre=type_semestre,
+            prof=None,
+            em=em,
+            departement_id=convocation.classe_id,
+            salle=None,
+            semestre=semestre_socle(matiere.code_semestre) if matiere else None,
+            creneau_fk=ancre,
+            type_seance_fk=type_seance,
+            jour_fk=jour,
+            institution=convocation.classe.institution,
+        ))
+    return lignes
 
 
 def rematerialiser_emplois(annee_universitaire: str, type_semestre: str,
