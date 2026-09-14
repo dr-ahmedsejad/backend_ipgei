@@ -16,7 +16,8 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from .models import EmploiArchive, SeanceReelle, SemaineIPGEI
+from .models import (EmploiArchive, EpreuveArchive, EpreuveIPGEI,
+                     SeanceReelle, SemaineIPGEI)
 from .socle import SEMESTRES
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,31 @@ def _instantane(seance, semaine, version, genere_le):
     )
 
 
+def _instantane_epreuve(convocation, semaine, version, genere_le):
+    """Une épreuve, recopiée en valeurs, pour LA classe qu'elle convoque."""
+    epreuve = convocation.epreuve
+    return EpreuveArchive(
+        semaine=semaine,
+        classe_id=convocation.classe_id,
+        version=version,
+        genere_le=genere_le,
+
+        epreuve_ref=epreuve.pk,
+        matiere_ref=epreuve.matiere_id,
+
+        type_epreuve=epreuve.type_epreuve,
+        numero=epreuve.numero,
+        date=epreuve.date,
+        heure_debut=epreuve.heure_debut,
+        duree_minutes=epreuve.duree_minutes,
+
+        matiere_code=epreuve.matiere.code if epreuve.matiere_id else '',
+        matiere_intitule=epreuve.matiere.intitule if epreuve.matiere_id else '',
+        classe_nom=convocation.classe.nom if convocation.classe_id else '',
+        observations=epreuve.observations,
+    )
+
+
 @transaction.atomic
 def archiver_semaine(annee: str, type_semestre: str, numero_semaine: int) -> int:
     """
@@ -70,10 +96,17 @@ def archiver_semaine(annee: str, type_semestre: str, numero_semaine: int) -> int
     écrasée, sinon l'archive ne servirait qu'une fois — celle où l'on ne s'est
     pas trompé.
 
-    Une classe sans séance cette semaine-là n'est pas archivée : une grille
-    vide n'apprend rien et polluerait le sélecteur de versions.
+    Une classe sans séance NI épreuve cette semaine-là n'est pas archivée : une
+    grille vide n'apprend rien et polluerait le sélecteur de versions. Mais une
+    semaine d'examens ne porte souvent aucune séance — l'écarter pour autant
+    aurait laissé sans archive précisément le document qu'on distribue.
 
-    Retourne le nombre de séances figées. Sans effet hors IPGEI.
+    Les épreuves sont figées EN MÊME TEMPS, et sous la même version : elles font
+    partie de ce que la classe a reçu. Déplacer un examen après coup ne doit pas
+    récrire un emploi du temps déjà remis aux étudiants.
+
+    Retourne le nombre de lignes figées, séances et épreuves confondues. Sans
+    effet hors IPGEI.
     """
     codes = [c for c, (_, t) in SEMESTRES.items() if t == type_semestre]
     semaines = SemaineIPGEI.objects.filter(
@@ -94,27 +127,45 @@ def archiver_semaine(annee: str, type_semestre: str, numero_semaine: int) -> int
             .select_related('classe', 'jour', 'creneau', 'matiere', 'prof',
                             'prof_initial', 'salle', 'sous_groupe', 'type_seance')
         )
-        if not seances:
+        # Les convocations de la semaine, une ligne par (épreuve, classe).
+        convocations = [
+            c
+            for e in (EpreuveIPGEI.objects
+                      .filter(date__gte=semaine.date_debut, date__lte=semaine.date_fin)
+                      .select_related('matiere')
+                      .prefetch_related('convocations__classe'))
+            for c in e.convocations.all()
+        ]
+
+        if not seances and not convocations:
             continue
 
         # Une version par classe : deux responsables peuvent générer leur
         # semaine à des moments différents, et chacun doit retrouver la sienne.
-        deja = {
-            ligne['classe_id']: ligne['v']
-            for ligne in (EmploiArchive.objects
-                          .filter(semaine=semaine)
-                          .values('classe_id')
-                          .annotate(v=Max('version')))
-        }
+        # Le maximum est pris sur les DEUX tables : une semaine d'examens a pu
+        # n'archiver que des épreuves, et repartir de 1 écraserait l'ordre.
+        deja = {}
+        for modele in (EmploiArchive, EpreuveArchive):
+            for ligne in (modele.objects.filter(semaine=semaine)
+                          .values('classe_id').annotate(v=Max('version'))):
+                deja[ligne['classe_id']] = max(deja.get(ligne['classe_id'], 0),
+                                               ligne['v'])
 
         lot = []
         for seance in seances:
             version = deja.get(seance.classe_id, 0) + 1
             lot.append(_instantane(seance, semaine, version, genere_le))
-
         EmploiArchive.objects.bulk_create(lot)
         total += len(lot)
 
-    logger.info('Archivage EDT : %s séance(s) figée(s) pour la semaine %s (%s %s)',
+        lot_epreuves = []
+        for convocation in convocations:
+            version = deja.get(convocation.classe_id, 0) + 1
+            lot_epreuves.append(
+                _instantane_epreuve(convocation, semaine, version, genere_le))
+        EpreuveArchive.objects.bulk_create(lot_epreuves)
+        total += len(lot_epreuves)
+
+    logger.info('Archivage EDT : %s ligne(s) figée(s) pour la semaine %s (%s %s)',
                 total, numero_semaine, annee, type_semestre)
     return total

@@ -151,7 +151,7 @@ def construire_grille(seances, *, axe='classe', epreuves=()):
 
     def cellules(jour):
         """Les cases d'une ligne, l'épreuve fusionnant celles qu'elle couvre."""
-        plages = sorted(par_jour.get(jour.lower(), []))
+        plages = sorted(par_jour.get(jour.lower(), []), key=lambda p: (p[0], p[1]))
         rendu, i = [], 0
         while i < len(creneaux):
             plage = next((p for p in plages if p[0] == i), None)
@@ -162,8 +162,7 @@ def construire_grille(seances, *, axe='classe', epreuves=()):
                     'blocs':   [],
                     'epreuve': {
                         'type':    epreuve.type_epreuve,
-                        'intitule': (epreuve.matiere.intitule if epreuve.matiere_id
-                                     else epreuve.type_epreuve),
+                        'intitule': epreuve.intitule_affiche,
                         'horaire': (f'{epreuve.heure_debut:%Hh%M} → '
                                     f'{epreuve.heure_fin:%Hh%M} · {epreuve.duree_libelle}'),
                     },

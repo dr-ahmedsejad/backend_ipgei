@@ -1261,7 +1261,63 @@ class AnonymatIPGEI(models.Model):
         return f'Anonymat {self.numero} — {self.session}'
 
 
-class EpreuveIPGEI(models.Model):
+class _IntervalleEpreuve:
+    """
+    Ce qu'une épreuve sait de son propre horaire : sa fin, sa durée lisible, et
+    les créneaux qu'elle recouvre.
+
+    Partagé entre l'épreuve vivante et son ARCHIVE. Recopier ce calcul aurait
+    laissé les deux dériver — et un document réimprimé ne recouvrirait plus les
+    mêmes créneaux que l'original, ce qui vide l'archive de son sens.
+
+    Le porteur doit offrir `heure_debut` et `duree_minutes`.
+    """
+
+    @property
+    def debut_minutes(self) -> int:
+        """Début en minutes depuis minuit — la forme dans laquelle on compare."""
+        return self.heure_debut.hour * 60 + self.heure_debut.minute
+
+    @property
+    def fin_minutes(self) -> int:
+        return self.debut_minutes + self.duree_minutes
+
+    @property
+    def heure_fin(self) -> time:
+        """
+        Fin de l'épreuve. Bornée à 23h59 : une épreuve qui déborderait sur le
+        lendemain n'existe pas, et laisser l'heure reboucler sur 00h30
+        afficherait une fin AVANT le début.
+        """
+        fin = min(self.fin_minutes, 23 * 60 + 59)
+        return time(fin // 60, fin % 60)
+
+    @property
+    def duree_libelle(self) -> str:
+        """« 3h » ou « 2h30 » — ce qui se lit sur le bandeau."""
+        h, m = divmod(self.duree_minutes, 60)
+        return f'{h}h{m:02d}' if m else f'{h}h'
+
+    def recouvre(self, creneau) -> bool:
+        """
+        Vrai si l'épreuve empiète, ne serait-ce que d'une minute, sur ce créneau.
+
+        Le créneau est un libellé — « 09h45-11h15 » —, pas deux champs d'heure :
+        c'est de là qu'on lit ses bornes. Un libellé qui ne se laisse pas lire
+        ne bloque rien, plutôt que de bloquer tout par excès de prudence.
+
+        Le recouvrement PARTIEL suffit. Un DS de 8h00 à 10h00 ne mord que 15
+        minutes sur le créneau de 09h45-11h15, mais personne ne peut y
+        commencer un cours : la classe compose encore.
+        """
+        bornes = _bornes_creneau(getattr(creneau, 'creneau', '') or '')
+        if bornes is None:
+            return False
+        debut_c, fin_c = bornes
+        return self.debut_minutes < fin_c and debut_c < self.fin_minutes
+
+
+class EpreuveIPGEI(_IntervalleEpreuve, models.Model):
     """
     Une épreuve : le DS de maths du 18 novembre, 8h00, 3h, pour MP A à MP E.
 
@@ -1353,49 +1409,10 @@ class EpreuveIPGEI(models.Model):
         return (f'{self.type_epreuve} {self.numero} {self.matiere.code} — '
                 f'{self.date} {self.heure_debut:%H:%M}')
 
-    # ── Intervalle ───────────────────────────────────────────────────────────
     @property
-    def debut_minutes(self) -> int:
-        """Début en minutes depuis minuit — la forme dans laquelle on compare."""
-        return self.heure_debut.hour * 60 + self.heure_debut.minute
-
-    @property
-    def fin_minutes(self) -> int:
-        return self.debut_minutes + self.duree_minutes
-
-    @property
-    def heure_fin(self) -> time:
-        """
-        Fin de l'épreuve. Bornée à 23h59 : une épreuve qui déborderait sur le
-        lendemain n'existe pas, et laisser l'heure reboucler sur 00h30
-        afficherait une fin AVANT le début.
-        """
-        fin = min(self.fin_minutes, 23 * 60 + 59)
-        return time(fin // 60, fin % 60)
-
-    @property
-    def duree_libelle(self) -> str:
-        """« 3h » ou « 2h30 » — ce qui se lit sur le bandeau."""
-        h, m = divmod(self.duree_minutes, 60)
-        return f'{h}h{m:02d}' if m else f'{h}h'
-
-    def recouvre(self, creneau) -> bool:
-        """
-        Vrai si l'épreuve empiète, ne serait-ce que d'une minute, sur ce créneau.
-
-        Le créneau est un libellé — « 09h45-11h15 » —, pas deux champs d'heure :
-        c'est de là qu'on lit ses bornes. Un libellé qui ne se laisse pas lire
-        ne bloque rien, plutôt que de bloquer tout par excès de prudence.
-
-        Le recouvrement PARTIEL suffit. Un DS de 8h00 à 10h00 ne mord que 15
-        minutes sur le créneau de 09h45-11h15, mais personne ne peut y
-        commencer un cours : la classe compose encore.
-        """
-        bornes = _bornes_creneau(getattr(creneau, 'creneau', '') or '')
-        if bornes is None:
-            return False
-        debut_c, fin_c = bornes
-        return self.debut_minutes < fin_c and debut_c < self.fin_minutes
+    def intitule_affiche(self) -> str:
+        """Ce que la case porte. L'archive expose la même chose, sans FK."""
+        return self.matiere.intitule if self.matiere_id else self.type_epreuve
 
 
 def _bornes_creneau(libelle: str):
@@ -2266,6 +2283,72 @@ class EmploiArchive(models.Model):
     @property
     def sous_groupe(self):
         return _Fige(groupe=self.sous_groupe_libelle) if self.sous_groupe_libelle else None
+
+
+class EpreuveArchive(_IntervalleEpreuve, models.Model):
+    """
+    Photographie d'une épreuve, prise avec celle de l'emploi du temps.
+
+    Une table à part, et non des lignes d'`EmploiArchive` : une épreuve n'a ni
+    créneau, ni enseignant, ni salle, et convoque plusieurs classes. L'y loger
+    aurait demandé d'inventer des valeurs pour ces champs, et toute requête
+    lisant des séances aurait dû apprendre à les écarter.
+
+    La ligne est posée PAR CLASSE convoquée, comme `EmploiArchive` : c'est
+    classe par classe qu'on génère un suivi et qu'on relit un emploi du temps.
+    Une épreuve de niveau y laisse donc autant de lignes que de classes — le
+    prix à payer pour que chacune retrouve exactement ce qu'elle a reçu.
+
+    Autoportante, elle aussi : aucun lien vers le référentiel, uniquement des
+    valeurs figées. Déplacer une épreuve après coup ne doit pas récrire le
+    document déjà distribué — c'est la raison d'être de cette table.
+
+    Le calcul des créneaux recouverts vient du mixin partagé avec l'épreuve
+    vivante : le recopier aurait laissé les deux dériver, et un document
+    réimprimé n'aurait plus fusionné les mêmes colonnes.
+    """
+    semaine   = models.ForeignKey(SemaineIPGEI, on_delete=models.CASCADE,
+                                  related_name='archives_epreuves')
+    classe    = models.ForeignKey(Classe, on_delete=models.CASCADE,
+                                  related_name='archives_epreuves')
+    version   = models.PositiveSmallIntegerField(default=1)
+    genere_le = models.DateTimeField()
+
+    # Repère nu vers l'épreuve d'origine : utile pour rapprocher deux versions,
+    # jamais pour lire la valeur. L'épreuve peut avoir été supprimée depuis.
+    epreuve_ref = models.IntegerField(null=True, blank=True)
+    matiere_ref = models.IntegerField(null=True, blank=True)
+
+    type_epreuve  = models.CharField(max_length=2, blank=True, default='')
+    numero        = models.PositiveSmallIntegerField(default=1)
+    date          = models.DateField()
+    heure_debut   = models.TimeField()
+    duree_minutes = models.PositiveSmallIntegerField(default=120)
+
+    matiere_code     = models.CharField(max_length=30,  blank=True, default='')
+    matiere_intitule = models.CharField(max_length=150, blank=True, default='')
+    classe_nom       = models.CharField(max_length=100, blank=True, default='')
+    observations     = models.CharField(max_length=300, blank=True, default='')
+
+    class Meta:
+        db_table            = 'ipgei_epreuve_archive'
+        verbose_name        = 'Épreuve archivée'
+        verbose_name_plural = 'Épreuves archivées'
+        ordering            = ['-genere_le', 'date', 'heure_debut']
+        indexes = [models.Index(fields=['semaine', 'classe', 'version'])]
+
+    def __str__(self):
+        return (f'{self.classe_nom} {self.semaine} v{self.version} — '
+                f'{self.type_epreuve} {self.matiere_code} {self.date}')
+
+    # ── Surface attendue par le constructeur de grille du PDF ────────────────
+    @property
+    def matiere_id(self):
+        return self.matiere_ref
+
+    @property
+    def intitule_affiche(self) -> str:
+        return self.matiere_intitule or self.type_epreuve
 
 class AbsenceSeance(models.Model):
     """

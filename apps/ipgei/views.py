@@ -44,7 +44,7 @@ from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
     AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
     HistoriqueClasse,
-    EpreuveIPGEI,
+    EpreuveArchive, EpreuveIPGEI,
     InscriptionIPGEI, LigneDeliberation, Matiere, MembreJuryIPGEI, NiveauIPGEI,
     Note,
     ParametresIPGEI,
@@ -81,9 +81,22 @@ def _epreuves_de_la_semaine(classe, semaine):
     Elles ne passent ni par la grille ni par le suivi : ce ne sont pas des
     séances. Mais un emploi du temps distribué qui tairait l'examen serait pire
     qu'inutile — et une semaine d'examens n'a souvent rien d'autre à montrer.
+
+    L'ARCHIVE prime quand elle existe, exactement comme pour les séances : le
+    document doit se relire tel qu'il a été remis. Déplacer un examen après coup
+    ne récrit pas ce que les étudiants ont reçu — c'est toute la raison d'être
+    de la prise de vue.
     """
     if classe is None or semaine is None:
         return []
+
+    archivees = (EpreuveArchive.objects
+                 .filter(semaine=semaine, classe=classe)
+                 .order_by('-version', 'date', 'heure_debut'))
+    if archivees.exists():
+        derniere = archivees.first().version
+        return list(archivees.filter(version=derniere))
+
     return list(
         EpreuveIPGEI.objects
         .filter(convocations__classe_id=classe.pk,
@@ -3166,6 +3179,11 @@ class EpreuveIPGEIViewSet(_ErreurMetierMixin, ModelViewSet):
         Le recouvrement PARTIEL bloque la case entière : un DS de 8h00 à 10h00
         ne mord que quinze minutes sur le créneau de 09h45-11h15, mais la
         classe y compose encore — personne ne peut y placer un cours.
+
+        La source est l'ARCHIVE dès qu'il en existe une, comme pour les
+        séances : une semaine publiée se relit telle qu'elle a été remise. La
+        réponse garde la même forme dans les deux cas — l'écran n'a pas à
+        savoir d'où vient ce qu'il dessine.
         """
         classe_id  = request.query_params.get('classe')
         semaine_id = request.query_params.get('semaine')
@@ -3175,11 +3193,9 @@ class EpreuveIPGEIViewSet(_ErreurMetierMixin, ModelViewSet):
         semaine = SemaineIPGEI.objects.filter(pk=semaine_id).first()
         if semaine is None:
             raise ValidationError({'semaine': 'Semaine introuvable.'})
-
-        epreuves = (self.get_queryset()
-                    .filter(convocations__classe_id=classe_id,
-                            date__gte=semaine.date_debut, date__lte=semaine.date_fin)
-                    .distinct())
+        classe = Classe.objects.filter(pk=classe_id).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe introuvable.'})
 
         creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
         jours    = {j.jour.lower(): j.id for j in Jour.objects.all()}
@@ -3189,13 +3205,31 @@ class EpreuveIPGEIViewSet(_ErreurMetierMixin, ModelViewSet):
         NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
 
         lignes = []
-        for epreuve in epreuves:
-            couverts = [c.id for c in creneaux if epreuve.recouvre(c)]
-            donnees = self.get_serializer(epreuve).data
-            donnees['jour']             = jours.get(NOMS[epreuve.date.weekday()])
-            donnees['jour_libelle']     = NOMS[epreuve.date.weekday()].capitalize()
-            donnees['creneaux_couverts'] = couverts
-            lignes.append(donnees)
+        for epreuve in _epreuves_de_la_semaine(classe, semaine):
+            archivee = isinstance(epreuve, EpreuveArchive)
+            lignes.append({
+                'id':            epreuve.pk,
+                'archivee':      archivee,
+                'type_epreuve':  epreuve.type_epreuve,
+                'numero':        epreuve.numero,
+                'matiere_code':     (epreuve.matiere_code if archivee
+                                     else (epreuve.matiere.code if epreuve.matiere_id else '')),
+                'matiere_intitule': epreuve.intitule_affiche,
+                'date':          epreuve.date.isoformat(),
+                'heure_debut':   epreuve.heure_debut.isoformat(),
+                'heure_fin':     epreuve.heure_fin.isoformat(),
+                'duree_minutes': epreuve.duree_minutes,
+                'duree_libelle': epreuve.duree_libelle,
+                'observations':  epreuve.observations,
+                # Les classes convoquées n'ont de sens que sur l'épreuve
+                # vivante : l'archive est posée PAR classe, elle ne sait pas
+                # qui d'autre composait.
+                'classes_noms':  ([] if archivee
+                                  else [c.classe.nom for c in epreuve.convocations.all()]),
+                'jour':          jours.get(NOMS[epreuve.date.weekday()]),
+                'jour_libelle':  NOMS[epreuve.date.weekday()].capitalize(),
+                'creneaux_couverts': [c.id for c in creneaux if epreuve.recouvre(c)],
+            })
         return Response(lignes)
 
 
