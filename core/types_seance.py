@@ -21,9 +21,20 @@ sur lesquels il prend une décision.
 #: fiches, et le surveillant relève de la vacation —, et elles n'avancent pas
 #: le programme.
 #:
-#: `ipgei.EpreuveIPGEI.TYPE_CHOICES` porte les mêmes codes avec leurs libellés.
-#: Un test vérifie que les deux ne se séparent pas.
-TYPES_EPREUVE = ('DS', 'EF', 'ER')
+#: Le dictionnaire porte CODE ET LIBELLÉ, et le triplet en découle : les deux
+#: vivaient séparément — `EpreuveIPGEI.TYPE_CHOICES` d'un côté,
+#: `secretariat.LIBELLES_EPREUVE` de l'autre — et s'étaient déjà séparés sur le
+#: rattrapage, « Examen » pour l'un, « Épreuve » pour l'autre.
+#:
+#: Le pendant TypeScript est la liste `TYPES` de
+#: `app/dashboard/ipgei/epreuves/page.tsx` : les deux doivent bouger ensemble.
+LIBELLES_EPREUVE = {
+    'DS': 'Devoir surveillé',
+    'EF': 'Examen final',
+    'ER': 'Examen de rattrapage',
+}
+
+TYPES_EPREUVE = tuple(LIBELLES_EPREUVE)
 
 #: Ce qui se paie en SURVEILLANCE : les épreuves, plus le type « Surveillance »
 #: lui-même, saisi en vacation pour un surveillant qui n'assurait aucune

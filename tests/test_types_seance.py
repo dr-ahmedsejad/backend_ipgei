@@ -20,20 +20,29 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 from apps.ipgei.models import EpreuveIPGEI
-from core.types_seance import TYPES_EPREUVE, TYPES_SURVEILLANCE
+from core.types_seance import (LIBELLES_EPREUVE, TYPES_EPREUVE,
+                               TYPES_SURVEILLANCE)
 
 RACINE = Path(__file__).resolve().parent.parent
 
 
 class TypesSeanceTest(SimpleTestCase):
-    def test_le_modele_porte_exactement_les_memes_codes(self):
+    def test_le_modele_porte_exactement_les_memes_codes_ET_libelles(self):
         """
-        `EpreuveIPGEI.TYPE_CHOICES` garde ses libellés, mais ses codes doivent
-        rester ceux de la constante. Ajouter un type d'un seul côté ferait une
-        épreuve que le reste du code ne reconnaîtrait pas comme telle.
+        Les choix du modèle sont DÉRIVÉS du dictionnaire ; ce test le constate
+        plutôt que de le supposer. Quelqu'un qui les réécrirait à la main pour
+        « plus de lisibilité » rouvrirait la porte par laquelle « Épreuve » et
+        « Examen » de rattrapage s'étaient séparés.
         """
-        codes = tuple(code for code, _ in EpreuveIPGEI.TYPE_CHOICES)
-        self.assertEqual(sorted(codes), sorted(TYPES_EPREUVE))
+        self.assertEqual(EpreuveIPGEI.TYPE_CHOICES,
+                         list(LIBELLES_EPREUVE.items()))
+        self.assertEqual(tuple(code for code, _ in EpreuveIPGEI.TYPE_CHOICES),
+                         TYPES_EPREUVE)
+
+    def test_chaque_code_a_son_libelle(self):
+        """Le triplet découle du dictionnaire : aucun code ne peut rester muet."""
+        for code in TYPES_EPREUVE:
+            self.assertTrue(LIBELLES_EPREUVE.get(code), code)
 
     def test_la_surveillance_contient_les_epreuves(self):
         """
@@ -52,6 +61,13 @@ class TypesSeanceTest(SimpleTestCase):
 
         Les migrations sont exclues : elles figent un état passé et ne se
         modifient jamais. Les tests aussi : celui-ci cite forcément les codes.
+
+        Seuls les CODES sont cherchés, pas les libellés : « Devoir surveillé »
+        et « Examen final » nomment aussi des types de NOTE dans
+        `collecte.LIBELLES_TYPE`, une table de quatre codes différents. Un
+        motif textuel ne sait pas distinguer le même concept des mêmes mots —
+        c'est `test_le_modele_porte_exactement_les_memes_codes_ET_libelles`
+        qui garantit l'accord des libellés, et lui est exact.
         """
         # Le TRIPLET, dans n'importe quel ordre. Un sous-ensemble délibéré —
         # `EPREUVES_ANONYMES = ('EF', 'ER')`, les seules épreuves corrigées

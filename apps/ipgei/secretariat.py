@@ -30,7 +30,11 @@ from django.utils import timezone
 from core.pdf_renderer import render_pdf_bytes
 from core.pdf_utils import get_institution_context
 
-from core.types_seance import TYPES_EPREUVE       # noqa: F401  (ré-exporté)
+#: `LIBELLES_EPREUVE` nomme l'épreuve en toutes lettres sur l'écran et sur la
+#: fiche ; `TYPES_EPREUVE` est ré-exporté pour ses appelants. Les deux vivent
+#: dans `core.types_seance`, seul endroit où ils sont écrits.
+from core.types_seance import (LIBELLES_EPREUVE,         # noqa: F401
+                               TYPES_EPREUVE)
 
 from .collecte import OPTIONS_PDF, _entete_excel, _logo_reduit
 from .models import AnonymatIPGEI
@@ -153,14 +157,6 @@ def epreuves_tenues(matiere, semestre) -> list:
                        + (f" — {', '.join(classes)}" if classes else ''),
         })
     return sorted(epreuves, key=lambda e: (e['date'], e['type']), reverse=True)
-
-
-#: De quoi nommer l'épreuve en toutes lettres sur l'écran et sur la fiche.
-LIBELLES_EPREUVE = {
-    'DS': 'Devoir surveillé',
-    'EF': 'Examen final',
-    'ER': 'Épreuve de rattrapage',
-}
 
 
 def _libelle_epreuve(epreuve) -> str:

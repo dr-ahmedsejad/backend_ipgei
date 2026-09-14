@@ -21,6 +21,7 @@ from django.db import models
 # EST un département de planification, ce qui rend Suivi, Vacations, Avancement
 # et Emplois utilisables sans copie ni synchronisation.
 from apps.departement.models import Departement
+from core.types_seance import LIBELLES_EPREUVE
 
 
 # ── Vocabulaire du cursus ────────────────────────────────────────────────────
@@ -1348,11 +1349,11 @@ class EpreuveIPGEI(_IntervalleEpreuve, models.Model):
     TYPE_DS = 'DS'
     TYPE_EF = 'EF'
     TYPE_ER = 'ER'
-    TYPE_CHOICES = [
-        (TYPE_DS, 'Devoir surveillé'),
-        (TYPE_EF, 'Examen final'),
-        (TYPE_ER, 'Examen de rattrapage'),
-    ]
+    # Dérivés de `core.types_seance`, seul endroit où ces codes et leurs
+    # libellés sont écrits. Les redire ici les aurait laissés se séparer —
+    # c'est ce qui était arrivé avec `secretariat.LIBELLES_EPREUVE`, qui
+    # nommait le rattrapage « Épreuve » quand ce modèle disait « Examen ».
+    TYPE_CHOICES = list(LIBELLES_EPREUVE.items())
 
     # La session porte le semestre ET la campagne : un ER appartient à la
     # session de rattrapage, un DS à la normale. Rattacher l'épreuve au
