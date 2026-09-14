@@ -74,6 +74,25 @@ from .serializers import (
 )
 
 
+def _epreuves_de_la_semaine(classe, semaine):
+    """
+    Les épreuves qui convoquent cette classe pendant cette semaine.
+
+    Elles ne passent ni par la grille ni par le suivi : ce ne sont pas des
+    séances. Mais un emploi du temps distribué qui tairait l'examen serait pire
+    qu'inutile — et une semaine d'examens n'a souvent rien d'autre à montrer.
+    """
+    if classe is None or semaine is None:
+        return []
+    return list(
+        EpreuveIPGEI.objects
+        .filter(convocations__classe_id=classe.pk,
+                date__gte=semaine.date_debut, date__lte=semaine.date_fin)
+        .select_related('matiere')
+        .distinct()
+    )
+
+
 def _nom_fichier(libelle: str) -> str:
     """Portion de nom de fichier sûre : accents et ponctuation retirés."""
     import re
@@ -3326,7 +3345,8 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
             if groupe:
                 libelle = f'{classe.nom} — sous-groupe {groupe.groupe}'
 
-        creneaux, lignes = edt_pdf.construire_grille(seances, axe='classe')
+        creneaux, lignes = edt_pdf.construire_grille(
+            seances, axe='classe', epreuves=_epreuves_de_la_semaine(classe, semaine))
         return edt_pdf.reponse_pdf(
             'ipgei/emploi_pdf.html',
             {
@@ -3561,19 +3581,32 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
     def pdf(self, request):
         """La même grille, au même gabarit que l'emploi du temps courant."""
         seances = list(self._prise_de_vue(request))
-        if not seances:
-            raise ValidationError('Aucune archive pour cette semaine.')
-
         axe      = self._axe(request)
-        premiere = seances[0]
         semaine  = SemaineIPGEI.objects.select_related('semestre').filter(
             pk=request.query_params.get('semaine')).first()
-        creneaux, lignes = edt_pdf.construire_grille(seances, axe=axe)
 
+        # Les épreuves ne sont pas archivées — elles ne sont pas des séances et
+        # ne passent pas par la prise de vue du suivi. Elles n'en doivent pas
+        # moins figurer sur le document : une semaine d'examens n'a souvent
+        # rien d'autre à montrer, et c'est précisément celle qu'on distribue.
+        classe = (Classe.objects.filter(pk=request.query_params.get('classe')).first()
+                  if axe == 'classe' else None)
+        epreuves = _epreuves_de_la_semaine(classe, semaine) if classe else ()
+
+        if not seances and not epreuves:
+            raise ValidationError('Aucune archive pour cette semaine.')
+
+        premiere = seances[0] if seances else None
+        creneaux, lignes = edt_pdf.construire_grille(seances, axe=axe, epreuves=epreuves)
+
+        # `premiere` est nulle sur une semaine qui ne porte QUE des épreuves :
+        # rien n'y est archivé. Le nom de la cible se lit alors sur la classe
+        # demandée, la seule qu'on connaisse encore.
         libelle, cible = {
-            'prof':  ('Enseignant', premiere.prof_nom),
-            'salle': ('Salle',      premiere.salle_nom),
-        }.get(axe, ('Classe', premiere.classe_nom))
+            'prof':  ('Enseignant', premiere.prof_nom if premiere else ''),
+            'salle': ('Salle',      premiere.salle_nom if premiere else ''),
+        }.get(axe, ('Classe', premiere.classe_nom if premiere
+                              else (classe.nom if classe else '')))
 
         return edt_pdf.reponse_pdf(
             'ipgei/emploi_pdf.html',
@@ -3594,9 +3627,14 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
                 # courant, alors qu'ils diffèrent souvent — c'est la raison même
                 # de sa conservation.
                 'etat_semaine': (
-                    f'Publié le {edt_pdf._date_fr(premiere.genere_le.date())}'
-                    + (f' · version {premiere.version}'
-                       if axe == 'classe' and premiere.version > 1 else '')
+                    (f'Publié le {edt_pdf._date_fr(premiere.genere_le.date())}'
+                     + (f' · version {premiere.version}'
+                        if axe == 'classe' and premiere.version > 1 else ''))
+                    if premiere
+                    # Aucune séance archivée : le document ne porte que des
+                    # épreuves, et doit le dire — sans quoi il se lirait comme
+                    # une semaine publiée sans cours.
+                    else 'Épreuves — emploi du temps non publié pour cette classe'
                 ),
                 'est_divergent': False,
             },

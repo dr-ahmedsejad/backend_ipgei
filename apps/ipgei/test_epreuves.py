@@ -338,6 +338,37 @@ class SurimpressionAPITest(TestCase):
     def test_une_classe_non_convoquee_ne_voit_rien(self):
         self.assertEqual(len(self._semaine(self.autre).data), 0)
 
+    def test_la_grille_pdf_porte_l_epreuve_meme_sans_aucune_seance(self):
+        """
+        Le cas qui a bloqué un utilisateur : une semaine d'examens ne porte
+        AUCUNE séance. Le document refusait alors de se produire — or c'est
+        précisément celui qu'on distribue.
+
+        L'épreuve fusionne les colonnes que son intervalle recouvre, et la
+        ligne garde exactement la largeur de la grille : une table HTML dont
+        les `colspan` ne totalisent pas le nombre de colonnes se déforme.
+        """
+        from apps.ipgei import edt_pdf
+
+        creneaux, lignes = edt_pdf.construire_grille(
+            [], axe='classe', epreuves=[self.epreuve])
+
+        mardi = next(l for l in lignes if l['jour'] == 'Mardi')
+        largeur = sum(c['colspan'] for c in mardi['cells'])
+        self.assertEqual(largeur, len(creneaux),
+                         'la ligne doit faire exactement la largeur de la grille')
+
+        fusionnee = next(c for c in mardi['cells'] if c['epreuve'])
+        self.assertEqual(fusionnee['colspan'], 2, '3h couvrent deux créneaux de 1h30')
+        self.assertEqual(fusionnee['epreuve']['type'], 'EF')
+        self.assertIn('08h00', fusionnee['epreuve']['horaire'])
+        self.assertIn('11h00', fusionnee['epreuve']['horaire'])
+
+        # Les autres jours restent des lignes pleines, faites de cases simples.
+        lundi = next(l for l in lignes if l['jour'] == 'Lundi')
+        self.assertEqual(len(lundi['cells']), len(creneaux))
+        self.assertTrue(all(c['colspan'] == 1 for c in lundi['cells']))
+
     def test_une_epreuve_hors_semaine_n_apparait_pas(self):
         self.epreuve.date = date(2025, 12, 2)
         self.epreuve.save(update_fields=['date'])

@@ -70,7 +70,14 @@ def _ligne(seance, axe):
     return texte
 
 
-def construire_grille(seances, *, axe='classe'):
+#: Les jours dans l'ordre de `date.weekday()`. Le référentiel `Jour` est
+#: libellé en toutes lettres et son ordre n'est pas garanti : le nom est la
+#: seule correspondance stable entre une date et une ligne de la grille.
+JOURS_SEMAINE = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi',
+                 'dimanche']
+
+
+def construire_grille(seances, *, axe='classe', epreuves=()):
     """
     Transforme des séances en (créneaux, lignes) pour le gabarit IPGEI.
 
@@ -83,6 +90,17 @@ def construire_grille(seances, *, axe='classe'):
     actifs, occupés ou non. Une case vide est une information — le créneau est
     libre — et masquer les jours creux décalerait les colonnes d'une semaine à
     l'autre, rendant deux tirages incomparables.
+
+    `epreuves` — des `EpreuveIPGEI` — sont posées EN SURIMPRESSION, fusionnant
+    les colonnes que leur intervalle recouvre. Elles ne sont pas des séances :
+    leur durée ne tombe pas sur la grille de 1h30, elles convoquent plusieurs
+    classes et n'ont ni salle ni enseignant. Le document devait pourtant les
+    porter — un emploi du temps distribué qui tairait l'examen serait pire
+    qu'inutile, et une semaine d'examens n'a souvent rien d'autre à montrer.
+
+    Chaque cellule rendue porte son `colspan` : une table HTML ne sait fusionner
+    que des colonnes contiguës, et c'est au constructeur de la grille de le
+    décider, non au gabarit.
     """
     seances = [s for s in seances if s.creneau_id and not s.annulee]
 
@@ -119,11 +137,49 @@ def construire_grille(seances, *, axe='classe'):
         if ligne:
             blocs[cle]['lignes'].append(ligne)
 
-    def cellule(jour, creneau_id):
-        return list(grille[jour][creneau_id].values())
+    # Les épreuves du jour, avec la plage de colonnes qu'elles recouvrent.
+    par_jour = defaultdict(list)
+    index_creneau = {c.id: i for i, c in enumerate(creneaux)}
+    for epreuve in epreuves or ():
+        indices = [index_creneau[c.id] for c in creneaux if epreuve.recouvre(c)]
+        if not indices:
+            # Une épreuve logée dans une pause — 13h00-15h10 — ne recouvre
+            # aucun créneau. Elle ne bloque rien, donc elle ne fusionne rien.
+            continue
+        par_jour[JOURS_SEMAINE[epreuve.date.weekday()]].append(
+            (min(indices), max(indices), epreuve))
+
+    def cellules(jour):
+        """Les cases d'une ligne, l'épreuve fusionnant celles qu'elle couvre."""
+        plages = sorted(par_jour.get(jour.lower(), []))
+        rendu, i = [], 0
+        while i < len(creneaux):
+            plage = next((p for p in plages if p[0] == i), None)
+            if plage is not None:
+                debut, fin, epreuve = plage
+                rendu.append({
+                    'colspan': fin - debut + 1,
+                    'blocs':   [],
+                    'epreuve': {
+                        'type':    epreuve.type_epreuve,
+                        'intitule': (epreuve.matiere.intitule if epreuve.matiere_id
+                                     else epreuve.type_epreuve),
+                        'horaire': (f'{epreuve.heure_debut:%Hh%M} → '
+                                    f'{epreuve.heure_fin:%Hh%M} · {epreuve.duree_libelle}'),
+                    },
+                })
+                i = fin + 1
+                continue
+            rendu.append({
+                'colspan': 1,
+                'blocs':   list(grille[jour][creneaux[i].id].values()),
+                'epreuve': None,
+            })
+            i += 1
+        return rendu
 
     lignes = [
-        {'jour': jour.jour, 'cells': [cellule(jour.jour, c.id) for c in creneaux]}
+        {'jour': jour.jour, 'cells': cellules(jour.jour)}
         for jour in Jour.objects.all().order_by('id')
     ]
     return creneaux, lignes

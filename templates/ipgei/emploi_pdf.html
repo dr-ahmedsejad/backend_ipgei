@@ -83,6 +83,15 @@ Une case à deux groupes garde ainsi la hauteur d'une case ordinaire.
         /* La case entiere se teinte, comme a l'ecran. */
         .bloc-evaluation { background: #fdecea; border-radius: 4px; padding: 2px 3px; }
 
+        /* Une épreuve occupe la case fusionnée entière, et se lit centrée : sur
+           trois colonnes, un bloc calé à gauche laisserait croire qu'il ne
+           concerne que la première. Le liseré la distingue d'un cours même sur
+           une sortie noir et blanc, où le fond rose disparaît. */
+        .bloc-epreuve {
+            border: 1px solid #c82020; text-align: center;
+            padding: 4px 3px; margin-bottom: 0;
+        }
+
         /* Un bloc = une matière. Deux blocs dans la même case restent rares
            (deux matières sur le même créneau) mais doivent rester lisibles. */
         .bloc { margin-bottom: 3px; }
@@ -172,10 +181,25 @@ donc après que des heures ont été pointées et payées sur une autre version.
     {% for row in rows %}
     <tr>
         <td class="jour">{{ row.jour }}</td>
-        {% for blocs in row.cells %}
-        <td class="custom-td{% if blocs|length == 1 and blocs.0.est_speciale %} custom-td-special{% endif %}">
-            {% for bloc in blocs %}
-            {% if bloc.est_speciale and blocs|length == 1 %}
+        {% for cell in row.cells %}
+        <td class="custom-td{% if cell.blocs|length == 1 and cell.blocs.0.est_speciale %} custom-td-special{% endif %}"
+            {% if cell.colspan > 1 %}colspan="{{ cell.colspan }}"{% endif %}>
+            {% comment %}
+            L'épreuve fusionne les colonnes que son intervalle recouvre. Elle
+            porte ses VRAIES heures — « 08h00 → 11h00 · 3h » — et non celles
+            des créneaux : la colonne dit ce qui est indisponible, le bandeau
+            ce qui s'y passe. Ni enseignant ni salle, comme à l'écran : chaque
+            classe compose dans la sienne, répartie sur les fiches.
+            {% endcomment %}
+            {% if cell.epreuve %}
+            <div class="bloc bloc-evaluation bloc-epreuve">
+                <div class="session-type {{ cell.epreuve.type }}">{{ cell.epreuve.type }}</div>
+                <div class="course-title">{{ cell.epreuve.intitule }}</div>
+                <div class="ligne-seance">{{ cell.epreuve.horaire }}</div>
+            </div>
+            {% else %}
+            {% for bloc in cell.blocs %}
+            {% if bloc.est_speciale and cell.blocs|length == 1 %}
             <div class="bloc-special">{{ bloc.em_intitule }}</div>
             {% else %}
             <div class="bloc{% if bloc.est_evaluation %} bloc-evaluation{% endif %}">
@@ -187,6 +211,7 @@ donc après que des heures ont été pointées et payées sur une autre version.
             </div>
             {% endif %}
             {% endfor %}
+            {% endif %}
         </td>
         {% endfor %}
     </tr>
