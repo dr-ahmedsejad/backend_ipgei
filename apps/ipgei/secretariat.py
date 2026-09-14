@@ -25,6 +25,7 @@ from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db.models.functions import Length
+from django.utils import timezone
 
 from core.pdf_renderer import render_pdf_bytes
 from core.pdf_utils import get_institution_context
@@ -66,7 +67,8 @@ STATUTS_SOCLE_SANS_COPIE = (1, 3)
 
 def epreuves_tenues(matiere, semestre) -> list:
     """
-    Les épreuves de cette matière qui ont EU LIEU, d'après le Suivi.
+    Les épreuves de cette matière qui ont EU LIEU — déclarées, ou déduites
+    du Suivi.
 
     Une fiche de collecte porte sur UNE épreuve. Tant qu'on ne la désignait
     pas, les absences de toutes les épreuves du semestre se mélangeaient : un
@@ -114,6 +116,34 @@ def epreuves_tenues(matiere, semestre) -> list:
             'classes': set(),
         })
         entree['classes'].update(d.nom for d in pointage.departements.all())
+
+    # Les épreuves DÉCLARÉES, désormais, en plus de celles déduites du pointage.
+    #
+    # Le groupement ci-dessus reconstitue une épreuve à partir de ses séances,
+    # faute de l'avoir jamais eue sous la main. `EpreuveIPGEI` la porte enfin —
+    # avec ses classes, sans reconstruction. Les deux sources cohabitent parce
+    # que les semestres déjà saisis n'ont que des séances, et qu'on ne va pas
+    # ressaisir leur calendrier pour rééditer une fiche.
+    #
+    # Ce qui rend une épreuve déclarée « tenue » est sa DATE PASSÉE. Le pointage
+    # ne vaut que pour une séance, et une épreuve n'en est pas une : exiger un
+    # « Fait » qui ne sera jamais écrit n'en rendrait aucune.
+    from .models import EpreuveIPGEI
+
+    aujourdhui = timezone.localdate()
+    declarees = (
+        EpreuveIPGEI.objects
+        .filter(matiere_id=matiere.pk,
+                session__semestre_id=semestre.pk,
+                date__lte=aujourdhui)
+        .prefetch_related('convocations__classe')
+    )
+    for epreuve in declarees:
+        cle = (epreuve.date, epreuve.type_epreuve)
+        entree = groupees.setdefault(cle, {
+            'date': epreuve.date, 'type': epreuve.type_epreuve, 'classes': set(),
+        })
+        entree['classes'].update(c.classe.nom for c in epreuve.convocations.all())
 
     epreuves = []
     for entree in groupees.values():

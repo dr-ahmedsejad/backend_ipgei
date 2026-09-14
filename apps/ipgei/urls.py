@@ -7,7 +7,7 @@ from .views import (
     AbsenceSeanceViewSet, ClassementS3ViewSet, ClasseViewSet, ConcoursCNIMViewSet,
     DeliberationViewSet,
     DocumentIPGEIViewSet,
-    EmploiArchiveViewSet, EvaluationViewSet,
+    EmploiArchiveViewSet, EpreuveIPGEIViewSet, EvaluationViewSet,
     GrilleTypeViewSet, HistoriqueClasseViewSet, InscriptionIPGEIViewSet,
     LigneDeliberationViewSet, MatiereViewSet, MembreJuryIPGEIViewSet,
     NiveauIPGEIViewSet, NoteViewSet,
@@ -34,6 +34,10 @@ router.register(r'matieres',        MatiereViewSet,              basename='ipgei
 router.register(r'sessions',        SessionEvaluationIPGEIViewSet, basename='ipgei-session')
 router.register(r'notes',           NoteViewSet,                 basename='ipgei-note')
 router.register(r'evaluations',     EvaluationViewSet,           basename='ipgei-evaluation')
+# Le calendrier des epreuves : la composition elle-meme — date, heure, duree,
+# classes convoquees. Ni l'emploi du temps (elle n'entre pas dans la grille de
+# 1h30) ni la note (qui est par etudiant) ne savaient la porter.
+router.register(r'epreuves',        EpreuveIPGEIViewSet,         basename='ipgei-epreuve')
 router.register(r'deliberations',   DeliberationViewSet,         basename='ipgei-deliberation')
 router.register(r'lignes-deliberation', LigneDeliberationViewSet, basename='ipgei-ligne-deliberation')
 router.register(r'membres-jury',    MembreJuryIPGEIViewSet,      basename='ipgei-membre-jury')

@@ -6,7 +6,7 @@ from django.db import models
 
 from .models import (
     AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, EmploiArchive,
-    Evaluation,
+    EpreuveClasse, EpreuveIPGEI, Evaluation,
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
     MembreJuryIPGEI, NiveauIPGEI,
     Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
@@ -861,6 +861,129 @@ class SaisieCollectiveSerializer(serializers.Serializer):
     matiere  = serializers.IntegerField()
     semestre = serializers.IntegerField()
     lignes   = SaisieNoteSerializer(many=True)
+
+
+# ── Épreuves ─────────────────────────────────────────────────────────────────
+class EpreuveIPGEISerializer(serializers.ModelSerializer):
+    """
+    Une épreuve et les classes qu'elle convoque.
+
+    `classes` s'écrit comme une simple liste d'identifiants, bien que la
+    liaison passe par une table explicite : le client n'a pas à connaître
+    `EpreuveClasse`, dont le seul champ propre — la salle — se remplit sur les
+    fiches de répartition et non ici.
+    """
+    matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
+    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True)
+    type_display     = serializers.CharField(source='get_type_epreuve_display', read_only=True)
+    semestre_code    = serializers.CharField(source='session.semestre.code', read_only=True)
+    semestre_annee   = serializers.CharField(
+        source='session.semestre.annee_universitaire', read_only=True)
+    session_type     = serializers.CharField(source='session.type_session', read_only=True)
+    heure_fin        = serializers.TimeField(read_only=True)
+    duree_libelle    = serializers.CharField(read_only=True)
+    classes_noms     = serializers.SerializerMethodField()
+
+    classes = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Classe.objects.filter(actif=True),
+    )
+
+    class Meta:
+        model  = EpreuveIPGEI
+        fields = [
+            'id', 'session', 'session_type', 'semestre_code', 'semestre_annee',
+            'matiere', 'matiere_code', 'matiere_intitule',
+            'type_epreuve', 'type_display', 'numero',
+            'date', 'heure_debut', 'heure_fin', 'duree_minutes', 'duree_libelle',
+            'classes', 'classes_noms', 'observations', 'cree_le', 'cree_par',
+        ]
+        read_only_fields = ['cree_le', 'cree_par']
+
+    def get_classes_noms(self, obj) -> list:
+        return [c.nom for c in obj.classes.all()]
+
+    def validate_classes(self, valeur):
+        if not valeur:
+            raise serializers.ValidationError(
+                'Une épreuve convoque au moins une classe.')
+        return valeur
+
+    def validate(self, attrs):
+        """
+        Deux épreuves ne peuvent pas se chevaucher pour une même classe.
+
+        La contrainte d'unicité en base protège du doublon « DS 1 de maths deux
+        fois » ; elle ne dit rien de deux épreuves DIFFÉRENTES posées à la même
+        heure sur la même classe — maths et physique le mardi à 8h. C'est
+        pourtant la faute la plus facile à commettre, et la seule que personne
+        ne rattrape après coup.
+        """
+        instance = self.instance
+        date    = attrs.get('date',          getattr(instance, 'date', None))
+        debut   = attrs.get('heure_debut',   getattr(instance, 'heure_debut', None))
+        duree   = attrs.get('duree_minutes', getattr(instance, 'duree_minutes', None))
+        classes = attrs.get('classes')
+        if classes is None and instance is not None:
+            classes = list(instance.classes.all())
+        if not (date and debut and duree and classes):
+            return attrs
+
+        d1 = debut.hour * 60 + debut.minute
+        f1 = d1 + duree
+        ids = {c.pk for c in classes}
+
+        concurrentes = (
+            EpreuveIPGEI.objects
+            .filter(date=date, convocations__classe_id__in=ids)
+            .exclude(pk=getattr(instance, 'pk', None))
+            .prefetch_related('convocations__classe')
+            .distinct()
+        )
+        for autre in concurrentes:
+            if d1 < autre.fin_minutes and autre.debut_minutes < f1:
+                noms = sorted(
+                    c.classe.nom for c in autre.convocations.all() if c.classe_id in ids
+                )
+                raise serializers.ValidationError({
+                    'heure_debut': (
+                        f'Chevauchement avec {autre.type_epreuve} '
+                        f'{autre.matiere.code} ({autre.heure_debut:%H:%M}–'
+                        f'{autre.heure_fin:%H:%M}) pour : {", ".join(noms)}.'
+                    )
+                })
+        return attrs
+
+    def create(self, validated_data):
+        classes = validated_data.pop('classes', [])
+        epreuve = EpreuveIPGEI.objects.create(**validated_data)
+        self._poser_classes(epreuve, classes)
+        return epreuve
+
+    def update(self, instance, validated_data):
+        classes = validated_data.pop('classes', None)
+        for champ, valeur in validated_data.items():
+            setattr(instance, champ, valeur)
+        instance.save()
+        if classes is not None:
+            self._poser_classes(instance, classes)
+        return instance
+
+    @staticmethod
+    def _poser_classes(epreuve, classes):
+        """
+        Aligne les convocations sur la liste reçue.
+
+        On ne recrée pas tout : les lignes conservées gardent leur salle, que la
+        répartition sur fiches aura pu renseigner. Un `delete()` suivi d'un
+        `bulk_create` l'aurait effacée à chaque modification d'horaire.
+        """
+        voulues = {c.pk for c in classes}
+        actuelles = {c.classe_id for c in epreuve.convocations.all()}
+        epreuve.convocations.exclude(classe_id__in=voulues).delete()
+        EpreuveClasse.objects.bulk_create([
+            EpreuveClasse(epreuve=epreuve, classe_id=pk)
+            for pk in voulues - actuelles
+        ])
 
 
 # ── Délibération ─────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ from rest_framework.mixins import (CreateModelMixin, DestroyModelMixin,
                                    ListModelMixin, RetrieveModelMixin,
                                    UpdateModelMixin)
 
+from apps.parametres.models import Creneau, Jour
 from apps.prof.models import Prof
 from apps.salle.models import Salle
 from core.audit_helpers import write_audit
@@ -43,6 +44,7 @@ from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
     AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
     HistoriqueClasse,
+    EpreuveIPGEI,
     InscriptionIPGEI, LigneDeliberation, Matiere, MembreJuryIPGEI, NiveauIPGEI,
     Note,
     ParametresIPGEI,
@@ -53,7 +55,8 @@ from .models import (
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
     DeliberationSerializer, DupliquerGrilleSerializer, EditionLotSerializer,
-    EmploiArchiveSerializer, EvaluationSerializer, GrilleTypeListSerializer, GrilleTypeSerializer,
+    EmploiArchiveSerializer, EpreuveIPGEISerializer, EvaluationSerializer,
+    GrilleTypeListSerializer, GrilleTypeSerializer,
     HistoriqueClasseSerializer, InscriptionCompleteSerializer,
     InscriptionIPGEISerializer,
     LigneDeliberationListSerializer, LigneDeliberationSerializer,
@@ -3092,6 +3095,89 @@ class SeanceTypeViewSet(PerimetreMatiereMixin, ModelViewSet):
     filter_backends    = [DjangoFilterBackend]
     filterset_fields   = ['grille', 'jour', 'creneau', 'matiere', 'prof']
     pagination_class   = NoPagination
+
+
+class EpreuveIPGEIViewSet(_ErreurMetierMixin, ModelViewSet):
+    """
+    Le calendrier des épreuves : DS, examens finals, rattrapages.
+
+    Une épreuve n'est pas une séance — elle a sa durée propre, qui ne tombe pas
+    sur la grille de 1h30, elle convoque plusieurs classes à la fois, et elle
+    n'a ni salle ni enseignant. Elle vit donc ici, et l'emploi du temps se
+    contente de l'afficher en surimpression (cf. `EpreuveIPGEI`).
+
+    Module `ipgei_sessions` et non `ipgei_edt` : décider quand l'établissement
+    compose relève de la scolarité, pas de la confection des emplois du temps.
+    """
+    serializer_class   = EpreuveIPGEISerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_sessions'
+    queryset           = (EpreuveIPGEI.objects
+                          .select_related('matiere', 'session__semestre')
+                          .prefetch_related('convocations__classe'))
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = {
+        'session':      ['exact'],
+        'session__semestre': ['exact'],
+        'session__semestre__annee_universitaire': ['exact'],
+        'session__type_session': ['exact'],
+        'matiere':      ['exact'],
+        'type_epreuve': ['exact', 'in'],
+        'date':         ['exact', 'gte', 'lte'],
+        'convocations__classe': ['exact'],
+    }
+    ordering           = ['date', 'heure_debut']
+    pagination_class   = NoPagination
+
+    def perform_create(self, serializer):
+        serializer.save(cree_par=_utilisateur(self.request))
+
+    @action(detail=False, methods=['get'], url_path='semaine')
+    def par_semaine(self, request):
+        """
+        Les épreuves d'une classe sur une semaine, prêtes pour la surimpression.
+
+        Chaque épreuve est rendue avec LES CRÉNEAUX QU'ELLE RECOUVRE et le jour
+        où elle tombe : c'est ce que l'écran attend pour fusionner les colonnes
+        et neutraliser les cases. Le calcul appartient au serveur — il dépend
+        des bornes lues dans le libellé du créneau, que le client n'a pas à
+        réinterpréter, et il doit donner le même résultat à la grille, au PDF
+        et à l'export.
+
+        Le recouvrement PARTIEL bloque la case entière : un DS de 8h00 à 10h00
+        ne mord que quinze minutes sur le créneau de 09h45-11h15, mais la
+        classe y compose encore — personne ne peut y placer un cours.
+        """
+        classe_id  = request.query_params.get('classe')
+        semaine_id = request.query_params.get('semaine')
+        if not (classe_id and semaine_id):
+            raise ValidationError('Paramètres requis : classe, semaine.')
+
+        semaine = SemaineIPGEI.objects.filter(pk=semaine_id).first()
+        if semaine is None:
+            raise ValidationError({'semaine': 'Semaine introuvable.'})
+
+        epreuves = (self.get_queryset()
+                    .filter(convocations__classe_id=classe_id,
+                            date__gte=semaine.date_debut, date__lte=semaine.date_fin)
+                    .distinct())
+
+        creneaux = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
+        jours    = {j.jour.lower(): j.id for j in Jour.objects.all()}
+        # `date.weekday()` rend 0 pour lundi ; le référentiel `Jour` est libellé
+        # en toutes lettres et n'a pas d'ordre garanti — on passe donc par le
+        # nom, seule correspondance stable entre les deux.
+        NOMS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+
+        lignes = []
+        for epreuve in epreuves:
+            couverts = [c.id for c in creneaux if epreuve.recouvre(c)]
+            donnees = self.get_serializer(epreuve).data
+            donnees['jour']             = jours.get(NOMS[epreuve.date.weekday()])
+            donnees['jour_libelle']     = NOMS[epreuve.date.weekday()].capitalize()
+            donnees['creneaux_couverts'] = couverts
+            lignes.append(donnees)
+        return Response(lignes)
 
 
 class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):

@@ -9,6 +9,8 @@ Institution` et `authentication.CustomUser` par clé étrangère.
 
 Toutes les tables sont préfixées `ipgei_` pour rendre l'origine évidente en base.
 """
+import re
+from datetime import time
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -1257,6 +1259,198 @@ class AnonymatIPGEI(models.Model):
 
     def __str__(self):
         return f'Anonymat {self.numero} — {self.session}'
+
+
+class EpreuveIPGEI(models.Model):
+    """
+    Une épreuve : le DS de maths du 18 novembre, 8h00, 3h, pour MP A à MP E.
+
+    Le chaînon qui manquait. `SessionEvaluationIPGEI` n'est qu'une fenêtre de
+    saisie, et `Evaluation` est la note d'UN étudiant : la composition
+    elle-même — sa date, son heure, sa durée, les classes qui y sont
+    convoquées — n'était représentée nulle part. Faute de mieux on la posait
+    dans la grille d'emploi du temps, où elle n'entre pas :
+
+    - **Sa durée ne tombe pas sur la grille.** Les créneaux font 1h30 ; une
+      épreuve fait 2h, 3h ou 4h. Aucune de ces durées n'est un multiple de
+      1h30, donc « la séance occupe N cases » ne peut pas marcher. D'où
+      `heure_debut` + `duree_minutes`, qui disent l'heure vraie ; les créneaux
+      recouverts se CALCULENT, ils ne se saisissent pas.
+    - **Elle concerne plusieurs classes à la fois.** `SeanceReelle.classe` est
+      une clé simple : il aurait fallu cinq cases dans cinq grilles, cinq fois
+      modifiables séparément — avec la certitude qu'une soit oubliée le jour
+      où l'heure change.
+    - **Elle n'a ni salle ni enseignant.** Chaque classe compose dans sa propre
+      salle, répartie plus tard sur les fiches, quand l'effectif et l'anonymat
+      sont connus. Et le surveillant relève de la vacation : `avancement`
+      compte déjà DS, EF et ER en `Surveillance_total`, jamais en heures de
+      cours, et `avancement/par_groupe.py` les exclut du programme.
+
+    L'emploi du temps ne la contient donc pas : il l'affiche en surimpression
+    et neutralise les créneaux que son intervalle recouvre.
+    """
+    TYPE_DS = 'DS'
+    TYPE_EF = 'EF'
+    TYPE_ER = 'ER'
+    TYPE_CHOICES = [
+        (TYPE_DS, 'Devoir surveillé'),
+        (TYPE_EF, 'Examen final'),
+        (TYPE_ER, 'Examen de rattrapage'),
+    ]
+
+    # La session porte le semestre ET la campagne : un ER appartient à la
+    # session de rattrapage, un DS à la normale. Rattacher l'épreuve au
+    # semestre aurait laissé cette distinction implicite.
+    session = models.ForeignKey(
+        SessionEvaluationIPGEI, on_delete=models.CASCADE, related_name='epreuves',
+    )
+    matiere = models.ForeignKey(
+        Matiere, on_delete=models.PROTECT, related_name='epreuves',
+    )
+    type_epreuve = models.CharField(max_length=2, choices=TYPE_CHOICES)
+    numero = models.PositiveSmallIntegerField(
+        default=1, help_text='DS 1, DS 2… ; 1 pour un examen unique.',
+    )
+
+    date        = models.DateField()
+    heure_debut = models.TimeField()
+    duree_minutes = models.PositiveSmallIntegerField(
+        default=120,
+        help_text='Durée réelle en minutes : 120 = 2h, 180 = 3h, 240 = 4h.',
+    )
+
+    classes = models.ManyToManyField(
+        Classe, through='EpreuveClasse', related_name='epreuves',
+    )
+    observations = models.CharField(max_length=300, blank=True, default='')
+
+    cree_le  = models.DateTimeField(auto_now_add=True)
+    cree_par = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='epreuves_ipgei_creees',
+    )
+
+    class Meta:
+        db_table = 'ipgei_epreuve'
+        ordering = ['date', 'heure_debut', 'matiere']
+        verbose_name        = 'épreuve IPGEI'
+        verbose_name_plural = 'épreuves IPGEI'
+        constraints = [
+            # Deux fois « DS 1 de maths » dans la même campagne serait une
+            # saisie en double, pas deux épreuves.
+            models.UniqueConstraint(
+                fields=['session', 'matiere', 'type_epreuve', 'numero'],
+                name='uniq_ipgei_epreuve',
+            ),
+            models.CheckConstraint(
+                check=models.Q(duree_minutes__gte=15) & models.Q(duree_minutes__lte=480),
+                name='ck_ipgei_epreuve_duree',
+            ),
+        ]
+        indexes = [models.Index(fields=['date'])]
+
+    def __str__(self):
+        return (f'{self.type_epreuve} {self.numero} {self.matiere.code} — '
+                f'{self.date} {self.heure_debut:%H:%M}')
+
+    # ── Intervalle ───────────────────────────────────────────────────────────
+    @property
+    def debut_minutes(self) -> int:
+        """Début en minutes depuis minuit — la forme dans laquelle on compare."""
+        return self.heure_debut.hour * 60 + self.heure_debut.minute
+
+    @property
+    def fin_minutes(self) -> int:
+        return self.debut_minutes + self.duree_minutes
+
+    @property
+    def heure_fin(self) -> time:
+        """
+        Fin de l'épreuve. Bornée à 23h59 : une épreuve qui déborderait sur le
+        lendemain n'existe pas, et laisser l'heure reboucler sur 00h30
+        afficherait une fin AVANT le début.
+        """
+        fin = min(self.fin_minutes, 23 * 60 + 59)
+        return time(fin // 60, fin % 60)
+
+    @property
+    def duree_libelle(self) -> str:
+        """« 3h » ou « 2h30 » — ce qui se lit sur le bandeau."""
+        h, m = divmod(self.duree_minutes, 60)
+        return f'{h}h{m:02d}' if m else f'{h}h'
+
+    def recouvre(self, creneau) -> bool:
+        """
+        Vrai si l'épreuve empiète, ne serait-ce que d'une minute, sur ce créneau.
+
+        Le créneau est un libellé — « 09h45-11h15 » —, pas deux champs d'heure :
+        c'est de là qu'on lit ses bornes. Un libellé qui ne se laisse pas lire
+        ne bloque rien, plutôt que de bloquer tout par excès de prudence.
+
+        Le recouvrement PARTIEL suffit. Un DS de 8h00 à 10h00 ne mord que 15
+        minutes sur le créneau de 09h45-11h15, mais personne ne peut y
+        commencer un cours : la classe compose encore.
+        """
+        bornes = _bornes_creneau(getattr(creneau, 'creneau', '') or '')
+        if bornes is None:
+            return False
+        debut_c, fin_c = bornes
+        return self.debut_minutes < fin_c and debut_c < self.fin_minutes
+
+
+def _bornes_creneau(libelle: str):
+    """
+    Les bornes d'un créneau, en minutes depuis minuit, lues dans son libellé.
+
+    Accepte « 08h00-09h30 », « 08:00 - 09:30 », « 8h-9h30 ». Rend `None` si le
+    libellé ne se laisse pas lire — au vu de la table `creneau`, qui est un
+    référentiel libre partagé avec le socle, c'est un cas à prévoir.
+    """
+    trouves = re.findall(r'(\d{1,2})\s*[h:]\s*(\d{2})?', libelle or '')
+    if len(trouves) < 2:
+        return None
+    try:
+        debut = int(trouves[0][0]) * 60 + int(trouves[0][1] or 0)
+        fin   = int(trouves[1][0]) * 60 + int(trouves[1][1] or 0)
+    except (TypeError, ValueError):
+        return None
+    return (debut, fin) if fin > debut else None
+
+
+class EpreuveClasse(models.Model):
+    """
+    Une classe convoquée à une épreuve.
+
+    Table de liaison explicite, et non un `ManyToManyField` nu, pour une raison
+    précise : chaque classe compose dans SA salle, à la même heure que les
+    autres. Cette salle se décide sur les fiches de répartition, pas ici — le
+    champ reste donc vide et hors des écrans. Mais il a sa place dès
+    maintenant : convertir plus tard une liaison nue en table explicite est une
+    migration pénible, alors que la laisser inutilisée ne coûte rien.
+    """
+    epreuve = models.ForeignKey(
+        EpreuveIPGEI, on_delete=models.CASCADE, related_name='convocations',
+    )
+    classe = models.ForeignKey(
+        Classe, on_delete=models.PROTECT, related_name='convocations_epreuve',
+    )
+    salle = models.ForeignKey(
+        'salle.Salle', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='epreuves_ipgei',
+        help_text='Renseignée lors de la répartition sur fiches, le cas échéant.',
+    )
+
+    class Meta:
+        db_table = 'ipgei_epreuve_classe'
+        ordering = ['epreuve', 'classe']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['epreuve', 'classe'], name='uniq_ipgei_epreuve_classe',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.classe.nom} — {self.epreuve}'
 
 
 class Evaluation(models.Model):

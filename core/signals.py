@@ -58,6 +58,10 @@ TRACKED_MODELS = [
     # fait bouger, ni de combien — inexploitable en cas de litige. Une note
     # effacee ne laissait, elle, aucune trace du tout.
     'ipgei.Evaluation',
+    # L'epreuve elle-meme : sa date, son heure, sa duree. Deplacer un examen
+    # apres coup engage l'etablissement vis-a-vis des etudiants convoques —
+    # au moins autant que la note qui en sortira.
+    'ipgei.EpreuveIPGEI',
     'ipgei.Deliberation',
     'ipgei.LigneDeliberation',
     # Suivi pedagogique
