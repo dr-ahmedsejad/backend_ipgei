@@ -340,6 +340,37 @@ class EpreuvePointableTest(TestCase):
                      for f in jour.get('fiches', [])]
         self.assertIn('EF', types_pdf, "l'épreuve doit figurer sur les PDF")
 
+    def test_une_SEANCE_sans_salle_reste_ecartee_des_fiches(self):
+        """
+        L'exception est nommément limitée aux épreuves. Une séance de cours
+        sans salle est une ligne d'emploi du temps incomplète : elle n'a rien
+        à faire sur une feuille de présence, et la règle d'origine tient.
+        """
+        from rest_framework.test import APIRequestFactory, force_authenticate
+
+        from django.contrib.auth import get_user_model
+        from apps.suivi.views import SuiviePointageViewSet
+
+        # Un CM sans salle, et une épreuve : seule la seconde doit passer.
+        SeanceReelle.objects.create(
+            classe=self.mp_a, semaine=self.semaine, jour=Jour.objects.first(),
+            creneau=Creneau.objects.first(), matiere=self.matiere,
+            type_seance=Seance.objects.get(type_seance='CM'))
+        self._epreuve(minutes=240)
+        self._generer_le_suivi()
+
+        admin = get_user_model().objects.get(username='gen')
+        vue = SuiviePointageViewSet.as_view({'get': 'fiches'})
+        demande = APIRequestFactory().get('/x/', {
+            'annee_universitaire': '2025-2026', 'numero_semaine': 7,
+            'type_semestre': 'I', 'id_semestre': 'S3'})
+        force_authenticate(demande, user=admin)
+        types = [f['type_seance'] for jour in vue(demande).data
+                 for f in jour.get('fiches', [])]
+
+        self.assertIn('EF', types, "l'épreuve passe sans salle")
+        self.assertNotIn('CM', types, 'une séance sans salle reste écartée')
+
     def test_les_lignes_vides_restent_ecartees_des_fiches(self):
         """
         Ce que la condition visait vraiment : la génération pose une ligne sur

@@ -1154,6 +1154,13 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         return response
 
 
+#: Les types de seance qui sont des EPREUVES. Elles n'ont ni salle ni
+#: surveillant : la repartition en salles se decide sur les fiches, et le
+#: surveillant releve de la vacation. Les feuilles de presence les admettent
+#: donc sans salle, ce qu'elles refusent a une seance de cours.
+TYPES_EPREUVE = ('DS', 'EF', 'ER')
+
+
 class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, viewsets.ModelViewSet):
     # SuiviePointage utilise M2M `departements`
     departement_filter_field  = 'departements'
@@ -1658,21 +1665,25 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         filiere_utile = filiere_distingue()
         result = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
-            # L'EM suffit. Exiger AUSSI une salle écartait les épreuves, qui
-            # n'en ont pas : le surveillant relève de la vacation, et la
-            # répartition en salles se décide sur les fiches, plus tard. Le
-            # devoir disparaissait donc de la feuille où on le pointe.
-            #
-            # Ce que la condition visait reste écarté : les lignes vides que la
-            # génération pose sur chaque créneau libre n'ont pas d'EM.
-            #
-            # Une séance qui aurait un EM mais pas de salle s'affiche désormais
-            # avec « — », comme elle le fait déjà dans « Remplissage ». Une
-            # séance qui existe a sa place sur la feuille.
-            if not sp.em_id:
-                continue
             ts_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             if not ts_label:
+                continue
+            # La salle reste EXIGÉE — sauf pour une épreuve, qui n'en a pas.
+            #
+            # Le surveillant relève de la vacation, et la répartition en salles
+            # se décide sur les fiches de répartition, plus tard. Exiger une
+            # salle faisait disparaître le devoir de la feuille où on le pointe,
+            # alors que c'est celle qui circule le jour de l'examen.
+            #
+            # L'exception est nommément limitée aux trois types d'épreuve : une
+            # SÉANCE sans salle reste écartée, comme avant. Une ligne de cours
+            # incomplète n'a rien à faire sur une feuille de présence.
+            #
+            # Et les lignes vides que la génération pose sur chaque créneau
+            # libre n'ont pas d'EM : elles ne passent toujours pas.
+            if not sp.em_id:
+                continue
+            if not sp.salle_id and ts_label not in TYPES_EPREUVE:
                 continue
             jour_label = sp.jour_fk.jour if sp.jour_fk_id and sp.jour_fk else ''
             result.append({
@@ -1722,21 +1733,25 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         filiere_utile = filiere_distingue()
         rows = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
-            # L'EM suffit. Exiger AUSSI une salle écartait les épreuves, qui
-            # n'en ont pas : le surveillant relève de la vacation, et la
-            # répartition en salles se décide sur les fiches, plus tard. Le
-            # devoir disparaissait donc de la feuille où on le pointe.
-            #
-            # Ce que la condition visait reste écarté : les lignes vides que la
-            # génération pose sur chaque créneau libre n'ont pas d'EM.
-            #
-            # Une séance qui aurait un EM mais pas de salle s'affiche désormais
-            # avec « — », comme elle le fait déjà dans « Remplissage ». Une
-            # séance qui existe a sa place sur la feuille.
-            if not sp.em_id:
-                continue
             ts_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             if not ts_label:
+                continue
+            # La salle reste EXIGÉE — sauf pour une épreuve, qui n'en a pas.
+            #
+            # Le surveillant relève de la vacation, et la répartition en salles
+            # se décide sur les fiches de répartition, plus tard. Exiger une
+            # salle faisait disparaître le devoir de la feuille où on le pointe,
+            # alors que c'est celle qui circule le jour de l'examen.
+            #
+            # L'exception est nommément limitée aux trois types d'épreuve : une
+            # SÉANCE sans salle reste écartée, comme avant. Une ligne de cours
+            # incomplète n'a rien à faire sur une feuille de présence.
+            #
+            # Et les lignes vides que la génération pose sur chaque créneau
+            # libre n'ont pas d'EM : elles ne passent toujours pas.
+            if not sp.em_id:
+                continue
+            if not sp.salle_id and ts_label not in TYPES_EPREUVE:
                 continue
             jour_label = sp.jour_fk.jour if sp.jour_fk_id and sp.jour_fk else ''
             rows.append({
