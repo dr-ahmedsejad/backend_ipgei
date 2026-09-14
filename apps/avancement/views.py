@@ -229,13 +229,21 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
             if label in dates_epreuve and s.date_suivie:
                 dates_epreuve[label].add(s.date_suivie)
 
-            if label == 'EF':
+            # DS, EF et ER ne DÉDUISENT RIEN de la charge de la matière.
+            #
+            # Le devoir surveillé comptait dans les heures de TD — il se tient
+            # sur un créneau de TD, et l'assimilation venait de là. Mais un
+            # devoir n'avance pas le programme : la matière paraissait plus
+            # loin qu'elle ne l'était, et le volume de TD restant à faire
+            # diminuait d'autant. Deux devoirs suffisaient à annoncer un
+            # semestre bouclé.
+            #
+            # Les trois types sont désormais comptés à part, dans les colonnes
+            # « Évaluations » qui en donnent le NOMBRE. Les laisser aussi dans
+            # les heures serait les compter deux fois.
+            if label in dates_epreuve:
                 continue
-            if label == 'ER':
-                continue
-            if label == 'DS':
-                famille = 'TD'
-            elif label in FAMILY_FAM:
+            if label in FAMILY_FAM:
                 famille = FAMILY_FAM[label]
             else:
                 continue

@@ -56,6 +56,7 @@ class ComptageDesEpreuvesTest(TestCase):
 
         cls.ds = Seance.objects.create(type_seance='DS')
         cls.ef = Seance.objects.create(type_seance='EF')
+        cls.td = Seance.objects.create(type_seance='TD')
         Seance.objects.create(type_seance='ER')
 
     def _pointer(self, type_seance, jour, departements=(), commentaire='Fait'):
@@ -125,14 +126,49 @@ class ComptageDesEpreuvesTest(TestCase):
         self.assertIs(ligne['exam_fait'], False)
         self.assertIs(ligne['rat_fait'], False)
 
-    def test_le_ds_continue_d_alimenter_les_heures_de_TD(self):
+    def test_un_ds_ne_deduit_RIEN_de_la_charge_de_la_matiere(self):
         """
-        Un DS est surveillé sur un créneau de TD et compte dans ses heures.
-        Le passage au comptage ne devait pas déplacer cette règle.
+        Le devoir surveillé comptait dans les heures de TD — il s'en tient un
+        sur un créneau de TD, et l'assimilation venait de là. Mais un devoir
+        n'avance pas le programme : la matière paraissait plus loin qu'elle ne
+        l'était, et deux devoirs suffisaient à annoncer un semestre bouclé.
         """
         self._pointer(self.ds, date(2025, 11, 4))
-        self.assertEqual(self._ligne_em()['real_TD'], 2.0)
+        ligne = self._ligne_em()
+        self.assertEqual((ligne['real_CM'], ligne['real_TD'],
+                          ligne['real_TP'], ligne['real_PR']), (0, 0, 0, 0))
+        # Il reste compté, mais À PART : c'est tout l'objet des colonnes
+        # « Évaluations ».
+        self.assertEqual(ligne['nb_ds'], 1)
+
+    def test_la_vue_PAR_PROFESSEUR_continue_de_compter_le_DS_en_TD(self):
+        """
+        Volontairement inchangée : elle dit ce que CE professeur a assuré, non
+        où en est le programme. Surveiller un devoir est du travail fait, et
+        c'est sur elle que s'appuie la charge.
+        """
+        self._pointer(self.ds, date(2025, 11, 4))
         self.assertEqual(self._ligne_prof()['real_TD'], 2.0)
+
+    def test_les_deux_ecrans_de_programme_tranchent_pareil(self):
+        """
+        « Avancement par matière » retient le MAXIMUM des unités que calcule
+        « Avancement par groupe ». Un désaccord sur le DS ferait afficher deux
+        volumes de TD différents pour la même matière — et personne ne saurait
+        lequel croire.
+        """
+        from apps.avancement.par_groupe import avancement_par_groupe
+
+        self._pointer(self.ds, date(2025, 11, 4), [self.g1])
+        self._pointer(self.td, date(2025, 11, 6), [self.g1])
+
+        par_matiere = self._ligne_em()['real_TD']
+        lignes = avancement_par_groupe('2025-2026', 'I', ems=[self.em.pk])
+        par_groupe = max((g['real_TD'] for ligne in lignes
+                          for g in ligne['groupes']), default=0)
+
+        self.assertEqual(par_matiere, 2.0, 'seul le TD compte')
+        self.assertEqual(par_groupe, par_matiere)
 
     def test_un_examen_final_ne_compte_dans_aucune_famille_d_heures(self):
         """EF et ER sont des épreuves, pas du programme."""

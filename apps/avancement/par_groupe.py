@@ -55,9 +55,17 @@ def _heures_par_unite(pointages):
     heures = defaultdict(lambda: defaultdict(dict))
     for seance in pointages:
         label = _ts_label(seance)
-        famille = 'TD' if label == 'DS' else FAMILLES.get(label)
+        # Le DS rejoint EF et ER : une épreuve n'avance pas le programme, et ne
+        # doit rien déduire de la charge de la matière. Il comptait dans les
+        # heures de TD — il s'en tient un sur un créneau de TD —, si bien que
+        # deux devoirs suffisaient à annoncer un semestre bouclé.
+        #
+        # Cette vue et « Avancement par matière » doivent trancher pareil : la
+        # seconde retient le MAXIMUM des unités calculées ici. Un désaccord
+        # ferait afficher deux volumes de TD différents pour la même matière.
+        famille = FAMILLES.get(label)
         if famille is None:
-            continue                    # EF, ER : des épreuves, pas du programme
+            continue                    # DS, EF, ER : des épreuves, pas du programme
         # La clé ne porte PAS l'unité : c'est ce qui permet ensuite de réunir un
         # sous-groupe et sa classe sans compter deux fois une séance inscrite
         # aux deux. Dans une même unité, elle joue le rôle de l'ancienne
