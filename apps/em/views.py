@@ -54,6 +54,19 @@ class EMViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
         l'acces au catalogue complet.
         """
         qs = super().get_queryset()
+
+        # ?miroir=1 : ne rendre que les EM qui reflètent une matière ACTIVE.
+        #
+        # Le socle porte des EM hérités d'avant le fork — CHIM et EPS aux
+        # quatre semestres — qui ne correspondent à aucune matière de la
+        # maquette de prépa. Les proposer dans un sélecteur de vacation invite
+        # à saisir des heures sur un enseignement qui n'existe pas.
+        #
+        # En OPTION, jamais par défaut : ce ViewSet sert aussi la couche LMD,
+        # où les EM ne sont pas des miroirs et où ce filtre viderait tout.
+        if self.request.query_params.get('miroir') in ('1', 'true', 'True'):
+            qs = qs.filter(matiere_ipgei__isnull=False, matiere_ipgei__actif=True)
+
         if self.request.query_params.get('edt_scope') in ('1', 'true', 'True'):
             u = self.request.user
             if not (u.is_authenticated and u.is_superuser):

@@ -75,9 +75,15 @@ def _classe_ancre(matiere: Matiere):
     resynchronisation, et l'avancement de l'année en cours se vidait.
     """
     niveau_code = SEMESTRES[matiere.code_semestre][0]
+    # La CLASSE D'ATTENTE est écartée. Elle porte bien le niveau, mais c'est un
+    # conteneur : elle reste hors des emplois du temps, du suivi et des listes
+    # d'appel, et son `groupe` vide la faisait élire la PREMIÈRE par le tri
+    # ci-dessous. Les EM de S3 s'ancraient donc sur « MP » plutôt que sur
+    # « MP A », et tout écran joignant l'EM à son département en excluant les
+    # conteneurs les aurait perdus.
     candidates = Classe.objects.filter(
         institution=matiere.institution, niveau__niveau=niveau_code, actif=True,
-    )
+    ).exclude(groupe='')
 
     if matiere.em_miroir_id and matiere.em_miroir.departement_id:
         actuel = candidates.filter(pk=matiere.em_miroir.departement_id).first()
