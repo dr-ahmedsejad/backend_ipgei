@@ -22,7 +22,7 @@ from apps.ipgei.models import (
 )
 from apps.ipgei.serializers import EpreuveIPGEISerializer
 from apps.ipgei.views import EpreuveIPGEIViewSet
-from apps.parametres.models import Creneau, Institution, Jour, Niveau
+from apps.parametres.models import Creneau, Institution, Jour, Niveau, Seance
 
 # Les cinq créneaux réellement actifs à l'IPGEI, relevés dans la base.
 CRENEAUX = [
@@ -205,6 +205,145 @@ class ChevauchementTest(TestCase):
         s = self._valider(classes=[])
         self.assertFalse(s.is_valid())
         self.assertIn('classes', s.errors)
+
+
+class CreneauOccupeTest(TestCase):
+    """
+    On ne convoque pas une classe à un examen pendant qu'elle a cours.
+
+    La grille ne sait pas refuser : une épreuve n'y entre pas — sa durée ne
+    tombe pas sur les créneaux de 1h30 —, et rien ne l'empêcherait donc de
+    recouvrir une séance existante. Le contrôle appartient au seul point par
+    lequel une épreuve se déclare.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.inst = Institution.objects.create(acronyme='TST', nom='Test',
+                                              est_principale=True)
+        socle = Niveau.objects.create(niveau='MP')
+        ref   = NiveauIPGEI.objects.create(institution=cls.inst, code='MP',
+                                           libelle='MP', rang=2)
+        cls.semestre = SemestreIPGEI.objects.create(
+            institution=cls.inst, code='S3', annee_universitaire='2025-2026',
+            date_debut=date(2025, 10, 6))
+        cls.session = SessionEvaluationIPGEI.objects.create(
+            semestre=cls.semestre, type_session=SessionEvaluationIPGEI.TYPE_NORMALE)
+        cls.maths = Matiere.objects.create(
+            institution=cls.inst, code='MATH', intitule='Maths', code_semestre='S3',
+            niveau_ref=ref, coefficient=Decimal('4'))
+        cls.mp_a = Classe.objects.create(institution=cls.inst, niveau=socle,
+                                         groupe='A', annee_universitaire='2025-2026')
+        cls.mp_b = Classe.objects.create(institution=cls.inst, niveau=socle,
+                                         groupe='B', annee_universitaire='2025-2026')
+
+        for lib in ('Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'):
+            Jour.objects.create(jour=lib)
+        cls.creneaux = {lib: Creneau.objects.create(creneau=lib, ordre=o, duree=1.5)
+                        for lib, o in CRENEAUX}
+        cls.cm = Seance.objects.create(type_seance='CM')
+
+        # Mardi 18 novembre 2025.
+        cls.semaine = cls.semestre.semaines.create(
+            numero=7, date_debut=date(2025, 11, 17), date_fin=date(2025, 11, 23))
+        cls.mardi = Jour.objects.get(jour='Mardi')
+
+    def _cours(self, classe, creneau, annulee=False):
+        from apps.ipgei.models import SeanceReelle
+        return SeanceReelle.objects.create(
+            classe=classe, semaine=self.semaine, jour=self.mardi,
+            creneau=self.creneaux[creneau], matiere=self.maths,
+            type_seance=self.cm, annulee=annulee)
+
+    def _valider(self, **extra):
+        donnees = {
+            'session': self.session.pk, 'matiere': self.maths.pk,
+            'type_epreuve': 'EF', 'numero': 1, 'date': '2025-11-18',
+            'heure_debut': '08:00', 'duree_minutes': 180,   # 08h00 → 11h00
+            'classes': [self.mp_a.pk],
+        }
+        donnees.update(extra)
+        return EpreuveIPGEISerializer(data=donnees)
+
+    # ── Le refus ─────────────────────────────────────────────────────────────
+    def test_un_cours_sur_un_creneau_recouvert_interdit_l_epreuve(self):
+        self._cours(self.mp_a, '08h00-09h30')
+        s = self._valider()
+        self.assertFalse(s.is_valid())
+        self.assertIn('heure_debut', s.errors)
+        self.assertIn('Créneau déjà occupé', str(s.errors['heure_debut']))
+        self.assertIn('08h00-09h30', str(s.errors['heure_debut']))
+
+    def test_le_message_nomme_la_classe_et_la_matiere(self):
+        """Refuser sans dire QUOI déplacer laisse chercher."""
+        self._cours(self.mp_a, '09h45-11h15')
+        s = self._valider()
+        self.assertFalse(s.is_valid())
+        message = str(s.errors['heure_debut'])
+        self.assertIn(self.mp_a.nom, message)
+        self.assertIn('MATH', message)
+
+    def test_un_recouvrement_PARTIEL_suffit_a_refuser(self):
+        """
+        Un DS de 8h00 à 10h00 ne mord que quinze minutes sur le créneau de
+        09h45-11h15 — mais la classe y compose, le cours ne peut pas s'y tenir.
+        """
+        self._cours(self.mp_a, '09h45-11h15')
+        s = self._valider(duree_minutes=120)             # 08h00 → 10h00
+        self.assertFalse(s.is_valid())
+
+    def test_le_cours_d_une_AUTRE_classe_convoquee_bloque_aussi(self):
+        self._cours(self.mp_b, '08h00-09h30')
+        s = self._valider(classes=[self.mp_a.pk, self.mp_b.pk])
+        self.assertFalse(s.is_valid())
+        self.assertIn(self.mp_b.nom, str(s.errors['heure_debut']))
+
+    # ── Ce qui reste permis ──────────────────────────────────────────────────
+    def test_un_creneau_libre_laisse_passer(self):
+        self._cours(self.mp_a, '15h10-16h40')            # l'après-midi
+        self.assertTrue(self._valider().is_valid())
+
+    def test_le_cours_d_une_classe_NON_convoquee_ne_gene_pas(self):
+        self._cours(self.mp_b, '08h00-09h30')
+        self.assertTrue(self._valider(classes=[self.mp_a.pk]).is_valid())
+
+    def test_une_seance_ANNULEE_ne_bloque_rien(self):
+        """Elle n'a pas lieu : le créneau est libre."""
+        self._cours(self.mp_a, '08h00-09h30', annulee=True)
+        self.assertTrue(self._valider().is_valid())
+
+    def test_un_cours_un_AUTRE_jour_ne_gene_pas(self):
+        self._cours(self.mp_a, '08h00-09h30')
+        self.assertTrue(self._valider(date='2025-11-19').is_valid())
+
+    def test_une_epreuve_hors_calendrier_passe(self):
+        """Aucune semaine ne couvre la date : aucune séance ne peut exister."""
+        self._cours(self.mp_a, '08h00-09h30')
+        self.assertTrue(self._valider(date='2026-07-14').is_valid())
+
+    def test_une_epreuve_logee_dans_une_pause_ne_rencontre_rien(self):
+        self._cours(self.mp_a, '11h30-13h00')
+        self.assertTrue(
+            self._valider(heure_debut='13:15', duree_minutes=60).is_valid())
+
+    def test_la_semaine_cherchee_est_celle_du_SEMESTRE_de_l_epreuve(self):
+        """
+        Le piège qui a fait passer le contrôle à côté sur la base réelle. S1 et
+        S3 sont tous deux impairs : leurs semaines partagent numéros ET dates.
+        Chercher par la date seule tombait une fois sur deux sur le mauvais
+        semestre, n'y trouvait aucune séance, et laissait tout passer.
+        """
+        # Une semaine de S1 aux MÊMES dates que celle de S3 déjà créée.
+        autre = SemestreIPGEI.objects.create(
+            institution=self.inst, code='S1', annee_universitaire='2025-2026',
+            date_debut=date(2025, 10, 6))
+        autre.semaines.create(numero=7, date_debut=date(2025, 11, 17),
+                              date_fin=date(2025, 11, 23))
+
+        self._cours(self.mp_a, '08h00-09h30')       # le cours est en S3
+        s = self._valider()                          # l'épreuve aussi
+        self.assertFalse(s.is_valid(),
+                         "le conflit doit être vu malgré la semaine homonyme")
 
 
 class ConvocationsTest(TestCase):

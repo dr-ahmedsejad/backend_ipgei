@@ -951,7 +951,87 @@ class EpreuveIPGEISerializer(serializers.ModelSerializer):
                         f'{autre.heure_fin:%H:%M}) pour : {", ".join(noms)}.'
                     )
                 })
+
+        session = attrs.get('session', getattr(instance, 'session', None))
+        self._verifier_creneaux_libres(session, date, d1, f1, classes)
         return attrs
+
+    @staticmethod
+    def _verifier_creneaux_libres(session, date, debut, fin, classes):
+        """
+        Les créneaux que l'épreuve recouvre doivent être LIBRES de cours.
+
+        On ne peut pas convoquer une classe à un examen pendant qu'elle a cours.
+        La grille, elle, ne saurait pas refuser : une épreuve n'y entre pas — sa
+        durée ne tombe pas sur les créneaux de 1h30 —, et rien ne l'empêcherait
+        donc de recouvrir une séance existante. Le contrôle appartient à ce
+        point d'entrée, le seul par lequel une épreuve se déclare.
+
+        Le recouvrement PARTIEL suffit à refuser : un DS de 8h00 à 10h00 ne mord
+        que quinze minutes sur le créneau de 09h45-11h15, mais la classe y
+        compose — le cours ne peut pas s'y tenir.
+
+        Les séances ANNULÉES ne bloquent rien : elles n'ont pas lieu.
+        """
+        from apps.parametres.models import Creneau, Jour
+
+        from .models import JOURS_SEMAINE, SeanceReelle, SemaineIPGEI
+
+        # La semaine DU SEMESTRE de l'épreuve, et non la première qui couvre la
+        # date : S1 et S3 sont tous deux impairs, partagent leurs numéros ET
+        # leurs dates. Chercher par la date seule tombait une fois sur deux sur
+        # le mauvais semestre — et n'y trouvait aucune séance, donc aucun
+        # conflit. Le contrôle passait alors sans rien vérifier.
+        if session is None:
+            return
+        semaine = (SemaineIPGEI.objects
+                   .filter(semestre=session.semestre,
+                           date_debut__lte=date, date_fin__gte=date)
+                   .first())
+        if semaine is None:
+            # Hors calendrier de ce semestre : aucune séance ce jour-là.
+            return
+
+        jour = Jour.objects.filter(
+            jour__iexact=JOURS_SEMAINE[date.weekday()]).first()
+        if jour is None:
+            return
+
+        # Les créneaux que l'intervalle recouvre, lus dans leur libellé.
+        from .models import _bornes_creneau
+        couverts = []
+        for creneau in Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'):
+            bornes = _bornes_creneau(creneau.creneau or '')
+            if bornes and debut < bornes[1] and bornes[0] < fin:
+                couverts.append(creneau)
+        if not couverts:
+            return
+
+        occupees = (
+            SeanceReelle.objects
+            .filter(semaine=semaine, jour=jour, annulee=False,
+                    creneau__in=couverts, classe__in=classes)
+            .select_related('classe', 'creneau', 'matiere', 'type_seance')
+            .order_by('classe__nom', 'creneau__ordre')
+        )
+        if not occupees:
+            return
+
+        conflits = []
+        for s in occupees:
+            quoi = (s.matiere.code if s.matiere_id
+                    else (s.type_seance.type_seance if s.type_seance_id else 'séance'))
+            conflits.append(f'{s.classe.nom} — {s.creneau.creneau} ({quoi})')
+
+        raise serializers.ValidationError({
+            'heure_debut': (
+                'Créneau déjà occupé par un cours : '
+                + ' ; '.join(conflits[:6])
+                + ('…' if len(conflits) > 6 else '')
+                + ". Déplacez l'épreuve ou libérez ces créneaux dans "
+                  '« Emploi du temps ».'
+            )
+        })
 
     def create(self, validated_data):
         classes = validated_data.pop('classes', [])
