@@ -180,7 +180,16 @@ class Institution(models.Model):
     ]
 
     # --- Existant (CONSERVÉ — ne pas renommer directement, voir @property ci-dessous) ---
-    acronyme = models.CharField(max_length=20, unique=True)
+    # `acronyme` en base, « sigle » partout ailleurs — à l'écran comme sur les
+    # documents (`inst_sigle` dans core/pdf_utils.py). Le champ garde son nom
+    # historique ; on ne fait qu'aligner ce que l'utilisateur lit. Sans ces
+    # deux réglages, un doublon renvoyait « Un objet institution avec ce champ
+    # acronyme existe déjà. » — le gabarit générique de Django, qui nomme un
+    # champ que personne ne voit sur l'écran où l'erreur s'affiche.
+    acronyme = models.CharField(
+        'sigle', max_length=20, unique=True,
+        error_messages={'unique': "Ce sigle est déjà utilisé par une autre institution."},
+    )
     nom      = models.CharField(max_length=200)  # deprecié progressivement via @property -> nom_fr
 
     # --- Tutelle / Groupe de rattachement ---
