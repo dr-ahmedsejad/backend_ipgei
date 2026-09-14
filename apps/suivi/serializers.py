@@ -38,7 +38,7 @@ class SuiviePointageSerializer(serializers.ModelSerializer):
     # Mode d'affichage cellule : True -> uniquement le type centre (Sport, Instruction militaire, ...)
     type_seance_is_special = serializers.BooleanField(source='type_seance_fk.is_special', read_only=True, default=False)
 
-    #: L'horaire REEL quand il deborde du creneau — « 08h00 → 12h00 ».
+    #: L'horaire REEL quand il deborde du creneau — « 08h00 - 12h00 ».
     #:
     #: Une epreuve dure 2h, 3h ou 4h, et sa ligne est ancree sur le PREMIER
     #: creneau qu'elle recouvre. Afficher « 08h00-09h30 » pour un examen qui
@@ -63,7 +63,7 @@ class SuiviePointageSerializer(serializers.ModelSerializer):
             return ''
 
         fin = min(debut + int(round(duree * 60)), 23 * 60 + 59)
-        return (f'{debut // 60:02d}h{debut % 60:02d} → '
+        return (f'{debut // 60:02d}h{debut % 60:02d} - '
                 f'{fin // 60:02d}h{fin % 60:02d}')
 
     class Meta:

@@ -284,11 +284,11 @@ class EpreuvePointableTest(TestCase):
 
         pointage = SuiviePointage.objects.get(type_seance_fk__type_seance='EF')
         donnees = SuiviePointageSerializer(pointage).data
-        self.assertEqual(donnees['horaire_reel'], '08h00 → 12h00')
+        self.assertEqual(donnees['horaire_reel'], '08h00 - 12h00')
 
     def test_une_seance_ordinaire_n_a_pas_d_horaire_reel(self):
         """
-        Vide quand la durée colle au créneau : réécrire « 08h00 → 09h30 »
+        Vide quand la durée colle au créneau : réécrire « 08h00 - 09h30 »
         partout alourdirait la colonne sans rien apprendre.
         """
         from apps.suivi.models import SuiviePointage
