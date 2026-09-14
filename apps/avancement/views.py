@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.vacation.models import Vacation
+from core.libelle_dept import filiere_distingue, format_depts_compact
 from core.permissions import RBACPermission
 from apps.suivi.models import Suivie, SuiviePointage, ChargeInstitution
 from apps.emplois.models import Emplois
@@ -86,38 +87,6 @@ def _dep_key(s):
     if s.departement_id:
         return str(s.departement_id)
     return '_global_'
-
-
-def _format_depts_compact(sp):
-    """Compose le libelle compact des departements d'un SuiviePointage.
-
-    Regle : depts partageant MEME filiere ET niveau sont regroupes en
-    'FIL - NIV (G1 / G2)'. Un dept solitaire conserve son format complet
-    'FIL - NIV - NOM'. Plusieurs groupes (fil/niv) sont concatenes par ' / '.
-
-    Requiert prefetch_related('departements__filiere', 'departements__niveau')
-    pour eviter N+1.
-    """
-    depts = list(sp.departements.all())
-    if not depts:
-        return ''
-    buckets = defaultdict(list)
-    for d in depts:
-        fil = d.filiere.code if d.filiere_id and d.filiere else ''
-        niv = d.niveau.niveau if d.niveau_id and d.niveau else ''
-        buckets[(fil, niv)].append(d)
-
-    parts = []
-    for (fil, niv), grp in buckets.items():
-        prefix = ' - '.join(x for x in (fil, niv) if x)
-        if len(grp) == 1:
-            d = grp[0]
-            full = ' - '.join(x for x in (fil, niv, d.nom or '') if x)
-            parts.append(full or (d.nom or ''))
-        else:
-            inner = ' / '.join((d.groupe or d.nom or '') for d in grp)
-            parts.append(f"{prefix} ({inner})" if prefix else inner)
-    return ' / '.join(parts)
 
 
 def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
@@ -1105,6 +1074,10 @@ class SuiviProfView(APIView):
         for s in Semaine.objects.filter(annee_universitaire=annee):
             sem_map[s.date] = (s.numero_semaine, s.type_semestre)
 
+        # Compte les filieres UNE fois pour tout le lot : la question ne depend
+        # pas de la ligne, et la poser a chacune ferait une requete par seance.
+        filiere_utile = filiere_distingue()
+
         rows = []
         # Lignes SuiviePointage
         for p in pointages:
@@ -1113,7 +1086,7 @@ class SuiviProfView(APIView):
                 'date_suivie':      p.date_suivie.isoformat() if p.date_suivie else None,
                 'em__intitule':     p.em.intitule if p.em_id and p.em else '',
                 'type_seance':      p.type_seance_fk.type_seance if p.type_seance_fk_id and p.type_seance_fk else '',
-                'departement__nom': _format_depts_compact(p),
+                'departement__nom': format_depts_compact(p, filiere_utile),
                 'duree_creneau':    p.duree_creneau or 0,
                 'taux_paiement':    p.taux_paiement or 0,
                 'type_semestre':    p.type_semestre or '',
@@ -1127,7 +1100,7 @@ class SuiviProfView(APIView):
                 'date_suivie':      v.date.isoformat() if v.date else None,
                 'em__intitule':     v.em.intitule if v.em_id and v.em else type_lib,
                 'type_seance':      type_lib,
-                'departement__nom': _format_depts_compact(v),
+                'departement__nom': format_depts_compact(v, filiere_utile),
                 'duree_creneau':    float(v.duree or 0),
                 'taux_paiement':    float(v.taux_paiement or 0),
                 'type_semestre':    ts,
@@ -1958,6 +1931,9 @@ class SuiviProfPDFView(APIView):
         for s in Semaine.objects.filter(annee_universitaire=annee):
             sem_map[s.date] = (s.numero_semaine, s.type_semestre)
 
+        # Une fois pour tout le lot, cf. plus haut.
+        filiere_utile = filiere_distingue()
+
         rows = []
         for p in pointages:
             rows.append({
@@ -1965,7 +1941,7 @@ class SuiviProfPDFView(APIView):
                 'date_suivie':      p.date_suivie,
                 'em__intitule':     p.em.intitule if p.em_id and p.em else '',
                 'type_seance':      p.type_seance_fk.type_seance if p.type_seance_fk_id and p.type_seance_fk else '',
-                'departement__nom': _format_depts_compact(p),
+                'departement__nom': format_depts_compact(p, filiere_utile),
                 'duree_creneau':    p.duree_creneau or 0,
                 'taux_paiement':    p.taux_paiement or 0,
                 'type_semestre':    p.type_semestre or '',
@@ -1978,7 +1954,7 @@ class SuiviProfPDFView(APIView):
                 'date_suivie':      v.date,
                 'em__intitule':     v.em.intitule if v.em_id and v.em else type_lib,
                 'type_seance':      type_lib,
-                'departement__nom': _format_depts_compact(v),
+                'departement__nom': format_depts_compact(v, filiere_utile),
                 'duree_creneau':    float(v.duree or 0),
                 'taux_paiement':    float(v.taux_paiement or 0),
                 'type_semestre':    ts,

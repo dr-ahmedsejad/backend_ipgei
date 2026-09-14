@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
+from core.libelle_dept import filiere_distingue, format_depts_compact
 from core.permissions import RBACPermission, EDTDepartementPermission
 from core.mixins import AuditMixin, InstitutionScopedMixin, DepartementScopedMixin
 from core.pagination import StandardPagination
@@ -1153,31 +1154,6 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         return response
 
 
-def _filiere_distingue() -> bool:
-    """
-    Le code de filiere apporte-t-il une information ?
-
-    Non s'il n'y en a qu'une dans tout le referentiel : il est alors constant,
-    et une constante repetee a chaque ligne n'apprend rien. C'est le cas de
-    l'IPGEI, qui n'a que la sienne.
-
-    Le calcul porte sur le REFERENTIEL entier, pas sur les lignes affichees —
-    sinon le prefixe apparaitrait et disparaitrait d'un ecran a l'autre selon
-    ce qu'ils montrent.
-    """
-    from apps.scolarite.models import Filiere
-    return (Filiere.objects.exclude(code='').exclude(code__isnull=True)
-            .values('code').distinct().count() > 1)
-
-
-def _nom_porte_le_niveau(nom: str, niveau: str) -> bool:
-    """Le nom de la classe redit-il deja son niveau ? (« MPSI A » pour MPSI)"""
-    if not niveau or not nom:
-        return False
-    n, v = nom.strip().lower(), niveau.strip().lower()
-    return n == v or n.startswith(f'{v} ') or n.startswith(f'{v}-')
-
-
 class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, viewsets.ModelViewSet):
     # SuiviePointage utilise M2M `departements`
     departement_filter_field  = 'departements'
@@ -1221,63 +1197,6 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
             qs = qs.filter(type_semestre=ts)
         count = qs.values('semestre').distinct().count()
         return Response({'annee_universitaire': annee, 'type_semestre': ts or '', 'count': count})
-
-    # ── Helper d'affichage compact des departements d'une seance ─────────
-    @staticmethod
-    def _format_depts_compact(sp, filiere_utile=None):
-        """Compose le libelle compact des departements d'un SuiviePointage.
-
-        Regle : les departements partageant MEME filiere ET niveau sont
-        regroupes => 'FIL - NIV (G1 / G2)'. Un dept solitaire conserve son
-        format complet 'FIL - NIV - NOM'. Plusieurs groupes (fil/niv) sont
-        concatenes par ' / '.
-
-        DEUX ALLEGEMENTS, commandes par les DONNEES et non par un choix fige —
-        un etablissement qui se diversifierait les verrait disparaitre d'eux-
-        memes. Ce sont ceux que `lib/format-depts.ts` applique deja cote ecran,
-        et que les fiches ignoraient : elles affichaient « IPGEI - MPSI - MPSI
-        A » la ou « MPSI A » dit la meme chose.
-
-          · le CODE DE FILIERE tombe quand l'etablissement n'en a qu'une. Il ne
-            distingue alors rien et se repete sur chaque ligne ;
-          · le NIVEAU tombe quand le nom de la classe le porte deja. A l'IPGEI
-            les classes se nomment d'apres leur niveau — « MPSI - MPSI A » le
-            disait deux fois.
-
-        `filiere_utile` evite de recompter les filieres a chaque ligne :
-        l'appelant le calcule une fois pour tout son lot (cf.
-        `_filiere_distingue`). Laisse a None, il est calcule ici.
-
-        Requiert que les M2M departements soient pre-charges avec
-        leurs filiere et niveau (prefetch_related('departements__filiere',
-        'departements__niveau')) sinon N+1 queries.
-        """
-        depts = list(sp.departements.all())
-        if not depts:
-            return ''
-        if filiere_utile is None:
-            filiere_utile = _filiere_distingue()
-
-        buckets = defaultdict(list)
-        for d in depts:
-            fil = (d.filiere.code if d.filiere_id and d.filiere else '')                 if filiere_utile else ''
-            niv = d.niveau.niveau if d.niveau_id and d.niveau else ''
-            buckets[(fil, niv)].append(d)
-
-        parts = []
-        for (fil, niv), grp in buckets.items():
-            prefix = ' - '.join(x for x in (fil, niv) if x)
-            if len(grp) == 1:
-                d = grp[0]
-                nom = d.nom or ''
-                # Le niveau tombe si le nom le redit deja.
-                niveau_affiche = '' if _nom_porte_le_niveau(nom, niv) else niv
-                full = ' - '.join(x for x in (fil, niveau_affiche, nom) if x)
-                parts.append(full or nom)
-            else:
-                inner = ' / '.join((d.groupe or d.nom or '') for d in grp)
-                parts.append(f"{prefix} ({inner})" if prefix else inner)
-        return ' / '.join(parts)
 
     # ── GET /api/v1/suivi/pointages/semaines/ ─────────────────────────────
     @action(detail=False, methods=['get'], url_path='semaines')
@@ -1736,7 +1655,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         jours_order = {'Lundi': 1, 'Mardi': 2, 'Mercredi': 3, 'Jeudi': 4, 'Vendredi': 5, 'Samedi': 6}
         # Compte les filieres UNE fois pour tout le lot : la question ne depend
         # pas de la ligne, et la poser a chacune ferait une requete par seance.
-        filiere_utile = _filiere_distingue()
+        filiere_utile = filiere_distingue()
         result = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
             if not (sp.em_id and sp.salle_id):
@@ -1755,7 +1674,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 'type_seance':  ts_label,
                 'salle_nom':    sp.salle.nom if sp.salle else '',
                 'commentaire':  sp.commentaire,
-                'departement':  self._format_depts_compact(sp, filiere_utile),
+                'departement':  format_depts_compact(sp, filiere_utile),
                 'semestre':     sp.semestre.semestre if sp.semestre else '',
             })
 
@@ -1789,7 +1708,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         jours_order = {'Lundi': 1, 'Mardi': 2, 'Mercredi': 3, 'Jeudi': 4, 'Vendredi': 5, 'Samedi': 6}
         # Compte les filieres UNE fois pour tout le lot : la question ne depend
         # pas de la ligne, et la poser a chacune ferait une requete par seance.
-        filiere_utile = _filiere_distingue()
+        filiere_utile = filiere_distingue()
         rows = []
         for sp in qs.order_by('date_suivie', 'creneau_fk__ordre'):
             if not (sp.em_id and sp.salle_id):
@@ -1807,7 +1726,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 'em_intitule': sp.em.intitule if sp.em else '',
                 'type_seance': ts_label,
                 'salle_nom':   sp.salle.nom if sp.salle else '',
-                'departement': self._format_depts_compact(sp, filiere_utile),
+                'departement': format_depts_compact(sp, filiere_utile),
                 'semestre':    sp.semestre.semestre if sp.semestre else '',
             })
 

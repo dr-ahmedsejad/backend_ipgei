@@ -1,5 +1,5 @@
 """
-Test — le libellé d'une classe sur les fiches de suivi.
+Test — le libellé d'une classe, partout où il s'affiche.
 
 Les fiches annonçaient « IPGEI - MPSI - MPSI A » là où « MPSI A » dit la même
 chose. Deux redites, et toutes deux commandées par les DONNÉES — un
@@ -12,6 +12,12 @@ chose. Deux redites, et toutes deux commandées par les DONNÉES — un
 C'est la règle que `lib/format-depts.ts` applique côté écran depuis longtemps,
 et que les fiches — écran ET PDF, qui lisent le même libellé — ignoraient.
 
+Le test porte sur `core.libelle_dept`, seul endroit où la règle est écrite. Elle
+vivait en deux copies littérales, `apps/suivi/views.py` et
+`apps/avancement/views.py` : corriger l'une avait laissé l'autre dire encore
+« IPGEI - MPSI - MPSI A ». Un seul test vaut désormais pour les deux familles
+d'écrans.
+
 Base SQLite en mémoire (siga.settings.test).
 """
 from django.db import connection
@@ -21,9 +27,7 @@ from apps.departement.models import Departement
 from apps.parametres.models import Institution, Jour, Niveau, Seance, Semestre
 from apps.scolarite.models import Filiere
 from apps.suivi.models import SuiviePointage, SuiviePointageDepartement
-from apps.suivi.views import SuiviePointageViewSet
-
-formater = SuiviePointageViewSet._format_depts_compact
+from core.libelle_dept import format_depts_compact as formater
 
 
 class LibelleClasseTest(TestCase):
