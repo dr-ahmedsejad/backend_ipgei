@@ -10,6 +10,7 @@ from .views import (
     EmploiArchiveViewSet, EpreuveIPGEIViewSet, EvaluationViewSet,
     GrilleTypeViewSet, HistoriqueClasseViewSet, InscriptionIPGEIViewSet,
     LigneDeliberationViewSet, MatiereViewSet, MembreJuryIPGEIViewSet,
+    PonderationClasseViewSet,
     NiveauIPGEIViewSet, NoteViewSet,
     ParametresIPGEIViewSet,
     PermutationEtudiantViewSet, PermutationProfViewSet, SeanceReelleViewSet,
@@ -31,6 +32,11 @@ router.register(r'inscriptions',    InscriptionIPGEIViewSet,     basename='ipgei
 router.register(r'historique-classes', HistoriqueClasseViewSet,  basename='ipgei-historique-classe')
 # Académique
 router.register(r'matieres',        MatiereViewSet,              basename='ipgei-matiere')
+# Les dérogations de pondération : une matière comptée autrement pour une
+# seule classe. Sous `matieres-ponderations` et non sous `matieres/<id>/` :
+# on les consulte par classe autant que par matière.
+router.register(r'matieres-ponderations', PonderationClasseViewSet,
+                basename='ipgei-ponderation-classe')
 router.register(r'sessions',        SessionEvaluationIPGEIViewSet, basename='ipgei-session')
 router.register(r'notes',           NoteViewSet,                 basename='ipgei-note')
 router.register(r'evaluations',     EvaluationViewSet,           basename='ipgei-evaluation')

@@ -192,10 +192,15 @@ def matieres_de(classe, semestre, type_note: str):
 def _fiche(semestre, classe, matiere, type_note, anonymat) -> dict:
     if type_note not in TYPES_NOTE:
         raise ValidationError(f'Type de note inconnu : {type_note}.')
-    if type_note == TYPE_TP and not matiere.has_tp:
+    # La CLASSE peut déroger : une colle tenue en MP A seulement s'y saisit,
+    # et nulle part ailleurs. Lire la matière refuserait la fiche à qui a
+    # pourtant composé.
+    from . import services
+    regle = services.ponderation_applicable(matiere, classe)
+    if type_note == TYPE_TP and not regle.has_tp:
         raise ValidationError(
-            f'{matiere.code} ne comporte pas de TP notés : aucune fiche de TP '
-            "n'a de sens pour cette matière."
+            f'{matiere.code} ne comporte pas de TP notés pour {classe.nom} : '
+            "aucune fiche de TP n'a de sens ici."
         )
     contenu, seuil = lignes(semestre, classe.pk, matiere, type_note, anonymat)
     return {

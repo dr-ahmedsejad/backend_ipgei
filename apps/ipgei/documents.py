@@ -273,7 +273,9 @@ def _ligne_note(note, stats_classe: dict | None = None) -> dict:
         'coefficient':    coef,
         'volume_horaire': note.matiere.volume_horaire,
         'moy_ds':         note.moy_ds,
-        'note_tp':        note.note_tp if note.matiere.has_tp else None,
+        # L'instantané, non la matière : le relevé doit dire ce qui a été
+        # compté pour CETTE note, y compris si sa classe dérogeait.
+        'note_tp':        note.note_tp if note.pct_tp else None,
         'moy_exam':       note.moy_exam,
         'moyenne':        note.moyenne,
         'rattrapage':     note.note_rattrapage,

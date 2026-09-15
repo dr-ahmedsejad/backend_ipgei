@@ -1215,6 +1215,104 @@ class Matiere(models.Model):
             )
 
 
+class PonderationClasse(models.Model):
+    """
+    LA PONDÉRATION D'UNE MATIÈRE POUR UNE SEULE CLASSE.
+
+    `Matiere` règle la pondération pour tout un niveau. C'est le cas général, et
+    il tient presque toujours. Mais une classe peut composer autrement : en S4
+    2025-2026, seule MP A a tenu une colle de maths — la colonne existe dans son
+    fichier de notes, elle est absente en MP B et vide en MP C et MP D. La
+    scolarité a donc compté 20/10/70 pour MP A et 30/0/70 pour les trois autres,
+    et nos moyennes s'écartaient des siennes pour 29 étudiants.
+
+    Cette table est celle des EXCEPTIONS. Vide, rien ne change. Une ligne, et
+    cette classe-là déroge.
+
+    Pourquoi une table plutôt qu'un champ de plus sur `Matiere` : la dérogation
+    est un fait rare et daté, qui mérite son motif. Une colonne par cas d'espèce
+    aurait grossi la matière sans jamais dire POURQUOI telle classe s'écarte.
+
+    Le résolveur est `services.ponderation_applicable(matiere, classe)`, sur le
+    modèle de `seuil_applicable` : la dérogation si elle existe, sinon la règle.
+
+    ATTENTION — créer une ligne ne recalcule RIEN. `Note` fige sa pondération au
+    moment du calcul (cf. `Note.pct_ds`), ce qui protège l'historique mais
+    signifie qu'il faut relancer le calcul sur les notes concernées, verrous de
+    jury levés puis rétablis.
+    """
+    matiere = models.ForeignKey(
+        Matiere, on_delete=models.CASCADE, related_name='ponderations_classe',
+    )
+    classe  = models.ForeignKey(
+        'ipgei.Classe', on_delete=models.CASCADE, related_name='ponderations',
+    )
+    pct_ds   = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('30'))
+    pct_tp   = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0'))
+    pct_exam = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('70'))
+    #: La classe a-t-elle des TP notés dans cette matière ?
+    #:
+    #: Il ne suffit pas de changer les pourcentages : sans ce drapeau, l'écran
+    #: de saisie refuse la fiche de TP et l'import écarte la colonne. La classe
+    #: aurait une part TP de 10 % qu'elle ne pourrait jamais remplir.
+    has_tp   = models.BooleanField(default=True)
+    #: POURQUOI cette classe déroge. Exigé : une dérogation sans motif devient,
+    #: deux ans plus tard, une anomalie que personne n'ose corriger.
+    motif    = models.CharField(
+        max_length=300,
+        help_text="Ce qui justifie l'écart — « colle de maths tenue en MP A "
+                  'seulement », par exemple.',
+    )
+    cree_le  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table    = 'ipgei_ponderation_classe'
+        ordering    = ['matiere__code', 'classe__nom']
+        verbose_name        = 'Pondération dérogatoire'
+        verbose_name_plural = 'Pondérations dérogatoires'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['matiere', 'classe'], name='uniq_ipgei_ponderation_classe',
+            ),
+        ]
+
+    def __str__(self):
+        return (f'{self.matiere.code} · {self.classe.nom} — '
+                f'{self.pct_ds:g}/{self.pct_tp:g}/{self.pct_exam:g}')
+
+    def ponderation(self) -> dict:
+        """Même forme que `Matiere.ponderation()` : les deux sont interchangeables."""
+        return {'pct_ds': self.pct_ds, 'pct_tp': self.pct_tp, 'pct_exam': self.pct_exam}
+
+    def clean(self):
+        # Mêmes règles que la matière — une dérogation reste une pondération.
+        if not self.has_tp and self.pct_tp and Decimal(self.pct_tp) != Decimal('0'):
+            raise ValidationError({'pct_tp': "Sans TP, la part TP doit valoir 0."})
+        total = Decimal(self.pct_ds or 0) + Decimal(self.pct_tp or 0) + Decimal(self.pct_exam or 0)
+        if total != Decimal('100'):
+            raise ValidationError(
+                f'La pondération doit totaliser 100 % (actuellement {total} %).'
+            )
+        # Une dérogation qui ne déroge pas est un piège : elle survivrait à un
+        # changement de la règle générale et figerait l'ancienne valeur en
+        # silence.
+        if (self.matiere_id and self.has_tp == self.matiere.has_tp
+                and self.ponderation() == self.matiere.ponderation()):
+            raise ValidationError(
+                f'Cette pondération est identique à celle de {self.matiere.code} : '
+                'une dérogation qui ne déroge à rien figerait la règle générale '
+                'sans le dire. Supprimez-la plutôt.'
+            )
+        if (self.classe_id and self.matiere_id
+                and self.matiere.niveau_ref_id
+                and self.classe.niveau_code != self.matiere.niveau_ref.code):
+            raise ValidationError(
+                f'{self.classe.nom} est en {self.classe.niveau_code}, or '
+                f'{self.matiere.code} appartient à la maquette de '
+                f'{self.matiere.niveau_ref.code}.'
+            )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 5. Notes : DS 1..N + examens 1..N, pondération historisée
 # ═════════════════════════════════════════════════════════════════════════════

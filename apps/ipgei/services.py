@@ -410,16 +410,20 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
         epreuves.get(Evaluation.TYPE_EXAM, 0),
     )
 
-    # Snapshot : à partir d'ici, on ne lit plus la matière — la pondération de
-    # cette ligne est celle du jour du calcul, définitivement.
-    note.pct_ds      = matiere.pct_ds
-    note.pct_tp      = matiere.pct_tp if matiere.has_tp else Decimal('0')
-    note.pct_exam    = matiere.pct_exam
+    # La pondération est celle de la CLASSE quand elle déroge, sinon celle de
+    # la matière — une colle tenue dans un seul groupe ne se compte que là.
+    regle = ponderation_applicable(matiere, note.inscription.classe)
+
+    # Snapshot : à partir d'ici, on ne lit plus ni la matière ni la dérogation —
+    # la pondération de cette ligne est celle du jour du calcul, définitivement.
+    note.pct_ds      = regle.pct_ds
+    note.pct_tp      = regle.pct_tp if regle.has_tp else Decimal('0')
+    note.pct_exam    = regle.pct_exam
     note.coefficient = matiere.coefficient
     note.moy_ds      = moy_ds
     note.moy_exam    = moy_exam
 
-    note_tp = note.note_tp if matiere.has_tp else None
+    note_tp = note.note_tp if regle.has_tp else None
 
     composantes = [
         (moy_ds,   Decimal(note.pct_ds or 0)),
@@ -3135,6 +3139,36 @@ def rang_annuel_classe(inscription: InscriptionIPGEI,
         inscription__classe_id=inscription.classe_id,
         inscription__actif=True,
         note_retenue__isnull=False))
+
+
+def ponderation_applicable(matiere: Matiere, classe):
+    """
+    La pondération qui juge cette note : la dérogation de la CLASSE si elle
+    existe, sinon la règle générale de la matière.
+
+    Même forme que `seuil_applicable` : une valeur particulière l'emporte sur le
+    paramétrage, et l'appelant n'a pas à savoir laquelle il a reçue. Les deux
+    objets exposent `pct_ds`, `pct_tp`, `pct_exam` et `has_tp` — c'est tout ce
+    que le calcul consulte.
+
+    Pourquoi c'est nécessaire : `Matiere` règle la pondération pour tout un
+    niveau, or une classe peut composer autrement. En S4 2025-2026, seule MP A a
+    tenu une colle de maths ; la scolarité a compté 20/10/70 pour elle et
+    30/0/70 pour les trois autres, et nos moyennes s'écartaient des siennes
+    pour 29 étudiants.
+
+    Sans classe — un appel qui n'en a pas —, on rend la règle générale : mieux
+    vaut la valeur du niveau qu'une erreur sur un chemin qui ne connaît pas de
+    classe.
+    """
+    from .models import PonderationClasse
+
+    if classe is None:
+        return matiere
+    derogation = (PonderationClasse.objects
+                  .filter(matiere=matiere, classe=classe)
+                  .first())
+    return derogation if derogation is not None else matiere
 
 
 def seuil_applicable(inscription: InscriptionIPGEI, annee_universitaire: str,

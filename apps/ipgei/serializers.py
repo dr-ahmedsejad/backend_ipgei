@@ -4,12 +4,15 @@ from decimal import Decimal
 from rest_framework import serializers
 from django.db import models
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+
 from .models import (
     AbsenceSeance, Classe, Deliberation, DetailLigneDeliberation, EmploiArchive,
     EpreuveClasse, EpreuveIPGEI, Evaluation,
     GrilleType, HistoriqueClasse, InscriptionIPGEI, LigneDeliberation, Matiere,
     MembreJuryIPGEI, NiveauIPGEI,
-    Note, ParametresIPGEI, PermutationEtudiant, PermutationProf, SeanceReelle,
+    Note, ParametresIPGEI, PermutationEtudiant, PermutationProf,
+    PonderationClasse, SeanceReelle,
     SeanceType, SemaineIPGEI, SemestreIPGEI, SessionEvaluationIPGEI,
     SignataireIPGEI, SousGroupeTP,
     NIVEAU_CHOICES, PCT_DEFAUT_AVEC_TP, PCT_DEFAUT_SANS_TP,
@@ -231,6 +234,43 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
 
 
 # ── Matières ─────────────────────────────────────────────────────────────────
+class PonderationClasseSerializer(serializers.ModelSerializer):
+    """
+    Une dérogation : la pondération d'une matière pour UNE classe.
+
+    Le `motif` est obligatoire au modèle et le reste ici. Une dérogation sans
+    raison écrite devient, deux ans plus tard, une anomalie que personne n'ose
+    corriger — c'est ce qui nous a coûté une demi-journée sur la colle de MP A.
+    """
+    matiere_code     = serializers.CharField(source='matiere.code', read_only=True)
+    matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True)
+    classe_nom       = serializers.CharField(source='classe.nom', read_only=True)
+    semestre_code    = serializers.CharField(source='matiere.code_semestre', read_only=True)
+
+    class Meta:
+        model  = PonderationClasse
+        fields = [
+            'id', 'matiere', 'matiere_code', 'matiere_intitule',
+            'classe', 'classe_nom', 'semestre_code',
+            'pct_ds', 'pct_tp', 'pct_exam', 'has_tp', 'motif', 'cree_le',
+        ]
+        read_only_fields = ['cree_le']
+
+    def validate(self, attrs):
+        # `full_clean` plutôt qu'une copie des règles : le modèle porte déjà la
+        # somme à 100, la cohérence has_tp / pct_tp, le refus d'une dérogation
+        # qui ne déroge pas, et le contrôle de niveau. Les redire ici les
+        # ferait diverger.
+        instance = self.instance or PonderationClasse()
+        for champ, valeur in attrs.items():
+            setattr(instance, champ, valeur)
+        try:
+            instance.full_clean(exclude=['cree_le'])
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.message_dict or e.messages)
+        return attrs
+
+
 class MatiereSerializer(serializers.ModelSerializer):
     institution   = _champ_institution()
     niveau = serializers.CharField(read_only=True)

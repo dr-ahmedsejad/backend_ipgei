@@ -193,7 +193,10 @@ def contexte(deliberation: Deliberation, tri: str = TRI_RANG) -> dict:
                                 else note.matiere.coefficient),
                 'intitule':    note.matiere.intitule,
                 'ds':          note.moy_ds,
-                'tp':          note.note_tp if note.matiere.has_tp else None,
+                # `pct_tp` et non `matiere.has_tp` : l'instantané dit si le
+                # TP a COMPTÉ pour cette note-là. La matière, elle, dit la
+                # règle d'aujourd'hui — et une classe peut y déroger.
+                'tp':          note.note_tp if note.pct_tp else None,
                 'examen':      note.moy_exam,
                 'me':          note.note_retenue,
                 'mc':          stat.get('moyenne'),

@@ -43,6 +43,7 @@ from .perimetre import PerimetreMatiereMixin
 from . import detail_notes, edt_pdf, pv, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
+    PonderationClasse,
     AbsenceSeance, AnonymatIPGEI, Classe, Deliberation, EmploiArchive, Evaluation, GrilleType,
     HistoriqueClasse,
     EpreuveArchive, EpreuveIPGEI,
@@ -56,6 +57,7 @@ from .models import (
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
     DeliberationSerializer, DupliquerGrilleSerializer,
+    PonderationClasseSerializer,
     DupliquerSemaineSerializer, EditionLotSerializer,
     EmploiArchiveSerializer, EpreuveIPGEISerializer, EvaluationSerializer,
     GrilleTypeListSerializer, GrilleTypeSerializer,
@@ -1065,6 +1067,31 @@ def _serialiser_releve_annuel(data: dict) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 # Matières
 # ═════════════════════════════════════════════════════════════════════════════
+class PonderationClasseViewSet(ModelViewSet):
+    """
+    Les dérogations de pondération : une matière comptée autrement pour UNE
+    classe.
+
+    Rare par nature — la table est vide tant qu'aucune classe ne déroge —, donc
+    pas de pagination : la liste tient à l'écran, et la tronquer masquerait
+    précisément l'exception qu'on vient vérifier.
+
+    **Créer ou modifier une ligne ne recalcule rien** : `Note` fige sa
+    pondération au calcul. C'est l'écran qui doit proposer le recalcul, et
+    l'utilisateur qui décide — un recalcul silencieux rouvrirait 4 000 notes
+    verrouillées par un jury sans que personne l'ait demandé.
+    """
+    serializer_class   = PonderationClasseSerializer
+    permission_classes = [RBACPermission]
+    required_module    = 'ipgei_matieres'
+    queryset           = PonderationClasse.objects.select_related(
+        'matiere', 'classe')
+    filter_backends    = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields   = ['matiere', 'classe', 'matiere__code_semestre']
+    ordering           = ['matiere__code', 'classe__nom']
+    pagination_class   = NoPagination
+
+
 class MatiereViewSet(PerimetreMatiereMixin, InstitutionScopedMixin, SelectAllMixin, ModelViewSet):
     """Matières du cursus : coefficient, volume horaire, pondération DS/TP/examen."""
     serializer_class   = MatiereSerializer
@@ -2040,8 +2067,24 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
             }
 
         sessions = services.sessions_du_semestre(semestre)
+
+        # La grille est celle d'UNE classe : elle doit donc annoncer la
+        # pondération qui s'y applique, dérogation comprise. Servir celle de la
+        # matière masquerait la colonne TP à la classe qui a tenu la colle — et
+        # l'afficherait aux trois autres, qui n'ont rien à y saisir.
+        regle = services.ponderation_applicable(
+            matiere, Classe.objects.filter(pk=classe_id).first())
+        donnees_matiere = MatiereSerializer(matiere).data
+        donnees_matiere.update({
+            'has_tp':   regle.has_tp,
+            'pct_ds':   regle.pct_ds,
+            'pct_tp':   regle.pct_tp,
+            'pct_exam': regle.pct_exam,
+            'ponderation_derogatoire': regle is not matiere,
+        })
+
         return Response({
-            'matiere':   MatiereSerializer(matiere).data,
+            'matiere':   donnees_matiere,
             'semestre':  SemestreIPGEISerializer(semestre).data,
             'partage':   partage,
             'nb_ds':     max(1, numeros['ds']),
@@ -2130,7 +2173,12 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
                     continue
 
                 if 'note_tp' in ligne:
-                    note.note_tp = ligne['note_tp'] if matiere.has_tp else None
+                    # La dérogation de la classe, s'il y en a une : sans
+                    # elle, l'import jetterait en silence la colonne de
+                    # colle d'une classe qui l'a bel et bien tenue.
+                    regle = services.ponderation_applicable(
+                        matiere, note.inscription.classe)
+                    note.note_tp = ligne['note_tp'] if regle.has_tp else None
                 if 'note_rattrapage' in ligne:
                     note.note_rattrapage = ligne['note_rattrapage']
                 note.save(update_fields=['note_tp', 'note_rattrapage', 'date_modification'])
