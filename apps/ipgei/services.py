@@ -2328,6 +2328,89 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
 
 
 @transaction.atomic
+def alimenter_patron_depuis_semaine(grille: GrilleType, semaine: SemaineIPGEI,
+                                    *, ecraser=False) -> dict:
+    """
+    Reprend une semaine RÉELLE dans la grille type — le sens inverse de la
+    duplication.
+
+    Le patron est un modèle sans dates : il appartient à la classe et au TYPE de
+    semestre, non à un semestre. Rempli une fois, il resservira l'année
+    suivante, là où une semaine réelle meurt avec son année. C'est sa seule
+    raison d'être, et c'est pourquoi ce report existe : personne ne compose un
+    patron à vide, on bâtit une semaine puis on la promeut.
+
+    Deux décisions qui ne se devinent pas :
+
+    - **Une séance annulée n'entre pas.** On reprend un emploi du temps, pas
+      l'histoire de ses accidents.
+    - **Une permutation est ramenée à son état normal.** Elle est par
+      définition une exception à la semaine ordinaire ; la recopier telle
+      quelle graverait l'exception dans le modèle. On retient donc
+      `prof_initial`, l'enseignant qui aurait dû assurer la séance. L'écarter
+      aurait été pire : le patron y aurait gardé un trou.
+
+    `ecraser=False` laisse intacte toute case déjà composée dans le patron :
+    on complète un modèle existant sans défaire ce qu'on y a réglé à la main.
+    """
+    from .models import SeanceReelle, SeanceType
+
+    if semaine.semestre.type_semestre != grille.type_semestre:
+        raise ValidationError(
+            f'Le patron vise un semestre {grille.get_type_semestre_display()}, '
+            f'or {semaine.semestre.code} ne l\'est pas : un modèle ne traverse '
+            'pas les parités.')
+
+    sources = list(
+        SeanceReelle.objects
+        .filter(classe=grille.classe, semaine=semaine, annulee=False)
+        .select_related('jour', 'creneau', 'matiere', 'prof', 'prof_initial',
+                        'salle', 'sous_groupe', 'type_seance')
+    )
+    if not sources:
+        raise ValidationError(
+            f'La semaine {semaine.numero} de {grille.classe.nom} ne contient '
+            "aucune séance : il n'y a rien à reprendre.")
+
+    creees = ignorees = remplacees = permutations = 0
+    for seance in sources:
+        filtre = {
+            'grille':      grille,
+            'jour':        seance.jour,
+            'creneau':     seance.creneau,
+            'sous_groupe': seance.sous_groupe,
+        }
+        existante = SeanceType.objects.filter(**filtre).first()
+        if existante is not None:
+            if not ecraser:
+                ignorees += 1
+                continue
+            existante.delete()
+            remplacees += 1
+
+        prof = seance.prof
+        if seance.origine == SeanceReelle.ORIGINE_PERMUTATION and seance.prof_initial_id:
+            prof = seance.prof_initial
+            permutations += 1
+
+        SeanceType.objects.create(
+            **filtre,
+            matiere=seance.matiere,
+            prof=prof,
+            salle=seance.salle,
+            type_seance=seance.type_seance,
+        )
+        creees += 1
+
+    return {
+        'creees': creees, 'ignorees': ignorees, 'remplacees': remplacees,
+        # Dit à part : l'agent doit savoir que le modèle ne reproduit pas
+        # exactement la semaine qu'il a sous les yeux, et pourquoi.
+        'permutations_normalisees': permutations,
+    }
+
+
+@transaction.atomic
 def dupliquer_semaine(classe, source: SemaineIPGEI, cibles, *, ecraser=False) -> dict:
     """
     Recopie les séances d'une semaine RÉELLE vers une ou plusieurs autres.

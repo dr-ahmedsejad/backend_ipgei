@@ -3213,6 +3213,27 @@ class GrilleTypeViewSet(_ErreurMetierMixin, ModelViewSet):
         )
         return Response(GrilleTypeSerializer(grille).data)
 
+    @action(detail=True, methods=['post'], url_path='reprendre-semaine')
+    def reprendre_semaine(self, request, pk=None):
+        """
+        Reprend une semaine réelle DANS le patron — le sens inverse de
+        `dupliquer`.
+
+        Le patron n'appartient à aucun semestre : rempli une fois, il resservira
+        l'année suivante, là où une semaine meurt avec son année. Corps :
+        `{semaine, ecraser}`.
+        """
+        grille = self.get_object()
+        semaine = SemaineIPGEI.objects.filter(
+            pk=request.data.get('semaine')).select_related('semestre').first()
+        if semaine is None:
+            raise ValidationError({'semaine': 'Semaine requise.'})
+
+        return Response(self._executer(
+            services.alimenter_patron_depuis_semaine, grille, semaine,
+            ecraser=bool(request.data.get('ecraser')),
+        ))
+
     @action(detail=True, methods=['post'], url_path='dupliquer')
     def dupliquer(self, request, pk=None):
         """
