@@ -11,9 +11,9 @@
 >    transaction annulée.
 
 Django 4.2 + DRF servant le frontend Next.js `C:\SIR\IPGEI\frontend_ipgei`.
-PostgreSQL 18, base **`IPGEI`**. 25 applications, ~75 700 lignes de Python.
+PostgreSQL 18, base **`IPGEI`**. 25 applications, ~75 600 lignes de Python.
 
-*Chiffres relevés le 17/08/2026 ; les recompter avant de s'y fier.*
+*Chiffres relevés le 15/09/2026 ; les recompter avant de s'y fier.*
 
 ## Réglages — quatre profils, et lequel sert où
 
@@ -34,7 +34,8 @@ déploiement incomplet démarrerait en silence avec une clé publique.
 
 ## Tests
 
-**56 fichiers, 411 tests. 405 passent** (relevé du 17/08/2026).
+**79 fichiers, 710 tests collectés. 703 passent**, 1 échec attendu (`xfail`),
+6 échecs connus (relevé du 15/09/2026).
 
 ```bash
 python -m pytest -q --no-migrations         # SQLite en mémoire, ~16 s
@@ -64,6 +65,26 @@ PONDERATION_ANNUELLE = {
 parts égales. **Sans l'un des deux, l'étudiant n'est pas classé** : la feuille
 sert à affecter, une demi-moyenne y passerait pour une vraie.
 
+### Auditeur libre — `InscriptionIPGEI.auditeur_libre`
+Il suit la scolarité **sans être de la promotion** : ni jury, ni classement, ni
+PV, ni CNIM, ni effectifs. Il garde ses notes, son relevé et son rattrapage.
+
+Le piège n'est pas qu'il apparaisse où il ne devrait pas — cela se verrait.
+C'est qu'il **décale silencieusement le rang des autres** et la moyenne de
+classe imprimée sur tous les relevés : les rangs restent une suite continue,
+simplement fausse.
+
+> Partout où l'on constitue une POPULATION, filtrer par
+> **`InscriptionIPGEI.objects.cursus()`**.
+
+L'exclusion des rangs vit dans `services._classer` et `statistiques_classe`,
+décidée **là** et non chez les appelants : un queryset déjà filtré ne peut pas
+être « dé-filtré ». L'auditeur y est classé **par comparaison** — situé dans la
+promotion sans y entrer, quitte à partager son rang avec un diplômant.
+
+`apps/ipgei/test_auditeur_libre.py` fige la seule assertion qui protège : rangs,
+moyennes de classe et effectifs **identiques que l'auditeur existe ou non**.
+
 ### Absents comptés zéro
 `_agreger(absents_a_zero=True)` compte une matière manquante comme **0 avec son
 coefficient**. C'est le mode du jury et du classement — une épreuve non rendue
@@ -76,7 +97,7 @@ remplace la moyenne que s'il est meilleur.
 
 ## Pièges — chacun a déjà coûté du temps
 
-- **`on_delete=PROTECT` partout** : 30 occurrences dans `apps/ipgei/models.py`,
+- **`on_delete=PROTECT` partout** : 33 occurrences dans `apps/ipgei/models.py`,
   24 dans `inscriptions`, 20 dans `evaluations`. Une suppression échoue sur
   `jury_source`, `LigneDeliberation.inscription`, `InscriptionIPGEI.issue_de`,
   `GrilleFrais.annee_univ`… Utiliser `django.contrib.admin.utils.NestedObjects`
@@ -143,8 +164,8 @@ Voir `deploy/DEPLOIEMENT_IPGEI.md`. Trois points structurants :
 ```
 apps/ipgei/        → le module métier : classes, inscriptions, matières, notes,
                      délibérations, EDT, documents, concours CNIM
-  services.py      → 3 120 lignes — moyennes, agrégation, décisions de jury
-  views.py         → 4 034 lignes — un nouveau @action mérite son propre module
+  services.py      → 3 715 lignes — moyennes, agrégation, décisions de jury
+  views.py         → 4 624 lignes — un nouveau @action mérite son propre module
   classement.py    → classement S3 (PDF + Excel)
   pv.py            → PV de délibération      collecte.py → fiches et bandeau Excel
 apps/{suivi,vacation,avancement,absence}/  → socle repris de SIGA
@@ -156,7 +177,11 @@ deploy/            → pile Docker, Nginx, sauvegardes chiffrées
 ## Workflow
 
 ```bash
-.venv\Scripts\python.exe manage.py runserver          # port 8000
+.venv\Scripts\python.exe manage.py runserver 8001     # 8001, pas 8000 :
+                                                      # c'est le port qu'attend
+                                                      # le front (.env.local),
+                                                      # et un autre projet
+                                                      # occupe déjà le 8000.
 .venv\Scripts\python.exe manage.py check              # après chaque lot d'édits
 .venv\Scripts\python.exe manage.py makemigrations --check --dry-run
 python -m pytest -q --no-migrations                   # SQLite jetable
