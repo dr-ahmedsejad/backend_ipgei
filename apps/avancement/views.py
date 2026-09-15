@@ -25,6 +25,7 @@ from apps.emplois.models import Emplois
 from apps.prof.models import Prof, TYPES_CHARGE_REG
 from apps.departement.models import Departement
 from apps.em.models import EM as EMModel, EM
+from apps.em.volumes import volumes_par_em
 from apps.parametres.models import Seance, Paiement
 
 logger = logging.getLogger('siga')
@@ -152,7 +153,13 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
         'TP': 'TP', 'TP2': 'TP',
         'PR': 'PR', 'PR2': 'PR',
     }
+    # Le volume PREVU est celui gele pour l'annee regardee, pas celui de la
+    # maquette d'aujourd'hui : une retouche de maquette ne doit pas reecrire le
+    # pourcentage d'une annee revolue. Repli sur l'EM quand rien n'est gele.
+    volumes = volumes_par_em(annee)
+
     for em in liste_em:
+        vol = volumes.get(em.id) or em
         # Source de verite = SuiviePointage avec commentaire='Fait'.
         # Filtre commentaire='Fait' : on compte uniquement ce que l'utilisateur
         # a explicitement marque comme realise dans /suivi/remplissage.
@@ -248,18 +255,18 @@ def _compute_avancement_em(annee, type_semestre, semestre_id=None, ems=None):
             'code_em':   em.code_em,
             'intitule':  em.intitule,
             'semestre':  em.semestre.semestre if em.semestre else '—',
-            'plan_CM':   em.CM,
-            'plan_TD':   em.TD,
-            'plan_TP':   em.TP,
-            'plan_PR':   em.PR,
+            'plan_CM':   vol.CM,
+            'plan_TD':   vol.TD,
+            'plan_TP':   vol.TP,
+            'plan_PR':   vol.PR,
             'real_CM':   real['CM'],
             'real_TD':   real['TD'],
             'real_TP':   real['TP'],
             'real_PR':   real['PR'],
-            'pct_CM':    pct(real['CM'], em.CM),
-            'pct_TD':    pct(real['TD'], em.TD),
-            'pct_TP':    pct(real['TP'], em.TP),
-            'pct_PR':    pct(real['PR'], em.PR),
+            'pct_CM':    pct(real['CM'], vol.CM),
+            'pct_TD':    pct(real['TD'], vol.TD),
+            'pct_TP':    pct(real['TP'], vol.TP),
+            'pct_PR':    pct(real['PR'], vol.PR),
             # Le NOMBRE d'épreuves tenues. Les anciens drapeaux restent
             # servis : le PDF et les écrans se lisent aussi bien avec, et
             # `> 0` reste la question qu'on leur posait.
@@ -310,7 +317,10 @@ def _compute_avancement_prof(annee, prof_id, semestre_id=None):
     totaux_globaux = {'CM': 0.0, 'TD': 0.0, 'TP': 0.0, 'PR': 0.0, 'total_eq_CM': 0.0}
     result = []
 
+    volumes = volumes_par_em(annee)
+
     for em in em_qs:
+        vol = volumes.get(em.id) or em
         # Realisation = seances effectivement POINTEES 'Fait' (coherent avec le
         # detail seance/seance et le calcul de charge). Avant : table Suivie
         # (toutes lignes, y compris planifiees/non faites) -> sur-comptage.
@@ -363,18 +373,18 @@ def _compute_avancement_prof(annee, prof_id, semestre_id=None):
             'code_em':     em.code_em,
             'intitule':    em.intitule,
             'semestre':    em.semestre.semestre if em.semestre else '—',
-            'plan_CM':     em.CM,
-            'plan_TD':     em.TD,
-            'plan_TP':     em.TP,
-            'plan_PR':     em.PR,
+            'plan_CM':     vol.CM,
+            'plan_TD':     vol.TD,
+            'plan_TP':     vol.TP,
+            'plan_PR':     vol.PR,
             'real_CM':     totaux['CM'],
             'real_TD':     totaux['TD'],
             'real_TP':     totaux['TP'],
             'real_PR':     totaux['PR'],
-            'pct_CM':      pct(totaux['CM'], em.CM),
-            'pct_TD':      pct(totaux['TD'], em.TD),
-            'pct_TP':      pct(totaux['TP'], em.TP),
-            'pct_PR':      pct(totaux['PR'], em.PR),
+            'pct_CM':      pct(totaux['CM'], vol.CM),
+            'pct_TD':      pct(totaux['TD'], vol.TD),
+            'pct_TP':      pct(totaux['TP'], vol.TP),
+            'pct_PR':      pct(totaux['PR'], vol.PR),
             'total_eq_CM': round(eq_cm, 2),
             'nb_ds':       len(dates_epreuve['DS']),
             'nb_exam':     len(dates_epreuve['EF']),

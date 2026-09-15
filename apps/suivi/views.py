@@ -564,6 +564,15 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
             if suivie_objects:
                 Suivie.objects.bulk_create(suivie_objects)
 
+            # La maquette de l'annee est GELEE ici, au premier suivi produit :
+            # c'est le dernier moment ou le volume prevu est encore celui qu'on
+            # a voulu. Sans ce gel, l'ecran « Avancement » lisait `em.CM` en
+            # direct, et corriger une maquette pour la rentree reecrivait le
+            # pourcentage des annees revolues. Idempotent : regenerer une
+            # semaine ne regele rien, le premier gel fait foi.
+            from apps.em.volumes import figer_maquette
+            figer_maquette(annee)
+
             # --- 2) Fusion -> SuiviePointage (cles via FK) ---
             groups = defaultdict(lambda: {
                 'departements': set(), 'max_date': None, 'duree_creneau': None,

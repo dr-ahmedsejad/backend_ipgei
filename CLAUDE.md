@@ -91,6 +91,36 @@ coefficient**. C'est le mode du jury et du classement — une épreuve non rendu
 ne s'efface pas. Le mode par défaut, lui, redistribue sur les composantes
 saisies : c'est celui d'un semestre en cours.
 
+### Maquette et volumes — une seule maquette, pour toutes les promotions
+
+Il n'existe **pas** de modèle `Maquette` : la maquette EST l'ensemble des
+`Matiere`, qui ne sont **pas datées**. Une matière vaut donc pour toutes les
+années, et le miroir lui tient **un seul `em.EM`** (unique sur `code_em` +
+filière).
+
+> **Retoucher une matière vaut rétroactivement pour toutes les promotions.**
+
+Côté IPGEI c'est sans danger : `Note` recopie `coefficient` et `pct_*` au
+calcul. Côté socle, l'EM ne recopiait rien — « Avancement » lisait `em.CM` en
+direct comme volume de référence, si bien que ramener MATH-S1 de 147 h à 100 h
+pour la rentrée faisait passer l'avancement de **2024-2025** de 1 % à 2 %.
+
+`em.VolumeAnnuelEM` gèle ce volume par (année, EM), et `em.volumes` applique
+l'idiome habituel — `volumes_applicables(em, annee)` rend le gel **sinon** l'EM,
+comme `seuil_applicable` et `ponderation_applicable`. Le gel se pose à la
+**génération du suivi** (`apps/suivi/views.py`) : le dernier moment où le volume
+prévu est encore celui qu'on a voulu. Il est idempotent ; `rafraichir=True` est
+un geste délibéré, jamais automatique.
+
+Ce qui reste vrai et n'est **pas** couvert :
+- `int(matiere.coefficient)` **tronque** dans l'EM. Sans effet aujourd'hui (tous
+  les coefficients sont entiers), piège dès qu'un vaut 2,5.
+- Le suffixe de niveau sur `code_em` est **conditionnel** : il n'apparaît que si
+  deux `NiveauIPGEI` partagent un `rang`. Ajouter un MPI au rang de MP ferait
+  basculer la condition et **renommerait 14 EM sur 26** (`MATH-S3` →
+  `MATH-S3-MP`). Rien n'est perdu — c'est un UPDATE, les clés étrangères suivent
+  — mais les attestations déjà imprimées ne diront plus le même code.
+
 ### Note retenue
 `note_retenue = max(moyenne, min(rattrapage, plafond))` — un rattrapage ne
 remplace la moyenne que s'il est meilleur.

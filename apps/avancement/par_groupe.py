@@ -22,6 +22,7 @@ from datetime import date
 from django.db.models import Min, Q
 
 from apps.departement.models import Departement
+from apps.em.volumes import volumes_par_em
 from apps.em.models import EM as EMModel
 from apps.suivi.models import SuiviePointage
 
@@ -203,6 +204,10 @@ def avancement_par_groupe(annee, type_semestre, semestre_id=None, niveau=None, e
     parents = {identifiant: infos['parent']
                for identifiant, infos in referentiel.items()}
 
+    # Volume PREVU gele pour l'annee : cf. `em.volumes`. Une retouche de
+    # maquette ne doit pas reecrire le pourcentage d'une annee revolue.
+    volumes = volumes_par_em(annee)
+
     for matiere in _matieres(annee, type_semestre, semestre_id, niveau, ems):
         pointages = (SuiviePointage.objects
                      .filter(annee_universitaire=annee, em_id=matiere.id)
@@ -242,8 +247,9 @@ def avancement_par_groupe(annee, type_semestre, semestre_id=None, niveau=None, e
             unites = {u for u in unites
                       if infos.get(u, {}).get('niveau') == niveau}
 
-        plan = {'CM': matiere.CM or 0, 'TD': matiere.TD or 0,
-                'TP': matiere.TP or 0, 'PR': matiere.PR or 0}
+        vol  = volumes.get(matiere.id) or matiere
+        plan = {'CM': vol.CM or 0, 'TD': vol.TD or 0,
+                'TP': vol.TP or 0, 'PR': vol.PR or 0}
 
         # La REFERENCE : ce que le groupe le plus avance a fait. C'est elle qui
         # repond a la question de l'ecran — « quel groupe n'a pas encore fait ce

@@ -88,3 +88,55 @@ class EM(models.Model):
     @property
     def volume_horaire_total(self):
         return self.CM + self.TD + self.TP + self.PR
+
+
+class VolumeAnnuelEM(models.Model):
+    """
+    Le volume horaire d'un EM, FIGÉ pour une année.
+
+    POURQUOI. Il n'existe qu'UN EM par matière, partagé par toutes les
+    promotions : `em.Matiere` n'est pas datée, et le miroir IPGEI réécrit l'EM à
+    chaque modification de la maquette. Or l'écran « Avancement » lit `em.CM` en
+    DIRECT comme volume de référence. Ramener MATH-S1 de 147 h à 100 h pour la
+    rentrée faisait donc passer l'avancement de 2024-2025 de 1 % à 2 % — une
+    année révolue dont le chiffre change sans que personne n'y ait touché, et
+    sans la moindre trace.
+
+    C'est l'idiome que `Note` applique déjà à son coefficient : ce qui a servi
+    au calcul est recopié dans la ligne, et reste lisible après coup. La
+    maquette de l'année est gelée ici, au moment où le suivi de cette année naît
+    — pas plus tard, sinon on gèlerait déjà une valeur retouchée.
+
+    Une ligne par (année, EM) : 26 matières, donc 26 lignes par année. C'est
+    aussi, incidemment, la seule histoire de maquette dont l'établissement
+    dispose.
+
+    L'alternative — dater `Matiere` — a été écartée : chaque matière veut son
+    EM, et `code_em` est unique par filière. `MATH-S1` existerait trois fois.
+    Il faudrait le suffixer par l'année, donc renommer, donc rompre le lien avec
+    toutes les vacations déjà saisies. Beaucoup plus cher, pour le même résultat.
+    """
+    annee_universitaire = models.CharField(max_length=20, db_index=True)
+    em = models.ForeignKey(
+        EM, on_delete=models.CASCADE, related_name='volumes_annuels',
+    )
+    CM = models.IntegerField(default=0)
+    TD = models.IntegerField(default=0)
+    TP = models.IntegerField(default=0)
+    PR = models.IntegerField(default=0)
+    fige_le = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'em_volume_annuel'
+        ordering = ['-annee_universitaire', 'em__code_em']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['annee_universitaire', 'em'],
+                name='uniq_volume_annuel_annee_em',
+            ),
+        ]
+        verbose_name        = 'volume annuel figé'
+        verbose_name_plural = 'volumes annuels figés'
+
+    def __str__(self):
+        return f'{self.em.code_em} — {self.annee_universitaire} ({self.CM}/{self.TD}/{self.TP})'
