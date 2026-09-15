@@ -39,18 +39,27 @@ pièce semestrielle.
 
   .page-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 
-  .sec-header    { padding-top: 2px !important; padding-bottom: 6px !important; }
-  .sec-annee     { padding-bottom: 6px !important; }
-  .sec-titre     { padding-bottom: 5px !important; }
-  .sec-qr        { padding-bottom: 4px !important; }
-  .sec-etudiant  { padding-bottom: 6px !important; }
-  /* Deux tableaux de notes au lieu d'un : la trame semestrielle est calibrée
-     pour une page, et le second bloc la faisait déborder — la signature se
-     retrouvait seule sur une feuille presque vide. On rend la hauteur là où
-     elle ne se lit pas : les interlignes, non le corps du texte. */
-  .sec-notes     { vertical-align: top; padding-bottom: 4px !important; }
-  .sec-resume    { padding-bottom: 4px !important; }
-  .sec-signature { padding-bottom: 6px !important; }
+  /* LES INTERLIGNES PAYENT LA SECONDE PAGE, PAS LE CORPS DU TEXTE.
+
+     Deux tableaux de notes au lieu d'un : la trame semestrielle est calibrée
+     pour une page. Un MPSI tient (12 lignes de notes) ; un MP déborde (14 —
+     huit matières en S3 depuis le dédoublement Maths/Maths 2 et PC/PC 2). Le
+     débordement mesuré est d'environ 3 mm : la page 2 ne portait que le pied
+     de page natif, imprimé sur toutes les pages, et sortait donc blanche.
+
+     On reprend cette hauteur dans les blancs entre sections, où elle ne se
+     lit pas, plutôt que de rétrécir le document entier — un `zoom` global
+     aurait aussi rapetissé les MPSI, qui n'ont pas le problème. Environ 8 mm
+     récupérés : de quoi absorber les 3 mm et garder de la marge pour un
+     niveau qui compterait une matière de plus. */
+  .sec-header    { padding-top: 1px !important; padding-bottom: 3px !important; }
+  .sec-annee     { padding-bottom: 3px !important; }
+  .sec-titre     { padding-bottom: 3px !important; }
+  .sec-qr        { padding-bottom: 2px !important; }
+  .sec-etudiant  { padding-bottom: 3px !important; }
+  .sec-notes     { vertical-align: top; padding-bottom: 2px !important; }
+  .sec-resume    { padding-bottom: 2px !important; }
+  .sec-signature { padding-bottom: 3px !important; }
 
   .header-table { width: 100%; border-collapse: collapse; }
   .header-table td { vertical-align: middle; }
