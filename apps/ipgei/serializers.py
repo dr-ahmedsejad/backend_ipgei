@@ -455,7 +455,11 @@ class ClasseSelectSerializer(serializers.ModelSerializer):
 # ── Inscriptions ─────────────────────────────────────────────────────────────
 class NouvelEtudiantSerializer(serializers.Serializer):
     """Identité saisie lors d'une inscription d'un étudiant encore inconnu."""
-    matricule      = serializers.CharField(max_length=50)
+    #: Laissé VIDE, le serveur l'attribue — le prochain libre de la promotion,
+    #: choisi au moment de l'écriture. C'est la voie sûre : un numéro proposé à
+    #: l'ouverture du formulaire peut être pris pendant la saisie, celui-ci non.
+    matricule      = serializers.CharField(max_length=50, required=False,
+                                           allow_blank=True, default='')
     # `nom` porte le nom COMPLET, prénoms inclus — c'est la forme du référentiel
     # officiel, celle du fichier MESRS, et celle que l'attestation imprime.
     # `prenom_fr` reste accepté pour les appels qui séparent encore les deux.
@@ -478,11 +482,20 @@ class NouvelEtudiantSerializer(serializers.Serializer):
 
     def validate_matricule(self, valeur):
         from apps.absence.models import Etudiant
-        valeur = valeur.strip()
-        if Etudiant.objects.filter(matricule__iexact=valeur).exists():
+        valeur = (valeur or '').strip()
+        if not valeur:
+            return valeur            # le serveur l'attribuera
+
+        # On NOMME le titulaire : « déjà attribué » laisse la secrétaire deviner
+        # si c'est la même personne — le cas courant, une réinscription saisie
+        # par la mauvaise voie — ou une collision qui demande un autre numéro.
+        occupant = Etudiant.objects.filter(matricule__iexact=valeur).first()
+        if occupant is not None:
             raise serializers.ValidationError(
-                f'Le matricule {valeur} est déjà attribué. Utilisez la recherche pour '
-                'inscrire cet étudiant plutôt que d\'en créer un nouveau.'
+                f'Le matricule {valeur} est déjà attribué à '
+                f'{occupant.nom_display}. Si c\'est la même personne, inscrivez-la '
+                'par « Étudiant déjà enregistré » ; sinon, choisissez un autre '
+                'numéro ou utilisez « Générer ».'
             )
         return valeur
 
@@ -506,6 +519,9 @@ class InscriptionCompleteSerializer(serializers.Serializer):
     annee_universitaire = serializers.CharField(required=False, allow_blank=True)
     sous_groupe       = serializers.IntegerField(required=False, allow_null=True)
     numero_ordre      = serializers.IntegerField(required=False, allow_null=True)
+    #: Inscrit hors promotion. Il ne redouble pas — il n'est pas étudiant —,
+    #: donc le contrôle de réinscription ne le concerne pas, et il ne paie rien.
+    auditeur_libre    = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs):
         if not attrs.get('classe') and not attrs.get('niveau'):
@@ -555,7 +571,7 @@ class InscriptionIPGEISerializer(serializers.ModelSerializer):
             'id', 'etudiant', 'etudiant_nom', 'etudiant_matricule', 'classe', 'classe_nom',
             'sous_groupe', 'sous_groupe_libelle', 'annee_universitaire', 'numero_ordre',
             'niveau', 'en_attente_affectation', 'statut', 'statut_display',
-            'nb_redoublements', 'date_inscription', 'actif',
+            'nb_redoublements', 'date_inscription', 'actif', 'auditeur_libre',
             'montant_frais', 'est_payee', 'date_paiement', 'recu_paiement',
         ]
 

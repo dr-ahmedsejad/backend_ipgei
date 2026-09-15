@@ -143,6 +143,7 @@ def _lignes(annee_universitaire: str, niveau: str = '', institution=None,
     une épreuve non rendue ne s'efface pas d'un classement qui sert à affecter.
     """
     inscrits = (InscriptionIPGEI.objects
+                .cursus()
                 .filter(actif=True, annee_universitaire=annee_universitaire)
                 .select_related('etudiant', 'classe__niveau', 'classe__institution'))
     if niveau:

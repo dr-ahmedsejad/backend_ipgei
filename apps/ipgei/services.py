@@ -952,7 +952,21 @@ def grille_rattrapage(deliberation: Deliberation) -> dict:
     lignes = list(deliberation.lignes
                   .select_related('inscription__etudiant', 'inscription__classe')
                   .order_by('rang', 'inscription__etudiant__nom'))
-    inscriptions = [ligne.inscription for ligne in lignes]
+
+    # Les rangées de la grille : celles du jury, PUIS les auditeurs libres.
+    # Un auditeur a droit au rattrapage mais n'entre dans aucun jury — sans
+    # cette seconde source, il n'aurait aucune case où l'on puisse écrire sa
+    # note. La grille est un ÉCRAN DE SAISIE, pas une pièce de jury : l'y faire
+    # figurer ne le fait entrer ni au PV, ni dans les rangs, ni dans les
+    # décisions. Toutes les matières lui sont ouvertes, faute d'un jury pour en
+    # désigner — sans danger, `max(normale, rattrapage)` rendant inoffensif un
+    # rattrapage qui n'améliore rien.
+    rangees = [(l.inscription, l.moyenne_generale, l.decision_auto, False)
+               for l in lignes]
+    rangees += [(i, None, '', True)
+                for i in auditeurs_du_jury(deliberation)]
+
+    inscriptions = [inscription for inscription, *_ in rangees]
 
     notes = {
         (note.inscription_id, note.matiere_id): note
@@ -970,27 +984,51 @@ def grille_rattrapage(deliberation: Deliberation) -> dict:
         ],
         'lignes': [
             {
-                'inscription':        ligne.inscription_id,
-                'etudiant_nom':       ligne.inscription.etudiant.nom_display,
-                'etudiant_matricule': ligne.inscription.etudiant.matricule,
-                'classe_nom':         ligne.inscription.classe.nom,
-                'moyenne_generale':   ligne.moyenne_generale,
-                'decision_auto':      ligne.decision_auto,
+                'inscription':        inscription.pk,
+                'etudiant_nom':       inscription.etudiant.nom_display,
+                'etudiant_matricule': inscription.etudiant.matricule,
+                'classe_nom':         inscription.classe.nom,
+                'moyenne_generale':   moyenne,
+                'decision_auto':      decision,
+                'auditeur_libre':     auditeur,
                 'notes': {
                     str(m.pk): {
-                        'moyenne':       getattr(notes.get((ligne.inscription_id, m.pk)),
+                        'moyenne':       getattr(notes.get((inscription.pk, m.pk)),
                                                  'moyenne', None),
-                        'rattrapage':    getattr(notes.get((ligne.inscription_id, m.pk)),
+                        'rattrapage':    getattr(notes.get((inscription.pk, m.pk)),
                                                  'note_rattrapage', None),
-                        'note_retenue':  getattr(notes.get((ligne.inscription_id, m.pk)),
+                        'note_retenue':  getattr(notes.get((inscription.pk, m.pk)),
                                                  'note_retenue', None),
                     }
                     for m in matieres
                 },
             }
-            for ligne in lignes
+            for inscription, moyenne, decision, auditeur in rangees
         ],
     }
+
+
+def auditeurs_du_jury(deliberation: Deliberation):
+    """
+    Les auditeurs libres que ce jury de rattrapage doit laisser composer.
+
+    Même année, même institution, même niveau que la délibération — le
+    périmètre d'enseignement, pas celui du jury : l'auditeur suit ces cours et
+    passe ces épreuves, il n'y a que la décision qui ne le concerne pas.
+
+    Renvoyé vide hors d'un jury de rattrapage : ailleurs, aucun écran n'a de
+    raison de les faire apparaître.
+    """
+    if deliberation.portee != Deliberation.PORTEE_RATTRAPAGE:
+        return []
+    return list(
+        InscriptionIPGEI.objects
+        .filter(annee_universitaire=deliberation.annee_universitaire,
+                classe__institution=deliberation.institution,
+                classe__niveau__niveau=deliberation.niveau,
+                actif=True, auditeur_libre=True)
+        .select_related('etudiant', 'classe')
+        .order_by('etudiant__nom'))
 
 
 @transaction.atomic
@@ -1019,7 +1057,11 @@ def saisir_rattrapage(deliberation: Deliberation, saisies: list) -> dict:
             "La saisie du rattrapage appartient au jury de RATTRAPAGE : c'est "
             'lui qui désigne les étudiants concernés.')
 
+    # Les mêmes deux sources que la grille : ce que l'écran propose, la saisie
+    # doit l'accepter. Un auditeur absent d'ici verrait ses cases refusées à
+    # l'enregistrement, après les avoir remplies.
     permises = set(deliberation.lignes.values_list('inscription_id', flat=True))
+    permises |= {i.pk for i in auditeurs_du_jury(deliberation)}
     ecrites = 0
     for saisie in saisies:
         inscription_id = int(saisie['inscription'])
@@ -1227,6 +1269,7 @@ def calculer_deliberation(deliberation: Deliberation) -> int:
     # portée de niveau, sans quoi leurs lignes disparaîtraient au recalcul.
     inscriptions = (
         InscriptionIPGEI.objects
+        .cursus()
         .filter(
             annee_universitaire=deliberation.annee_universitaire,
             classe__institution=deliberation.institution,
@@ -2632,6 +2675,7 @@ def statistiques_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) 
         .filter(semestre=semestre,
                 inscription__classe_id=inscription.classe_id,
                 inscription__actif=True,
+                inscription__auditeur_libre=False,
                 note_retenue__isnull=False)
         .values_list('matiere_id', 'inscription_id', 'note_retenue')
     )
@@ -2640,12 +2684,28 @@ def statistiques_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) 
     for matiere_id, inscription_id, note in lignes:
         par_matiere.setdefault(matiere_id, []).append((inscription_id, Decimal(note)))
 
+    # Un auditeur n'est pas dans la population qu'on vient de lire — il ne doit
+    # peser ni sur la moyenne de classe ni sur le rang de ses camarades. Ses
+    # propres notes sont donc chargées à part : elles lui donnent un rang PAR
+    # COMPARAISON, sans que personne ne recule d'un cran.
+    miennes = {}
+    if inscription.auditeur_libre:
+        miennes = {
+            matiere_id: Decimal(note)
+            for matiere_id, note in Note.objects
+            .filter(semestre=semestre, inscription_id=inscription.pk,
+                    note_retenue__isnull=False)
+            .values_list('matiere_id', 'note_retenue')
+        }
+
     stats = {}
     for matiere_id, notes in par_matiere.items():
         valeurs = [n for _, n in notes]
         moyenne = _arrondi(sum(valeurs) / len(valeurs))
 
         mienne = next((n for i, n in notes if i == inscription.pk), None)
+        if mienne is None:
+            mienne = miennes.get(matiere_id)
         rang = None
         if mienne is not None:
             # Rang = nombre de notes STRICTEMENT supérieures, plus un.
@@ -2683,14 +2743,8 @@ def rang_general_classe(inscription: InscriptionIPGEI, semestre: SemestreIPGEI) 
         note_retenue__isnull=False))
 
 
-def _classer(inscription: InscriptionIPGEI, lignes) -> dict:
-    """
-    Rang de l'étudiant parmi les moyennes tirées de `lignes`, et effectif classé.
-
-    Le périmètre est décidé par l'appelant — une classe, une promotion, un
-    semestre ou l'année — et le calcul reste le même : moyenne pondérée par les
-    coefficients FIGÉS sur chaque note, ex æquo partagés.
-    """
+def _moyennes_par_inscrit(lignes) -> dict:
+    """Moyenne pondérée de chaque inscrit présent dans `lignes`, coefficients FIGÉS."""
     cumuls = {}
     for inscription_id, note, coef_fige, coef_matiere in lignes.values_list(
         'inscription_id', 'note_retenue', 'coefficient', 'matiere__coefficient',
@@ -2698,9 +2752,35 @@ def _classer(inscription: InscriptionIPGEI, lignes) -> dict:
         coef = Decimal(coef_fige if coef_fige is not None else coef_matiere)
         cumul, poids = cumuls.get(inscription_id, (Decimal('0'), Decimal('0')))
         cumuls[inscription_id] = (cumul + Decimal(note) * coef, poids + coef)
+    return {i: c / p for i, (c, p) in cumuls.items() if p > 0}
 
-    moyennes = {i: c / p for i, (c, p) in cumuls.items() if p > 0}
+
+def _classer(inscription: InscriptionIPGEI, lignes) -> dict:
+    """
+    Rang de l'étudiant parmi les moyennes tirées de `lignes`, et effectif classé.
+
+    Le périmètre est décidé par l'appelant — une classe, une promotion, un
+    semestre ou l'année — et le calcul reste le même : moyenne pondérée par les
+    coefficients FIGÉS sur chaque note, ex æquo partagés.
+
+    Les appelants passent le PÉRIMÈTRE ENTIER, auditeurs compris ; l'exclusion
+    se décide ici, une seule fois. La population classée est celle du cursus,
+    et un auditeur libre est classé PAR COMPARAISON : sa moyenne est calculée
+    à part, puis située dans cette population sans y entrer.
+
+    Deux relevés peuvent alors porter le même rang, celui de l'auditeur et
+    celui du diplômant qu'il devance ; c'est voulu, ils ne relèvent pas du même
+    classement. L'alternative aurait été de faire reculer d'un rang tous ceux
+    qui le suivent, sur des pièces déjà signées.
+    """
+    moyennes = _moyennes_par_inscrit(lignes.filter(inscription__auditeur_libre=False))
     mienne = moyennes.get(inscription.pk)
+
+    if mienne is None and inscription.auditeur_libre:
+        # `lignes` porte déjà le périmètre voulu — semestre ou année, classe ou
+        # promotion. Restreint à lui seul, il donne sa moyenne sur ce périmètre.
+        mienne = _moyennes_par_inscrit(
+            lignes.filter(inscription_id=inscription.pk)).get(inscription.pk)
 
     return {
         'rang':     (sum(1 for m in moyennes.values() if m > mienne) + 1)
@@ -2979,6 +3059,126 @@ def _derogation_active(etudiant, classe) -> bool:
         etudiant=etudiant, annee_univ=annee,
         type_derogation='derogation_inscription', statut='actif',
     ).exists()
+
+
+#: Longueur de la séquence dans un matricule — `242011`, les trois derniers.
+LONGUEUR_SEQUENCE = 3
+#: Segment entre l'année et la séquence, quand aucun matricule n'existe encore
+#: pour servir de modèle. Constant dans les 440 matricules relevés ; ce qu'il
+#: signifie n'est pas documenté, on se contente de le reconduire.
+SEGMENT_PAR_DEFAUT = '2'
+
+
+def _prefixe_matricule(annee_universitaire: str) -> str:
+    """
+    Les trois premiers caractères d'un matricule de cette promotion : l'année
+    sur deux chiffres, puis un segment.
+
+    Le segment se LIT dans les matricules existants plutôt que de s'écrire en
+    dur : s'il encode un jour la filière ou l'établissement, la règle suivra
+    les données au lieu de les contredire. On regarde d'abord la promotion
+    visée, puis toutes les autres, et l'on ne retombe sur la constante que
+    devant une base vide.
+    """
+    from apps.absence.models import Etudiant
+
+    annee = annee_universitaire[2:4]
+
+    def segment_le_plus_frequent(matricules):
+        compte = {}
+        for m in matricules:
+            if m and len(m) == 3 + LONGUEUR_SEQUENCE and m.isdigit():
+                compte[m[2]] = compte.get(m[2], 0) + 1
+        return max(compte, key=compte.get) if compte else None
+
+    tous = list(Etudiant.objects.values_list('matricule', flat=True))
+    segment = (segment_le_plus_frequent([m for m in tous if m and m[:2] == annee])
+               or segment_le_plus_frequent(tous)
+               or SEGMENT_PAR_DEFAUT)
+    return f'{annee}{segment}'
+
+
+def prochain_matricule(annee_universitaire: str) -> str:
+    """
+    Le prochain matricule libre de la promotion — `262001` pour 2026-2027.
+
+    PROPOSÉ, jamais imposé. Trois cas exigent la saisie à la main : l'auditeur
+    libre déjà passé par l'IPGEI, qui garde son ancien numéro ; celui qui vient
+    de l'étranger, si une convention lui en impose un ; et la correction d'une
+    saisie passée.
+
+    On reprend le premier numéro LIBRE, et non le suivant du plus grand : la
+    série est trouée — 205 numéros distribués pour 143 étudiants en 2024 — par
+    des attributions restées sans suite. Les combler vaut mieux que de les
+    laisser s'accumuler.
+
+    Le calcul est SERVEUR. Fait côté navigateur, deux secrétaires inscrivant en
+    même temps proposeraient le même numéro ; le matricule étant unique en
+    base, la seconde tomberait sur une erreur d'intégrité après avoir tout
+    saisi. Cela reste possible ici — rien ne réserve le numéro entre la
+    proposition et l'enregistrement — mais la fenêtre se réduit à l'instant du
+    clic, et la création rend désormais un message lisible.
+    """
+    from apps.absence.models import Etudiant
+
+    prefixe = _prefixe_matricule(annee_universitaire)
+    pris = {
+        int(m[3:])
+        for m in Etudiant.objects.filter(matricule__startswith=prefixe)
+                                 .values_list('matricule', flat=True)
+        if m and len(m) == 3 + LONGUEUR_SEQUENCE and m[3:].isdigit()
+    }
+    libre = next((i for i in range(1, 10 ** LONGUEUR_SEQUENCE) if i not in pris), None)
+    if libre is None:
+        raise ValidationError(
+            f'La série {prefixe} est épuisée : ses '
+            f'{10 ** LONGUEUR_SEQUENCE - 1} numéros sont tous attribués.')
+    return f'{prefixe}{libre:0{LONGUEUR_SEQUENCE}d}'
+
+
+def creer_etudiant(identite: dict, annee_universitaire: str):
+    """
+    Crée la fiche étudiant, en attribuant le matricule s'il est laissé vide.
+
+    L'attribution se fait ICI, au moment de l'écriture, et non à l'ouverture du
+    formulaire : un numéro proposé d'avance peut être pris pendant la saisie, et
+    la secrétaire ne l'apprendrait qu'en validant.
+
+    Il reste une course — deux créations simultanées peuvent viser le même
+    numéro —, que l'unicité en base tranche. On reprend alors le suivant plutôt
+    que de renvoyer une erreur pour un numéro dont personne ne voulait en
+    particulier. Chaque tentative a son point de reprise : sans lui, la première
+    collision condamnerait toute la transaction.
+
+    Les tentatives sont bornées. Une boucle sans fin sur une base saturée
+    tiendrait la connexion ouverte sans jamais rien dire.
+    """
+    from django.db import IntegrityError
+    from apps.absence.models import Etudiant
+
+    identite = dict(identite)
+    impose = (identite.get('matricule') or '').strip()
+    identite.pop('matricule', None)
+
+    for tentative in range(5):
+        matricule = impose or prochain_matricule(annee_universitaire)
+        try:
+            with transaction.atomic():
+                # `nom_fr` alimente `nom_display`, utilisé par les relevés et la
+                # page publique de vérification : on le renseigne dès la création.
+                return Etudiant.objects.create(
+                    matricule=matricule, nom_fr=identite['nom'],
+                    statut='actif', **identite)
+        except IntegrityError:
+            if impose:
+                # Numéro voulu, et déjà pris : c'est à l'utilisateur de trancher.
+                raise ValidationError({'matricule': (
+                    f'Le matricule {impose} vient d\'être attribué à quelqu\'un '
+                    f'd\'autre. Laissez le champ vide pour en obtenir un libre.')})
+            if tentative == 4:
+                raise ValidationError({'matricule': (
+                    'Impossible d\'attribuer un matricule : cinq tentatives, '
+                    'chacune prise entre-temps. Réessayez.')})
 
 
 def controler_reinscription(etudiant, classe) -> tuple:

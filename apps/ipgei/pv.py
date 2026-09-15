@@ -115,6 +115,7 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
               if l.moyenne_generale is not None}
 
     promotion = (InscriptionIPGEI.objects
+                 .cursus()
                  .filter(actif=True, annee_universitaire=deliberation.annee_universitaire)
                  .select_related('classe__niveau', 'classe__institution'))
     if deliberation.classe_id:

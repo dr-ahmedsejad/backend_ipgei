@@ -51,6 +51,7 @@ def _concernes(annee_universitaire: str, niveau: str = '', institution=None):
     promotion, et ne permettrait plus de vérifier ce qui a été fait.
     """
     concernes = (InscriptionIPGEI.objects
+                 .cursus()
                  .filter(annee_universitaire=annee_universitaire, actif=True)
                  .filter(statut__in=[InscriptionIPGEI.STATUT_CNIM,
                                      InscriptionIPGEI.STATUT_SORTANT,

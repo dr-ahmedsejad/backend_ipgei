@@ -5,6 +5,7 @@ Les ViewSets restent minces : ils valident, délèguent à `services.py` et
 renvoient. Le périmètre est celui de l'institution principale (IPGEI), via
 `InstitutionScopedMixin` du socle.
 """
+import re
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -444,6 +445,22 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
         inscription.refresh_from_db()
         return Response(self.get_serializer(inscription).data)
 
+    @action(detail=False, methods=['get'], url_path='prochain-matricule')
+    def prochain_matricule(self, request):
+        """
+        Le prochain matricule libre, à PROPOSER dans le formulaire.
+
+        Rien ne le réserve : deux secrétaires qui appellent en même temps
+        reçoivent le même numéro. C'est assumé — le réserver obligerait à
+        libérer les numéros abandonnés, et la création rend de toute façon un
+        message clair sur doublon.
+        """
+        annee = request.query_params.get('annee') or ''
+        if not re.fullmatch(r'\d{4}-\d{4}', annee):
+            raise ValidationError(
+                {'annee': "Indiquez l'année sous la forme « 2026-2027 »."})
+        return Response({'matricule': services.prochain_matricule(annee)})
+
     @action(detail=False, methods=['post'], url_path='nouvelle')
     def nouvelle(self, request):
         """
@@ -490,12 +507,11 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
                 if etudiant is None:
                     raise ValidationError({'etudiant': 'Étudiant introuvable.'})
             else:
-                identite = dict(donnees['nouvel_etudiant'])
-                # `nom_fr` alimente `nom_display`, utilisé par les relevés et la
-                # page publique de vérification : on le renseigne dès la création.
-                etudiant = Etudiant.objects.create(
-                    nom_fr=identite['nom'], statut='actif', **identite,
-                )
+                # Matricule vide : le service en attribue un. L'unicité d'un
+                # matricule IMPOSÉ est vérifiée en amont, par
+                # `NouvelEtudiantSerializer.validate_matricule`.
+                etudiant = services.creer_etudiant(
+                    donnees['nouvel_etudiant'], classe.annee_universitaire)
 
             if InscriptionIPGEI.objects.filter(
                 etudiant=etudiant, annee_universitaire=classe.annee_universitaire,
@@ -505,10 +521,22 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
                     f'{classe.annee_universitaire}.'
                 )
 
-            # Redoubler se contrôle AVANT d'écrire : une fois l'inscription
-            # créée, ses notes et ses absences existent, et la défaire coûte
-            # plus que de la refuser.
-            statut, nb_redoublements = services.controler_reinscription(etudiant, classe)
+            auditeur = bool(donnees.get('auditeur_libre'))
+
+            if auditeur:
+                # UN AUDITEUR NE REDOUBLE PAS : il n'est pas étudiant de
+                # l'IPGEI, donc rien de ce que le contrôle vérifie ne le
+                # concerne. Le lui appliquer refuserait le cas le plus courant —
+                # un ancien reçu au CNIM qui revient suivre la 2e année : son
+                # inscription précédente porte « Autorisé à passer le CNIM », et
+                # le contrôle exige « Redoublant ». Il réclamerait une
+                # dérogation pour un droit qui n'est pas en jeu.
+                statut, nb_redoublements = InscriptionIPGEI.STATUT_ACTIF, 0
+            else:
+                # Redoubler se contrôle AVANT d'écrire : une fois l'inscription
+                # créée, ses notes et ses absences existent, et la défaire coûte
+                # plus que de la refuser.
+                statut, nb_redoublements = services.controler_reinscription(etudiant, classe)
 
             inscription = InscriptionIPGEI.objects.create(
                 etudiant=etudiant,
@@ -518,7 +546,11 @@ class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
                 annee_universitaire=classe.annee_universitaire,
                 statut=statut,
                 nb_redoublements=nb_redoublements,
-                montant_frais=services.frais_pour(classe),
+                auditeur_libre=auditeur,
+                # L'auditeur ne paie pas : lui figer le tarif de la promotion le
+                # ferait apparaître dans les impayés jusqu'à ce qu'on l'en sorte
+                # à la main.
+                montant_frais=0 if auditeur else services.frais_pour(classe),
             )
 
             # Inscription pédagogique, dans la même transaction : un étudiant
@@ -4368,7 +4400,9 @@ class TableauBordIPGEIViewSet(GenericViewSet):
     def resume(self, request):
         annee = request.query_params.get('annee')
         classes = Classe.objects.filter(actif=True)
-        inscriptions = InscriptionIPGEI.objects.filter(actif=True)
+        # Les auditeurs libres occupent une chaise, pas une ligne d'effectif :
+        # ce compteur est celui de la promotion, et sert à la déclarer.
+        inscriptions = InscriptionIPGEI.objects.cursus().filter(actif=True)
         if annee:
             classes = classes.filter(annee_universitaire=annee)
             inscriptions = inscriptions.filter(annee_universitaire=annee)

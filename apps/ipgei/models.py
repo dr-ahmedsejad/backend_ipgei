@@ -855,6 +855,25 @@ class SousGroupeTP(Departement):
         super().save(*args, **kwargs)
 
 
+class InscriptionQuerySet(models.QuerySet):
+    """Les inscriptions IPGEI, et le seul endroit qui sait écarter un auditeur."""
+
+    def cursus(self):
+        """
+        Les inscriptions QUI COMPTENT — celles de la promotion, auditeurs
+        libres exclus.
+
+        À appeler partout où l'on constitue une POPULATION : jury, classement,
+        PV, CNIM, effectifs, moyennes de classe, rangs. Pas ailleurs : la
+        saisie des notes, l'émargement et le relevé doivent voir l'auditeur.
+
+        Un filtre unique, parce que la faute n'est pas rattrapable à l'œil :
+        un auditeur oublié dans un classement ne s'y voit pas, il y décale
+        seulement le rang de tous les autres. Cf. `auditeur_libre`.
+        """
+        return self.filter(auditeur_libre=False)
+
+
 class InscriptionIPGEI(models.Model):
     """
     Rattachement d'un étudiant à une classe pour une année universitaire.
@@ -863,6 +882,9 @@ class InscriptionIPGEI(models.Model):
     journalise l'ancien rattachement dans `HistoriqueClasse` : notes et absences
     pointent sur l'inscription, donc rien n'est copié ni perdu (plan §4.6).
     """
+
+    objects = InscriptionQuerySet.as_manager()
+
     STATUT_ACTIF      = 'actif'
     STATUT_ADMIS      = 'admis'
     STATUT_REORIENTE  = 'reoriente'
@@ -936,6 +958,36 @@ class InscriptionIPGEI(models.Model):
     )
     date_inscription    = models.DateField(auto_now_add=True)
     actif               = models.BooleanField(default=True)
+
+    #: SUIT LA SCOLARITÉ SANS ÊTRE DE LA PROMOTION.
+    #:
+    #: Deux cas, et un seul besoin. Un ancien de l'IPGEI autorisé à refaire sa
+    #: deuxième année — il garde son matricule, la contrainte d'unicité portant
+    #: sur (étudiant, année) laisse passer la nouvelle inscription. Ou quelqu'un
+    #: venu d'une prépa étrangère pour sa seule deuxième année, à qui l'on
+    #: attribue un matricule. Ni l'un ni l'autre n'est étudiant de l'IPGEI ; les
+    #: deux suivent les cours, composent, et doivent obtenir un relevé.
+    #:
+    #: Ce n'est PAS une valeur de `statut` : le statut est un axe de cycle de
+    #: vie — actif, admis, sortant, abandon — et un auditeur en a un aussi, il
+    #: peut abandonner en cours d'année. Les fondre rendrait « auditeur qui a
+    #: abandonné » inexprimable.
+    #:
+    #: Ce que le drapeau commande : l'auditeur est écarté de TOUTE population
+    #: collective — jury, classement, PV, CNIM, effectifs, moyennes de classe
+    #: et rangs des autres. Il reste un étudiant ordinaire partout ailleurs :
+    #: classe, sous-groupe, emploi du temps, émargement, absences, saisie des
+    #: notes, relevé. Le point d'entrée unique est `objects.cursus()`.
+    #:
+    #: Le piège n'est pas qu'il apparaisse où il ne devrait pas — cela se
+    #: verrait. C'est qu'il DÉCALE SILENCIEUSEMENT le rang des autres : un
+    #: auditeur troisième fait reculer d'un cran les cent quarante derrière
+    #: lui, sur un PV signé comme sur les relevés déjà remis.
+    auditeur_libre      = models.BooleanField(
+        default=False,
+        help_text="Suit la scolarité sans être de la promotion : ni jury, ni "
+                  'classement, ni effectifs. Conserve notes et relevé.',
+    )
 
     # ── Frais ────────────────────────────────────────────────────────────────
     # Mêmes champs que l'inscription administrative du socle, et même grille
