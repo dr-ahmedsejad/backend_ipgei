@@ -2118,6 +2118,102 @@ def _date_seance(semaine: SemaineIPGEI, jour) -> object:
     return semaine.date_debut + timedelta(days=decalage)
 
 
+def _details_lisibles(conflits: list) -> list:
+    """
+    Les vingt premiers motifs, sans répétition et dans l'ordre.
+
+    `conflits` compte les CASES écartées, et c'est ce compte qui dit l'ampleur.
+    La liste, elle, sert à lire : deux fois la même phrase n'apprend rien, et
+    une clé en double casse le rendu côté navigateur. Le plafond reste — une
+    grille entière en collision produirait des centaines de lignes dont aucune
+    ne serait lue.
+    """
+    vus, propres = set(), []
+    for ligne in conflits:
+        if ligne not in vus:
+            vus.add(ligne)
+            propres.append(ligne)
+        if len(propres) == 20:
+            break
+    return propres
+
+
+def _case_en_conflit(semaine, modele) -> str:
+    """
+    Nomme la case écartée — sous-groupe compris.
+
+    Sans lui, deux sous-groupes d'un même créneau produisaient DEUX LIGNES
+    IDENTIQUES : on lisait deux fois la même chose sans savoir qu'il s'agissait
+    de deux cases, et React refusait la clé en double.
+    """
+    sous_groupe = f' ({modele.sous_groupe.groupe})' if modele.sous_groupe_id else ''
+    return f'S{semaine.numero} {modele.jour} {modele.creneau}{sous_groupe}'
+
+
+def creneaux_pris_par_epreuve(classe, semaines):
+    """
+    Les cases qu'une ÉPREUVE interdit à cette classe, semaine par semaine.
+
+    Renvoie `{(semaine_id, jour_id, creneau_id): "DS Mathématiques"}`.
+
+    Une épreuve n'entre pas dans la grille — sa durée ne tombe pas sur les
+    créneaux de 1h30 — et rien n'empêchait donc d'y poser un cours. Le contrôle
+    existait déjà dans l'autre sens (une épreuve refuse de recouvrir un cours,
+    cf. `EpreuveIPGEISerializer`) ; il manquait ici, si bien qu'on pouvait
+    planifier une séance là où la classe compose.
+
+    Le recouvrement PARTIEL suffit, comme pour l'épreuve : un DS de 8h00 à
+    10h00 ne mord que quinze minutes sur 09h45-11h15, mais personne ne peut y
+    commencer un cours — la classe est encore sur sa copie.
+    """
+    from apps.parametres.models import Creneau, Jour
+
+    from .models import EpreuveIPGEI, JOURS_SEMAINE
+
+    if not semaines:
+        return {}
+
+    par_date = {}
+    for semaine in semaines:
+        par_date.setdefault(semaine.date_debut, []).append(semaine)
+
+    # Les épreuves de CETTE classe sur la période couverte, en une requête.
+    debut = min(s.date_debut for s in semaines)
+    fin = max((s.date_fin or s.date_debut) for s in semaines)
+    epreuves = list(
+        EpreuveIPGEI.objects
+        .filter(classes=classe, date__gte=debut, date__lte=fin)
+        .select_related('matiere')
+        .distinct()
+    )
+    if not epreuves:
+        return {}
+
+    creneaux = list(Creneau.objects.all())
+    # `.lower()` : `JOURS_SEMAINE` rend « lundi », le référentiel porte
+    # « Lundi ». Sans cette normalisation, la recherche échoue en silence et le
+    # garde-fou ne bloque plus rien — c'est exactement ce qu'il a fait au
+    # premier essai. Les autres appelants d'`ancrage_epreuve` font de même.
+    jours = {j.jour.lower(): j for j in Jour.objects.all()}
+
+    index = {}
+    for epreuve in epreuves:
+        jour = jours.get(JOURS_SEMAINE[epreuve.date.weekday()])
+        if jour is None:
+            continue
+        semaine = next(
+            (s for s in semaines
+             if s.date_debut <= epreuve.date <= (s.date_fin or s.date_debut)),
+            None)
+        if semaine is None:
+            continue
+        libelle = f'{epreuve.get_type_epreuve_display()} {epreuve.matiere.code}'
+        for creneau in creneaux:
+            if epreuve.recouvre(creneau):
+                index[(semaine.pk, jour.pk, creneau.pk)] = libelle
+    return index
+
+
 def _occupation_ailleurs(classe, semaines):
     """
     Ce que les AUTRES classes retiennent déjà, semaine par semaine.
@@ -2163,6 +2259,7 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
     creees = ignorees = remplacees = 0
     conflits = []
     occupation = _occupation_ailleurs(grille.classe, semaines)
+    epreuves = creneaux_pris_par_epreuve(grille.classe, semaines)
 
     for semaine in semaines:
         if semaine.type_semaine != SemaineIPGEI.TYPE_COURS:
@@ -2175,6 +2272,17 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
                 'creneau':     modele.creneau,
                 'sous_groupe': modele.sous_groupe,
             }
+            # UNE ÉPREUVE PASSE AVANT TOUT, et `ecraser` n'y change rien : la
+            # classe compose, elle ne peut pas être en cours. On l'écarte avant
+            # même de regarder ce qui occupe la case, sans quoi l'écrasement
+            # poserait un cours sur un examen.
+            sur_epreuve = epreuves.get(
+                (semaine.pk, modele.jour_id, modele.creneau_id))
+            if sur_epreuve is not None:
+                conflits.append(
+                    f'{_case_en_conflit(semaine, modele)} — '
+                    f'{sur_epreuve} : la classe compose')
+                continue
             # « Un enseignant, une salle » — la regle du serializer, que ce
             # chemin contournait faute de passer par lui. On ECARTE la case
             # plutot que d'interrompre : sur seize semaines, tout annuler pour
@@ -2189,9 +2297,8 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
                     quoi = str(modele.salle) if ou else None
                 if ou is not None:
                     conflits.append(
-                        f'S{semaine.numero} {modele.jour} {modele.creneau} — '
-                        f'{quoi} déjà pris en {ou}'
-                    )
+                        f'{_case_en_conflit(semaine, modele)} — '
+                        f'{quoi} déjà pris en {ou}')
                     continue
 
             existante = SeanceReelle.objects.filter(**filtre).first()
@@ -2216,10 +2323,119 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
     return {
         'creees': creees, 'ignorees': ignorees, 'remplacees': remplacees,
         'conflits': len(conflits),
-        # Plafonne : une grille entiere en collision produirait des centaines de
-        # lignes, dont aucune ne serait lue. Les premieres suffisent a
-        # comprendre, le compte dit l'ampleur.
-        'details_conflits': conflits[:20],
+        'details_conflits': _details_lisibles(conflits),
+    }
+
+
+@transaction.atomic
+def dupliquer_semaine(classe, source: SemaineIPGEI, cibles, *, ecraser=False) -> dict:
+    """
+    Recopie les séances d'une semaine RÉELLE vers une ou plusieurs autres.
+
+    La grille type existait déjà, mais elle est un patron abstrait qu'il faut
+    remplir à part. À l'usage, personne ne le fait : au relevé, trois cases de
+    grille pour dix-sept séances réelles. On bâtit la semaine 1 sur l'écran de
+    l'emploi du temps, et l'on veut les suivantes identiques — c'est ce geste
+    qui manquait, et son absence se lisait comme une panne de la duplication.
+
+    Mêmes règles que `dupliquer_grille`, dont c'est le pendant :
+
+    - une épreuve interdit sa case, et `ecraser` n'y change rien ;
+    - « un enseignant, une salle » vaut contre les AUTRES classes ; la case en
+      collision est écartée avec son motif, sans interrompre le lot ;
+    - sans `ecraser`, une case déjà occupée reste telle quelle.
+
+    Une différence, et elle est délibérée : la copie porte sa propre origine,
+    **`dupliquee`**. Ni celle de sa source — une copie de séance manuelle
+    deviendrait alors inécrasable, et re-dupliquer après avoir corrigé la
+    semaine 1 ne changerait plus rien —, ni `grille`, qui mentirait sur sa
+    provenance. L'ORIGINAL de la semaine source, lui, garde `manuelle` et
+    reste protégé.
+
+    Les séances ANNULÉES ne sont pas recopiées : on duplique un emploi du
+    temps, pas l'histoire de ses accidents.
+    """
+    from .models import SeanceReelle
+
+    cibles = [s for s in cibles
+              if s.type_semaine == SemaineIPGEI.TYPE_COURS and s.pk != source.pk]
+    modeles = list(
+        SeanceReelle.objects
+        .filter(classe=classe, semaine=source, annulee=False)
+        .select_related('jour', 'creneau', 'matiere', 'prof', 'salle',
+                        'sous_groupe', 'type_seance')
+    )
+    if not modeles:
+        raise ValidationError(
+            f'La semaine {source.numero} de {classe.nom} ne contient aucune '
+            "séance : il n'y a rien à dupliquer."
+        )
+    if not cibles:
+        raise ValidationError(
+            'Aucune semaine de cours à alimenter — vérifiez la portée choisie.')
+
+    creees = ignorees = remplacees = 0
+    conflits = []
+    occupation = _occupation_ailleurs(classe, cibles)
+    epreuves = creneaux_pris_par_epreuve(classe, cibles)
+
+    for semaine in cibles:
+        for modele in modeles:
+            filtre = {
+                'classe':      classe,
+                'semaine':     semaine,
+                'jour':        modele.jour,
+                'creneau':     modele.creneau,
+                'sous_groupe': modele.sous_groupe,
+            }
+            sur_epreuve = epreuves.get(
+                (semaine.pk, modele.jour_id, modele.creneau_id))
+            if sur_epreuve is not None:
+                conflits.append(
+                    f'{_case_en_conflit(semaine, modele)} — '
+                    f'{sur_epreuve} : la classe compose')
+                continue
+
+            pris = occupation.get((semaine.pk, modele.jour_id, modele.creneau_id))
+            if pris is not None:
+                ou = (pris['profs'].get(modele.prof_id) if modele.prof_id else None)
+                quoi = str(modele.prof) if ou else None
+                if ou is None and modele.salle_id:
+                    ou = pris['salles'].get(modele.salle_id)
+                    quoi = str(modele.salle) if ou else None
+                if ou is not None:
+                    conflits.append(
+                        f'{_case_en_conflit(semaine, modele)} — '
+                        f'{quoi} déjà pris en {ou}')
+                    continue
+
+            # On n'écrase que ce qu'une duplication a posé — d'un patron ou
+            # d'une semaine. Une saisie à la main et une permutation restent
+            # intactes, c'est la promesse de la case à cocher.
+            reprises = (SeanceReelle.ORIGINE_GRILLE, SeanceReelle.ORIGINE_DUPLIQUEE)
+            existante = SeanceReelle.objects.filter(**filtre).first()
+            if existante is not None:
+                if not ecraser or existante.origine not in reprises:
+                    ignorees += 1
+                    continue
+                existante.delete()
+                remplacees += 1
+            SeanceReelle.objects.create(
+                **filtre,
+                matiere=modele.matiere,
+                prof=modele.prof,
+                salle=modele.salle,
+                type_seance=modele.type_seance,
+                date=_date_seance(semaine, modele.jour),
+                origine=SeanceReelle.ORIGINE_DUPLIQUEE,
+                seance_type=modele.seance_type,
+            )
+            creees += 1
+
+    return {
+        'creees': creees, 'ignorees': ignorees, 'remplacees': remplacees,
+        'conflits': len(conflits),
+        'details_conflits': _details_lisibles(conflits),
     }
 
 

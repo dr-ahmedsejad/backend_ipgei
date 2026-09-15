@@ -1565,15 +1565,19 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """
-        Deux règles sur une même case horaire.
+        Trois règles sur une même case horaire.
 
-        L'une contre le doublon, l'autre contre le mélange : une case appartient
-        à la classe entière OU à ses sous-groupes, jamais aux deux.
+        L'une contre le doublon, l'autre contre le mélange — une case appartient
+        à la classe entière OU à ses sous-groupes, jamais aux deux —, et la
+        dernière contre les épreuves : on ne met pas une classe en cours pendant
+        qu'elle compose.
         """
         def valeur(champ):
             return attrs.get(champ, getattr(self.instance, champ, None))
 
         _exiger_matiere(valeur('type_seance'), valeur('matiere'))
+        self._refuser_creneau_d_epreuve(
+            valeur('classe'), valeur('semaine'), valeur('jour'), valeur('creneau'))
 
         _refuser_double_affectation(
             SeanceReelle.objects.filter(
@@ -1600,6 +1604,30 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
         _refuser_case_mixte(voisines, self.instance, sous_groupe)
         return attrs
 
+    @staticmethod
+    def _refuser_creneau_d_epreuve(classe, semaine, jour, creneau):
+        """
+        On ne planifie pas un cours là où la classe compose.
+
+        Le pendant du contrôle que l'épreuve applique déjà en sens inverse
+        (`EpreuveIPGEISerializer._verifier_creneaux_libres`). Il manquait ici :
+        une épreuve n'entre pas dans la grille — sa durée ne tombe pas sur les
+        créneaux de 1h30 —, si bien que rien n'empêchait d'y poser une séance.
+
+        Le calcul est mutualisé avec la duplication : une seule règle, un seul
+        endroit où elle peut se tromper.
+        """
+        if not all((classe, semaine, jour, creneau)):
+            return
+        from . import services
+
+        pris = services.creneaux_pris_par_epreuve(classe, [semaine])
+        libelle = pris.get((semaine.pk, jour.pk, creneau.pk))
+        if libelle is not None:
+            raise serializers.ValidationError({'creneau': (
+                f'{libelle} occupe ce créneau : la classe compose, elle ne peut '
+                'pas être en cours.')})
+
     def get_nb_absents(self, obj) -> int:
         # `nb_absents_annote` vient du queryset de la vue (un seul COUNT groupe).
         # Sans lui, afficher une semaine de 30 seances declencherait 30 requetes.
@@ -1616,6 +1644,29 @@ class DupliquerGrilleSerializer(serializers.Serializer):
     )
     nb_semaines    = serializers.IntegerField(required=False, min_value=1, max_value=40)
     ecraser        = serializers.BooleanField(default=False)
+
+
+class DupliquerSemaineSerializer(serializers.Serializer):
+    """
+    Recopie une semaine réelle vers d'autres — le pendant de la grille type.
+
+    `semaines` désigne les cibles explicitement, ou `nb_semaines` prend les N
+    suivantes. Les deux sont acceptés parce que les deux gestes existent :
+    « celles-ci, que je coche » et « les huit prochaines ».
+    """
+    semaine_source = serializers.IntegerField()
+    semaines       = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True,
+        help_text='Semaines cibles. Vide, `nb_semaines` prend le relais.',
+    )
+    nb_semaines    = serializers.IntegerField(required=False, min_value=1, max_value=40)
+    ecraser        = serializers.BooleanField(default=False)
+
+    def validate(self, attrs):
+        if not attrs.get('semaines') and not attrs.get('nb_semaines'):
+            raise serializers.ValidationError(
+                'Indiquez les semaines à alimenter, ou un nombre de semaines.')
+        return attrs
 
 
 class EditionLotSerializer(serializers.Serializer):

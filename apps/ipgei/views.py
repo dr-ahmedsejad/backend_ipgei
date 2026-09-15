@@ -55,7 +55,8 @@ from .models import (
 )
 from .serializers import (
     AbsenceSeanceSerializer, ClasseSelectSerializer, ClasseSerializer,
-    DeliberationSerializer, DupliquerGrilleSerializer, EditionLotSerializer,
+    DeliberationSerializer, DupliquerGrilleSerializer,
+    DupliquerSemaineSerializer, EditionLotSerializer,
     EmploiArchiveSerializer, EpreuveIPGEISerializer, EvaluationSerializer,
     GrilleTypeListSerializer, GrilleTypeSerializer,
     HistoriqueClasseSerializer, InscriptionCompleteSerializer,
@@ -3398,6 +3399,54 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
     }
     ordering           = ['semaine', 'jour_id', 'creneau__ordre']
     pagination_class   = NoPagination
+
+    @action(detail=False, methods=['post'], url_path='dupliquer-semaine')
+    def dupliquer_semaine(self, request):
+        """
+        Recopie une semaine réelle vers une ou plusieurs autres.
+
+        Le pendant de la duplication de grille, pour le geste qu'on fait
+        vraiment : bâtir la semaine 1 sur l'écran de l'emploi du temps, puis
+        vouloir les suivantes identiques. Corps :
+        `{classe, semaine_source, semaines | nb_semaines, ecraser}`.
+        """
+        classe = Classe.objects.filter(pk=request.data.get('classe')).first()
+        if classe is None:
+            raise ValidationError({'classe': 'Classe requise.'})
+
+        entree = DupliquerSemaineSerializer(data=request.data)
+        entree.is_valid(raise_exception=True)
+        donnees = entree.validated_data
+
+        source = SemaineIPGEI.objects.filter(pk=donnees['semaine_source']).first()
+        if source is None:
+            raise ValidationError({'semaine_source': 'Semaine introuvable.'})
+
+        if donnees.get('semaines'):
+            # Cibles désignées une à une : on les contraint au MÊME SEMESTRE.
+            # S1 et S3 portant les mêmes dates, une cible prise ailleurs
+            # poserait les séances sur un semestre qu'on ne regarde pas — et la
+            # duplication passerait pour sans effet.
+            cibles = list(SemaineIPGEI.objects.filter(
+                pk__in=donnees['semaines'], semestre=source.semestre))
+            manquantes = set(donnees['semaines']) - {s.pk for s in cibles}
+            if manquantes:
+                raise ValidationError({'semaines': (
+                    f'{len(manquantes)} semaine(s) hors du semestre '
+                    f'{source.semestre.code} : une duplication ne traverse pas '
+                    'les semestres.')})
+        else:
+            # Les N suivantes, source exclue — `semaines_du_lot` la comprend.
+            cibles = [s for s in services.semaines_du_lot(
+                source, donnees['nb_semaines'] + 1) if s.pk != source.pk]
+            cibles = cibles[:donnees['nb_semaines']]
+
+        resultat = self._executer(
+            services.dupliquer_semaine, classe, source, cibles,
+            ecraser=donnees['ecraser'],
+        )
+        resultat['semaines_traitees'] = len(cibles)
+        return Response(resultat)
 
     @action(detail=False, methods=['get'], url_path='semaine')
     def par_semaine(self, request):

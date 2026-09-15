@@ -2079,8 +2079,16 @@ class SeanceReelle(models.Model):
     ORIGINE_GRILLE      = 'grille'
     ORIGINE_MANUELLE    = 'manuelle'
     ORIGINE_PERMUTATION = 'permutation'
+    #: Recopiée d'une AUTRE SEMAINE, et non d'un patron.
+    #:
+    #: Une valeur à part, et non l'origine héritée de la source : la copie doit
+    #: rester écrasable par une nouvelle duplication, là où l'original saisi à
+    #: la main ne doit jamais l'être. Hériter aurait rendu toute re-duplication
+    #: sans effet — on corrige la semaine 1, et les suivantes ne bougent plus.
+    ORIGINE_DUPLIQUEE   = 'dupliquee'
     ORIGINE_CHOICES     = [
         (ORIGINE_GRILLE,      'Dupliquée de la grille type'),
+        (ORIGINE_DUPLIQUEE,   "Recopiée d'une autre semaine"),
         (ORIGINE_MANUELLE,    'Ajoutée manuellement'),
         (ORIGINE_PERMUTATION, 'Issue d\'une permutation'),
     ]
@@ -2112,7 +2120,19 @@ class SeanceReelle(models.Model):
     )
     date         = models.DateField(null=True, blank=True, help_text='Date réelle, déduite de la semaine et du jour.')
 
-    origine      = models.CharField(max_length=12, choices=ORIGINE_CHOICES, default=ORIGINE_GRILLE)
+    #: D'OÙ VIENT CETTE SÉANCE — et le défaut est `manuelle`, non `grille`.
+    #:
+    #: Il valait `grille`, si bien que TOUTE séance saisie à la main en héritait.
+    #: Or c'est sur cette étiquette que repose la promesse de la duplication —
+    #: « les séances ajoutées à la main ne sont jamais écrasées » —, qui était
+    #: donc fausse : onze séances manuelles étaient marquées « grille » et
+    #: auraient été détruites au premier écrasement.
+    #:
+    #: `seance_type` tranche sans ambiguïté : nul, la séance n'a jamais été
+    #: dupliquée d'un patron. C'est ce critère qui a servi à réétiqueter
+    #: l'existant (migration `0041`).
+    origine      = models.CharField(max_length=12, choices=ORIGINE_CHOICES,
+                                    default=ORIGINE_MANUELLE)
     seance_type  = models.ForeignKey(
         SeanceType, on_delete=models.SET_NULL, null=True, blank=True, related_name='occurrences',
     )
