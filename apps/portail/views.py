@@ -54,23 +54,31 @@ class MonEmploiView(APIView):
         from django.db.models import Max, Q
         from apps.suivi.models import Suivie
         from apps.parametres.models import Creneau, Seance
-        from apps.inscriptions.models import InscriptionPedagogique
+
+        from apps.ipgei.models import SemestreIPGEI
+
+        from .ipgei_source import inscription_courante
 
         etudiant = _get_etudiant(request)
 
-        # ── Déterminer annee_universitaire + semestre_id depuis l'inscription péda ──
-        ip = InscriptionPedagogique.objects.filter(
-            inscription_admin__etudiant=etudiant,
-        ).select_related('semestre', 'inscription_admin__annee_univ').order_by(
-            '-inscription_admin__annee_univ__annee'
-        ).first()
-
-        if not ip:
+        # LE CONTEXTE VIENT DE L'INSCRIPTION IPGEI, non de l'inscription
+        # pédagogique du socle : cette dernière est vide depuis que l'IPGEI l'a
+        # remplacée, et l'écran rendait donc une grille vide sans rien dire.
+        #
+        # `Suivie` en revanche est bien alimentée — par la projection
+        # `apps/ipgei/miroir.py` —, et son `departement_id` EST l'identifiant
+        # de la classe : une classe IPGEI hérite de `Departement`, une seule
+        # ligne logique pour les deux. Rien à rebrancher de ce côté.
+        inscription = inscription_courante(etudiant)
+        if inscription is None:
             return Response({'creneaux': [], 'grille': {}, 'annee': '', 'semestre': ''})
 
-        annee_univ  = ip.inscription_admin.annee_univ.annee
-        semestre_id = ip.semestre_id
-        dept_id     = etudiant.departement_id
+        annee_univ  = inscription.annee_universitaire
+        dept_id     = inscription.classe_id
+        # Le semestre du socle ne sert qu'à départager deux suivis d'une même
+        # semaine ; l'IPGEI n'en a pas l'équivalent ici, et `Suivie` est déjà
+        # restreint à l'année et à la classe.
+        semestre_id = None
 
         # ── Résolution créneau label → id ──
         creneaux_all = list(Creneau.objects.values('id', 'creneau', 'ordre'))
@@ -195,7 +203,16 @@ class MonEmploiView(APIView):
                 'numero_semaine': s.numero_semaine,
             })
 
-        semestre_nom = ip.semestre.semestre if ip.semestre else ''
+        # Le semestre affiché en en-tête vient du cursus IPGEI : celui de la
+        # parité en cours pour le niveau de la classe. `ip.semestre` venait de
+        # l'inscription pédagogique du socle, que ce module ne lit plus.
+        semestre_nom = ''
+        semestre_courant = next(
+            (s for s in SemestreIPGEI.objects.filter(
+                annee_universitaire=annee_univ).order_by('code')
+             if inscription.niveau in s.niveaux), None)
+        if semestre_courant is not None:
+            semestre_nom = semestre_courant.code
 
         return Response({
             'creneaux':        creneaux_used,
@@ -226,57 +243,85 @@ class MesAbsencesView(APIView):
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
 class MesNotesView(APIView):
-    """GET /api/v1/portail/notes/"""
+    """
+    GET /api/v1/portail/notes/
+
+    Les notes IPGEI de toutes les années de l'étudiant, et non la couche LMD
+    que ce module lisait — elle est vide depuis que l'IPGEI l'a remplacée.
+
+    Seuls les semestres dont le JURY A STATUÉ sont rendus : une moyenne n'est
+    pas une décision, et la publier avant la délibération remplit le guichet de
+    réclamations sur des chiffres provisoires.
+    """
     permission_classes = [IsEtudiant]
 
     def get(self, request):
-        try:
-            from apps.inscriptions.models import InscriptionElement, InscriptionPedagogique
-            from .serializers import NoteEtudiantSerializer
+        from apps.ipgei import services
 
-            etudiant = _get_etudiant(request)
-            inscriptions_ped = InscriptionPedagogique.objects.filter(
-                inscription_admin__etudiant=etudiant,
-            ).values_list('id', flat=True)
+        from .ipgei_source import inscriptions_de, note_en_ligne, notes_publiables
 
-            elements = (
-                InscriptionElement.objects
-                .select_related(
-                    'em',
-                    'inscription_ped__semestre',
-                    'inscription_ped__inscription_admin__annee_univ',
-                )
-                .prefetch_related('notes', 'resultats')
-                .filter(inscription_ped__in=inscriptions_ped)
-            )
-
-            serializer = NoteEtudiantSerializer(elements, many=True)
-            return Response(serializer.data)
-        except Exception as e:
-            import traceback
-            return Response({'detail': str(e), 'trace': traceback.format_exc()}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        etudiant = _get_etudiant(request)
+        lignes = []
+        for inscription in inscriptions_de(etudiant):
+            seuil = services.seuil_applicable(
+                inscription, inscription.annee_universitaire)
+            lignes += [note_en_ligne(n, seuil)
+                       for n in notes_publiables(inscription)]
+        return Response(lignes)
 
 
 # ── Résultats semestriels ─────────────────────────────────────────────────────
 class MesResultatsView(APIView):
-    """GET /api/v1/portail/resultats/semestres/"""
+    """
+    GET /api/v1/portail/resultats/semestres/
+
+    La moyenne de chaque semestre DÉLIBÉRÉ, et la décision du jury.
+
+    La moyenne rendue est celle que le jury a FIGÉE sur sa ligne quand elle
+    existe, non un recalcul : le portail doit dire ce que le jury a vu, sinon
+    l'étudiant lit un chiffre que son PV ne porte pas.
+    """
     permission_classes = [IsEtudiant]
 
     def get(self, request):
-        try:
-            from apps.evaluations.models import ResultatSemestre
-            from apps.evaluations.serializers import ResultatSemestreSerializer
+        from apps.ipgei import services
+        from apps.ipgei.models import (Deliberation, LigneDeliberation,
+                                       SemestreIPGEI)
 
-            etudiant = _get_etudiant(request)
-            resultats = ResultatSemestre.objects.select_related(
-                'inscription_admin__annee_univ',
-                'inscription_admin__filiere',
-            ).filter(inscription_admin__etudiant=etudiant)
+        from .ipgei_source import inscriptions_de
 
-            serializer = ResultatSemestreSerializer(resultats, many=True, context={'request': request})
-            return Response(serializer.data)
-        except Exception as e:
-            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        etudiant = _get_etudiant(request)
+        sorties = []
+        for inscription in inscriptions_de(etudiant):
+            # SEMESTRIELLES **ET** ANNUELLES. N'exposer que les premières
+            # rendait une liste vide pour tout le monde : au relevé du
+            # 15/09/2026, les onze délibérations validées sont annuelles ou de
+            # rattrapage, aucune n'est rattachée à un semestre. Un écran vide
+            # là où un jury a statué se lit comme une panne.
+            for ligne in (LigneDeliberation.objects
+                          .filter(inscription=inscription,
+                                  deliberation__statut=Deliberation.STATUT_VALIDEE)
+                          .select_related('deliberation__semestre')
+                          .order_by('deliberation__portee')):
+                semestre = ligne.deliberation.semestre
+                # La valeur figée d'abord ; le recalcul seulement si le jury
+                # n'en a pas gardé — un jury ancien peut ne rien avoir figé.
+                moyenne = ligne.moyenne_generale
+                if moyenne is None and semestre is not None:
+                    moyenne, _, _ = services.moyenne_semestrielle(
+                        inscription, semestre, absents_a_zero=True)
+                sorties.append({
+                    'id':              ligne.pk,
+                    'semestre':        semestre.code if semestre else 'Année',
+                    'annee_univ':      ligne.deliberation.annee_universitaire,
+                    'moyenne':         float(moyenne) if moyenne is not None else None,
+                    # Pas de crédits à l'IPGEI : le total des coefficients est
+                    # ce qui pèse, et le relevé le porte déjà.
+                    'credits_valides': 0,
+                    'decision':        ligne.get_decision_display() or '',
+                    'filiere':         inscription.classe.nom,
+                })
+        return Response(sorties)
 
 
 # ── Documents ─────────────────────────────────────────────────────────────────
@@ -463,6 +508,69 @@ class DocumentsDisponiblesView(APIView):
 
     def get(self, request):
         import threading
+
+        from apps.ipgei.models import Deliberation, LigneDeliberation, SemestreIPGEI
+
+        from .ipgei_source import inscription_courante, inscriptions_de
+
+        etudiant = _get_etudiant(request)
+        # L'inscription IPGEI, non l'administrative du socle : cette dernière
+        # est vide, et l'écran ne proposait donc AUCUN document — pas même
+        # l'attestation, que rien n'empêche pourtant de délivrer.
+        inscription = inscription_courante(etudiant)
+        if inscription is None:
+            return Response({'attestation': None, 'releves': []})
+
+        annee_univ = inscription.annee_universitaire
+
+        attestation = {
+            'type_document': 'ipgei_attestation_inscription',
+            'label':         "Attestation d'inscription",
+            'annee_univ':    annee_univ,
+        }
+
+        # Les relevés de TOUTES les années, y compris historiques — et
+        # seulement ceux dont le jury a statué. Un relevé remis avant la
+        # délibération porte des chiffres qui ne sont pas des décisions.
+        releves = []
+        for insc in inscriptions_de(etudiant):
+            semestres = (SemestreIPGEI.objects
+                         .filter(pk__in=LigneDeliberation.objects
+                                 .filter(inscription=insc,
+                                         deliberation__statut=Deliberation.STATUT_VALIDEE,
+                                         deliberation__semestre__isnull=False)
+                                 .values_list('deliberation__semestre_id', flat=True))
+                         .order_by('code'))
+            for semestre in semestres:
+                releves.append({
+                    'type_document':  'ipgei_releve_semestre',
+                    'semestre_id':    semestre.pk,
+                    'semestre_code':  semestre.code,
+                    'semestre_label': f'Semestre {semestre.code[1:]}',
+                    'annee_univ':     insc.annee_universitaire,
+                    'label': f'Relevé de notes — {semestre.code} '
+                             f'({insc.annee_universitaire})',
+                })
+        return Response({'attestation': attestation, 'releves': releves})
+
+    def _pregeneration_desactivee(self, request):
+        """
+        L'ANCIEN CORPS, conservé pour mémoire et volontairement débranché.
+
+        Il pré-générait les PDF en threads démons pour rendre le
+        téléchargement instantané. Ce mécanisme visait les types de documents
+        du socle (`attestation_inscription`, `releve_semestre`) et leurs
+        générateurs ; l'IPGEI a les siens, avec son propre registre, sa
+        numérotation et son QR de vérification.
+
+        Le rebrancher demande de reprendre `_find_or_create_doc` et
+        `_pregen_pdf_bg` sur `apps/ipgei/documents.py` — un travail à part, qui
+        ne doit pas retarder le rétablissement de la LISTE. Sans
+        pré-génération, le premier téléchargement prend quelques secondes de
+        plus ; avec l'ancien code, il ne prenait rien du tout parce qu'il ne
+        produisait rien.
+        """
+        import threading
         from apps.inscriptions.models import InscriptionAdministrative, InscriptionPedagogique
 
         etudiant = _get_etudiant(request)
@@ -557,224 +665,119 @@ class DocumentsDisponiblesView(APIView):
 
         return Response({'attestation': attestation, 'releves': releves})
 
-
 class TelechargerDirectView(APIView):
-    """GET /api/v1/portail/documents/telecharger-direct/?type=...&semestre=...
+    """
+    GET /api/v1/portail/documents/telecharger-direct/?type=…&semestre=…
 
-    Si le PDF est déjà prêt (pré-généré par DocumentsDisponiblesView) → sert
-    immédiatement sans lancer wkhtmltopdf.
+    Délivre le document par les GÉNÉRATEURS IPGEI, et non par ceux du socle.
 
-    Sinon → génère le PDF de façon synchrone dans le thread courant.
-    Avant d'appeler pdfkit, _mark_sockets_non_inheritable() (dans services.py)
-    marque tous les sockets Python comme non-héritables : wkhtmltopdf ne peut
-    donc plus les fermer à sa sortie, ce qui éliminait TypeError: Failed to fetch.
+    L'ancien corps — trois cents lignes — cherchait l'inscription
+    administrative du socle, hachait les notes de la couche LMD pour détecter un
+    changement, et pré-générait en threads démons. Toutes ces tables sont vides
+    depuis que l'IPGEI les a remplacées : l'étudiant recevait « Aucune
+    inscription trouvée ».
+
+    Les générateurs IPGEI font déjà ce que ce code réimplémentait : registre,
+    numéro de série, empreinte SHA-256, QR de vérification, mention de
+    duplicata. Les appeler vaut mieux que de les doubler.
+
+    Le RELEVÉ reste verrouillé tant qu'aucun jury validé n'a statué sur le
+    semestre — l'attestation, elle, ne dépend d'aucune délibération.
     """
     permission_classes = [IsEtudiant]
 
+    TYPES = {
+        'ipgei_attestation_inscription': 'attestation',
+        'ipgei_releve_semestre':         'releve_semestre',
+        'ipgei_releve_annuel':           'releve_annuel',
+        # Les noms du socle restent acceptés : d'anciens liens les portent.
+        'attestation_inscription':       'attestation',
+        'releve_semestre':               'releve_semestre',
+    }
+
     def get(self, request):
-        import hashlib, os
-        from apps.inscriptions.models import InscriptionAdministrative
-        from apps.documents.services import _generer_pdf
         from django.http import HttpResponse
-        from django.core.files.base import ContentFile
 
-        type_document = request.query_params.get('type')
-        semestre_id   = request.query_params.get('semestre')
+        from apps.ipgei import documents as docs_ipgei
+        from apps.ipgei.models import SemestreIPGEI
 
-        if not type_document:
-            return Response({'detail': 'Paramètre type requis.'}, status=status.HTTP_400_BAD_REQUEST)
+        from .ipgei_source import (document_deja_delivre, inscriptions_de,
+                                   jury_a_statue)
+
+        demande = request.query_params.get('type')
+        semestre_id = request.query_params.get('semestre')
+        if not demande:
+            return Response({'detail': 'Paramètre type requis.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        genre = self.TYPES.get(demande)
+        if genre is None:
+            return Response({'detail': f'Type de document inconnu : {demande}.'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         etudiant = _get_etudiant(request)
+        base_url = request.build_absolute_uri('/').rstrip('/')
 
-        # Pour un releve, l'annee est deduite du semestre demande (l'etudiant
-        # peut telecharger un releve d'une annee anterieure).
-        sem_id_int = None
-        try:
-            sem_id_int = int(semestre_id) if semestre_id else None
-        except (TypeError, ValueError):
-            sem_id_int = None
+        semestre = None
+        if genre == 'releve_semestre':
+            if not semestre_id:
+                return Response({'detail': 'Paramètre semestre requis pour un relevé.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            semestre = SemestreIPGEI.objects.filter(pk=semestre_id).first()
+            if semestre is None:
+                return Response({'detail': 'Semestre introuvable.'},
+                                status=status.HTTP_404_NOT_FOUND)
 
-        # Pour un releve unifie, on parcourt TOUTES les annees ou l'etudiant
-        # est inscrit a ce semestre, et on prend la PLUS RECENTE qui ait un PV
-        # cloture. Cela permet de fournir un releve unifie tant qu'une annee
-        # source au moins est deliberee (les annees precedentes capitalisees
-        # ne ferment pas l'acces a la consolidation).
-        annee_univ = None
-        annee_disponible = False
-        if sem_id_int and type_document in ('releve_semestre', 'releve_complet', 'releve_notes'):
-            from apps.inscriptions.models import InscriptionPedagogique
-            ips = (
-                InscriptionPedagogique.objects
-                .filter(inscription_admin__etudiant=etudiant, semestre_id=sem_id_int)
-                .select_related('inscription_admin__annee_univ')
-                .order_by('-inscription_admin__annee_univ__annee')
-            )
-            for ip in ips:
-                ann_obj = ip.inscription_admin.annee_univ
-                if not ann_obj:
-                    continue
-                if _releve_disponible_pour_etudiant(etudiant, ann_obj.annee, sem_id_int):
-                    annee_univ = ann_obj.annee
-                    annee_disponible = True
-                    break
+        # L'inscription de l'ANNÉE du semestre demandé : un étudiant peut
+        # retirer le relevé d'une année passée, et c'est l'inscription de
+        # cette année-là qui porte ses notes.
+        annee = semestre.annee_universitaire if semestre else None
+        inscription = inscriptions_de(etudiant, annee).first()
+        if inscription is None:
+            return Response({'detail': "Aucune inscription pour cette année."},
+                            status=status.HTTP_404_NOT_FOUND)
 
-        if not annee_univ:
-            # Fallback : annee la plus recente (utilise pour les types qui ne sont
-            # pas un releve, ex: attestation_inscription)
-            ia = (
-                InscriptionAdministrative.objects
-                .filter(etudiant=etudiant)
-                .select_related('annee_univ')
-                .order_by('-annee_univ__annee')
-                .first()
-            )
-            if not ia:
-                return Response({'detail': 'Aucune inscription trouvée.'}, status=status.HTTP_404_NOT_FOUND)
-            annee_univ = ia.annee_univ.annee
+        if genre in ('releve_semestre', 'releve_annuel') and not jury_a_statue(
+                inscription, semestre):
+            return Response(
+                {'detail': "Ce relevé n'est pas encore disponible : le jury n'a "
+                           'pas délibéré.'},
+                status=status.HTTP_403_FORBIDDEN)
 
-        # ── Variante A : verrou tant que la deliberation n'est pas cloturee ──
-        # Concerne uniquement les releves (l'attestation reste libre).
-        if type_document in ('releve_semestre', 'releve_complet', 'releve_notes'):
-            if not annee_disponible:
-                return Response(
-                    {'detail': "Ce relevé n'est pas encore disponible : aucune session délibérée pour ce semestre."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # ON RESSERT AVANT DE REGÉNÉRER. `creer_document` enregistre chaque
+        # délivrance — juste au guichet, ruineux au portail, où l'étudiant
+        # rafraîchit et reclique. Un étudiant a déjà cinq exemplaires du même
+        # relevé au registre ; à trois cents, la table et les numéros de série
+        # s'useraient en quelques semaines.
+        types_ipgei = {
+            'attestation':     docs_ipgei.TYPE_ATTESTATION,
+            'releve_semestre': docs_ipgei.TYPE_RELEVE_SEMESTRE,
+            'releve_annuel':   docs_ipgei.TYPE_RELEVE_ANNUEL,
+        }
+        # Pas pour un relevé de SEMESTRE : le registre ne sait pas lequel il
+        # couvre — cf. `document_deja_delivre`.
+        deja = (None if genre == 'releve_semestre' else document_deja_delivre(
+            etudiant, types_ipgei[genre], inscription.annee_universitaire))
+        if deja is not None:
+            with deja.fichier_pdf.open('rb') as f:
+                pdf = f.read()
+            doc = deja
+        elif genre == 'attestation':
+            doc, pdf = docs_ipgei.generer_attestation_inscription(
+                inscription, utilisateur=request.user, base_url=base_url)
+        elif genre == 'releve_annuel':
+            doc, pdf = docs_ipgei.generer_releve_annuel(
+                inscription, utilisateur=request.user, base_url=base_url)
+        else:
+            doc, pdf = docs_ipgei.generer_releve_semestre(
+                inscription, semestre, utilisateur=request.user, base_url=base_url)
 
-        # ── Trouver ou créer le DocumentOfficiel ─────────────────────────────
-        try:
-            doc = _find_or_create_doc(etudiant, type_document, annee_univ, semestre_id, request.user)
-        except Exception as e:
-            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # ── Hash des notes pour détecter les changements ──────────────────────
-        hash_actuel = ''
-        try:
-            from apps.evaluations.models import Note
-            from apps.inscriptions.models import InscriptionPedagogique
-            ip = InscriptionPedagogique.objects.filter(
-                inscription_admin__etudiant=etudiant,
-                semestre_id=doc.semestre_id or semestre_id,
-            ).first()
-            if ip:
-                notes_qs = Note.objects.filter(
-                    inscription_element__inscription_ped=ip,
-                ).order_by('inscription_element_id', 'type_note').values_list(
-                    'inscription_element_id', 'type_note', 'valeur'
-                )
-                hash_data = '|'.join(f'{ie},{t},{v}' for ie, t, v in notes_qs)
-            else:
-                hash_data = ''
-            hash_actuel = hashlib.sha256(hash_data.encode()).hexdigest()
-        except Exception:
-            pass
-
-        def _pdf_path():
-            try:
-                return doc.fichier_pdf.path if doc.fichier_pdf else None
-            except ValueError:
-                return None
-
-        path = _pdf_path()
-        besoin_regen = (
-            not path or
-            not os.path.exists(path) or
-            doc.hash_sha256 != hash_actuel
-        )
-        # 1re délivrance = original ; impressions suivantes = DUPLICATA (décidé ici,
-        # à la délivrance, pas au pré-cache).
-        is_duplicata = doc.premiere_generation is not None
-
-        # ── Génération synchrone si nécessaire ───────────────────────────────
-        if besoin_regen:
-            # Attendre si un thread daemon est déjà en train de générer ce PDF
-            # (lancé par DocumentsDisponiblesView) pour éviter deux wkhtmltopdf.
-            import time
-            wait_start = time.time()
-            while doc.pk in _gen_in_progress and (time.time() - wait_start) < 30:
-                time.sleep(1)
-                doc.refresh_from_db(fields=['fichier_pdf', 'hash_sha256'])
-                path = _pdf_path()
-                if path and os.path.exists(path):
-                    besoin_regen = False
-                    break
-
-            if besoin_regen:
-                try:
-                    if doc.fichier_pdf:
-                        try:
-                            old = doc.fichier_pdf.path
-                            if os.path.exists(old):
-                                os.remove(old)
-                        except Exception:
-                            pass
-                        doc.fichier_pdf = None
-                        doc.save(update_fields=['fichier_pdf'])
-
-                    # Generation dans un thread daemon ISOLE pour eviter que
-                    # wkhtmltopdf herite des handles de la socket HTTP courante
-                    # (Windows : sa sortie tuait le socket -> "Failed to fetch").
-                    import threading
-                    result = {'pdf': None, 'error': None}
-
-                    def _gen():
-                        try:
-                            result['pdf'] = _generer_pdf(doc, etudiant, {
-                                'annee_universitaire': annee_univ,
-                                'semestre':            semestre_id,
-                            }, is_duplicata=is_duplicata)
-                        except Exception as exc:
-                            result['error'] = exc
-
-                    t = threading.Thread(target=_gen, daemon=True)
-                    t.start()
-                    t.join(timeout=60)
-                    if t.is_alive():
-                        return Response(
-                            {'detail': 'Generation PDF trop longue (timeout 60s).'},
-                            status=status.HTTP_504_GATEWAY_TIMEOUT,
-                        )
-                    if result['error']:
-                        return Response({'detail': str(result['error'])}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                    pdf_bytes = result['pdf']
-                    if not pdf_bytes:
-                        return Response(
-                            {'detail': 'Erreur de génération PDF.'},
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        )
-                    doc.hash_sha256 = hash_actuel
-                    from apps.documents.services import enregistrer_pdf_document
-                    enregistrer_pdf_document(doc, pdf_bytes)
-                    doc.save(update_fields=['hash_sha256'])
-                except Exception as e:
-                    return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # ── Servir le PDF ────────────────────────────────────────────────────
-        try:
-            filename = f'{doc.numero_serie}.pdf'
-            with doc.fichier_pdf.open('rb') as f:
-                pdf_content = f.read()
-        except Exception as e:
-            return Response({'detail': f'Fichier illisible : {e}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # 1re délivrance : marquer le document délivré ET vider le cache → la
-        # prochaine impression régénérera un DUPLICATA (cf. action telecharger).
-        if doc.premiere_generation is None:
-            from django.utils import timezone
-            doc.premiere_generation = timezone.now()
-            try:
-                doc.fichier_pdf.delete(save=False)
-            except Exception:
-                pass
-            doc.fichier_pdf = None
-            doc.save(update_fields=['premiere_generation', 'fichier_pdf'])
-
-        response = HttpResponse(pdf_content, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response['Content-Length'] = len(pdf_content)
-        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response['Pragma'] = 'no-cache'
-        return response
+        reponse = HttpResponse(pdf, content_type='application/pdf')
+        # `inline` et non `attachment` : les gestionnaires de téléchargement
+        # s'accrochent au second et tuent la requête de la page. Cf.
+        # `core/download_middleware.py`.
+        reponse['Content-Disposition'] = f'inline; filename="{doc.numero_serie}.pdf"'
+        reponse['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return reponse
 
 
 class MesDocumentsView(APIView):
