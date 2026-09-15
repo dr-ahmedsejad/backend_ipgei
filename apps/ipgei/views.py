@@ -107,6 +107,107 @@ def _epreuves_de_la_semaine(classe, semaine):
     )
 
 
+def _matricules_demandes(brut) -> list:
+    """
+    Les matricules d'un lot, lus d'un SEUL champ de saisie.
+
+    On accepte ce qu'une secrétaire colle réellement : une liste envoyée par
+    l'API, ou un texte où les numéros sont séparés par des retours à la ligne,
+    des virgules, des points-virgules, des tabulations ou de simples espaces —
+    selon qu'ils viennent d'un tableur, d'un courriel ou d'une saisie à la
+    main. Exiger un séparateur unique ferait échouer le collage le plus
+    fréquent, sans dire lequel.
+
+    Les doublons sont écartés, l'ORDRE DE SAISIE conservé : c'est celui dans
+    lequel on relira les pièces imprimées.
+    """
+    if not brut:
+        return []
+    if isinstance(brut, (list, tuple)):
+        morceaux = [str(x) for x in brut]
+    else:
+        morceaux = re.split(r'[\s,;]+', str(brut))
+
+    vus, propres = set(), []
+    for m in morceaux:
+        m = m.strip()
+        if m and m not in vus:
+            vus.add(m)
+            propres.append(m)
+    return propres
+
+
+def _inscriptions_par_matricule(matricules: list, annee: str, semestre=None):
+    """
+    Résout des matricules en inscriptions, et NOMME ceux qui n'aboutissent pas.
+
+    Renvoie `(inscriptions, erreurs)`. Un matricule fautif ne fait pas échouer
+    le lot — il serait absurde de refuser dix-huit pièces pour deux coquilles —
+    mais il est reporté au bilan : un lot silencieusement amputé est pire qu'un
+    lot refusé, parce qu'on ne s'aperçoit de rien.
+
+    L'année vient de l'appelant, ou du semestre demandé : un matricule ne
+    désigne pas une inscription à lui seul, l'étudiant en a une par année.
+    Faute d'année, on retient la PLUS RÉCENTE — ce que l'on veut presque
+    toujours, et ce que le bilan permet de vérifier.
+    """
+    annee = annee or (semestre.annee_universitaire if semestre else '')
+
+    base = (InscriptionIPGEI.objects
+            .filter(etudiant__matricule__in=matricules, actif=True)
+            .select_related('etudiant', 'classe__institution'))
+    if annee:
+        base = base.filter(annee_universitaire=annee)
+
+    # Une requête pour tout le lot : vingt matricules ne valent pas vingt
+    # allers-retours. On garde la plus récente quand l'année n'est pas dite.
+    par_matricule = {}
+    for inscription in base.order_by('annee_universitaire'):
+        par_matricule[inscription.etudiant.matricule] = inscription
+
+    retenues, erreurs = [], []
+    for m in matricules:
+        inscription = par_matricule.get(m)
+        if inscription is None:
+            erreurs.append({
+                'etudiant': m, 'nom': '',
+                'motif': f'Matricule {m} : aucune inscription active'
+                         + (f' en {annee}' if annee else ''),
+            })
+        else:
+            retenues.append(inscription)
+    return retenues, erreurs
+
+
+def _autorises_au_concours(inscriptions: list):
+    """
+    Parmi ces inscriptions, celles qu'un jury annuel validé autorise à concourir.
+
+    Le pendant de `_jury_et_autorises` pour un lot par matricules : il n'y a
+    plus UNE classe dont déduire LE jury, la liste peut en traverser
+    plusieurs. On interroge donc le jury de chacun.
+
+    Renvoie `(retenues, ecartes)`. Écarter en silence laisserait croire que
+    l'attestation a été refusée par erreur ; le motif dit que la décision
+    manque, ce qui se corrige au jury, pas ici.
+    """
+    autorisees = set(
+        LigneDeliberation.objects
+        .filter(inscription__in=inscriptions,
+                decision=LigneDeliberation.DECISION_CNIM,
+                deliberation__portee=Deliberation.PORTEE_ANNUELLE,
+                deliberation__statut=Deliberation.STATUT_VALIDEE)
+        .values_list('inscription_id', flat=True)
+    )
+    retenues = [i for i in inscriptions if i.pk in autorisees]
+    ecartes = [
+        {'etudiant': i.etudiant.matricule, 'nom': i.etudiant.nom_display,
+         'motif': "Aucun jury annuel validé ne l'autorise à concourir"}
+        for i in inscriptions if i.pk not in autorisees
+    ]
+    return retenues, ecartes
+
+
 def _nom_fichier(libelle: str) -> str:
     """Portion de nom de fichier sûre : accents et ponctuation retirés."""
     import re
@@ -4290,9 +4391,15 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         from . import documents as docs_ipgei
 
         type_document = request.data.get('type_document') or ''
+        # DEUX SOURCES POSSIBLES, jamais les deux : une classe entière, ou une
+        # liste de matricules. La seconde sert au cas que la première ne couvre
+        # pas — quelques étudiants pris dans plusieurs classes, ceux d'une
+        # commission, ceux qui ont réclamé leur pièce.
+        matricules = _matricules_demandes(request.data.get('matricules'))
         classe = Classe.objects.filter(pk=request.data.get('classe')).first()
-        if classe is None:
-            raise ValidationError({'classe': 'Classe requise.'})
+        if classe is None and not matricules:
+            raise ValidationError(
+                {'classe': 'Indiquez une classe, ou une liste de matricules.'})
 
         semestre = None
         if request.data.get('semestre'):
@@ -4301,14 +4408,25 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             if semestre is None:
                 raise ValidationError({'semestre': 'Semestre introuvable.'})
 
-        inscriptions = list(
-            InscriptionIPGEI.objects
-            .filter(classe=classe, actif=True)
-            .select_related('etudiant', 'classe__institution')
-            .order_by('numero_ordre', 'etudiant__nom')
-        )
-        if not inscriptions:
-            raise ValidationError(f"{classe.nom} n'a aucun inscrit actif.")
+        erreurs_amont = []
+        if matricules:
+            inscriptions, erreurs_amont = _inscriptions_par_matricule(
+                matricules, request.data.get('annee_universitaire') or '',
+                semestre)
+            if not inscriptions:
+                raise ValidationError({'matricules': (
+                    'Aucun de ces matricules ne correspond à une inscription : '
+                    + ' ; '.join(e['motif'] for e in erreurs_amont[:3])
+                    + ('…' if len(erreurs_amont) > 3 else ''))})
+        else:
+            inscriptions = list(
+                InscriptionIPGEI.objects
+                .filter(classe=classe, actif=True)
+                .select_related('etudiant', 'classe__institution')
+                .order_by('numero_ordre', 'etudiant__nom')
+            )
+            if not inscriptions:
+                raise ValidationError(f"{classe.nom} n'a aucun inscrit actif.")
 
         # L'autorisation de concourir découle d'un jury, et ne concerne QUE les
         # étudiants qu'il a autorisés. On restreint donc la fournée à ceux-là :
@@ -4317,7 +4435,20 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
         # pièces — le bilan dirait l'inverse de ce qui s'est passé.
         deliberation = None
         if type_document == docs_ipgei.TYPE_CNIM:
-            deliberation, inscriptions = self._jury_et_autorises(request, classe)
+            if classe is not None:
+                deliberation, inscriptions = self._jury_et_autorises(request, classe)
+            else:
+                # Par matricules, le jury ne se déduit plus d'une classe : la
+                # liste peut en traverser plusieurs. On vérifie donc chaque
+                # inscription contre SON propre jury annuel validé, et l'on
+                # écarte — en le disant — qui n'a pas été autorisé.
+                inscriptions, ecartes = _autorises_au_concours(inscriptions)
+                erreurs_amont += ecartes
+                if not inscriptions:
+                    raise ValidationError({'matricules': (
+                        "Aucun de ces étudiants n'est autorisé à concourir : "
+                        "l'attestation constate une décision de jury, elle ne "
+                        'peut la précéder.')})
 
         contenu, edites, total, erreurs = self._executer(
             docs_ipgei.generer_lot, inscriptions, type_document,
@@ -4328,8 +4459,14 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             signataire_id=self._signataire_id(request),
         )
 
+        # Les matricules introuvables comptent dans le TOTAL : « 18 sur 20 »
+        # doit désigner ce qui a été demandé, pas ce que le serveur a bien
+        # voulu retenir — sinon un lot amputé s'annonce complet.
+        erreurs = erreurs_amont + erreurs
+        total  += len(erreurs_amont)
+
         libelle = _nom_fichier(
-            f'{type_document}_{classe.nom}'
+            f'{type_document}_' + (classe.nom if classe else f'{len(inscriptions)}_etudiants')
             + (f'_{semestre.code}' if semestre else ''))
         reponse = HttpResponse(contenu, content_type='application/pdf')
         reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
