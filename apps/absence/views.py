@@ -457,7 +457,7 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
             nbac = (e.nbac or '').strip()
             mat  = (e.matricule or '').strip()
             if not cni or not nbac:
-                ignores.append({'matricule': e.matricule, 'raison': 'CNI ou NBAC manquant'})
+                ignores.append({'matricule': e.matricule, 'raison': 'NNI ou NBAC manquant'})
                 continue
             if User.objects.filter(username=cni).exists():
                 ignores.append({'matricule': e.matricule, 'raison': f"username '{cni}' deja pris"})
@@ -493,7 +493,7 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
         ws.title = 'Étudiants'
         headers = [
             'Matricule', 'Nom FR', 'Prénom FR', 'Nom AR', 'Prénom AR',
-            'Genre', 'Date naissance', 'CNI', 'Téléphone', 'Email',
+            'Genre', 'Date naissance', 'NNI', 'Téléphone', 'Email',
             'Filière', 'Département', 'Statut',
         ]
         ws.append(headers)

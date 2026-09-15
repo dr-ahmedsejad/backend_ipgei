@@ -52,7 +52,7 @@ class Command(BaseCommand):
 
             if not cni or not nbac:
                 self.stdout.write(
-                    self.style.WARNING(f"  SKIP {etudiant.matricule} - CNI ou NBAC manquant")
+                    self.style.WARNING(f"  SKIP {etudiant.matricule} - NNI ou NBAC manquant")
                 )
                 skipped += 1
                 continue
