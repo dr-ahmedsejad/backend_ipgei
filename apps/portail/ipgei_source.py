@@ -133,7 +133,8 @@ def note_en_ligne(note, seuil: Decimal) -> dict:
     }
 
 
-def document_deja_delivre(etudiant, type_document: str, annee: str):
+def document_deja_delivre(etudiant, type_document: str, annee: str,
+                          semestre_code: str = ''):
     """
     Le document déjà au registre pour ce couple, PDF compris — s'il existe.
 
@@ -147,16 +148,15 @@ def document_deja_delivre(etudiant, type_document: str, annee: str):
     trois cents, la table et les numéros de série s'useraient en quelques
     semaines. On ressert donc le dernier PDF produit.
 
-    ATTENTION — NE PAS APPELER POUR UN RELEVÉ DE SEMESTRE.
-    `DocumentOfficiel.semestre` pointe vers le `Semestre` du SOCLE, que l'IPGEI
-    n'utilise pas : `creer_document` reçoit bien un `SemestreIPGEI` mais ne le
-    stocke jamais, et tous les relevés IPGEI portent donc `semestre = NULL`.
-    Rien au registre ne distingue un relevé de S3 d'un relevé de S4 — resservir
-    l'un pour l'autre est un risque réel. Ces relevés-là se régénèrent, quitte
-    à peser sur le registre.
+    `semestre_code` est INDISPENSABLE pour un relevé de semestre. Sans lui, rien
+    au registre ne séparait un relevé de S3 d'un de S4, et la réutilisation
+    devait être refusée pour ces pièces-là : `DocumentOfficiel.semestre` pointe
+    vers le `Semestre` du socle, que l'IPGEI n'utilise pas, et
+    `creer_document` recevait un semestre sans jamais le stocker. C'est ce que
+    `semestre_code` répare.
 
-    Ne rend rien non plus si le fichier a disparu du disque : mieux vaut
-    régénérer que servir une entrée de registre sans pièce.
+    Ne rend rien si le fichier a disparu du disque : mieux vaut régénérer que
+    servir une entrée de registre sans pièce.
     """
     import os
 
@@ -164,7 +164,8 @@ def document_deja_delivre(etudiant, type_document: str, annee: str):
 
     qs = (DocumentOfficiel.objects
           .filter(etudiant=etudiant, type_document=type_document,
-                  annee_universitaire=annee, est_valide=True)
+                  annee_universitaire=annee, semestre_code=semestre_code,
+                  est_valide=True)
           .order_by('-date_generation'))
 
     for doc in qs[:3]:

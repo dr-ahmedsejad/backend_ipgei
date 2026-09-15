@@ -753,10 +753,9 @@ class TelechargerDirectView(APIView):
             'releve_semestre': docs_ipgei.TYPE_RELEVE_SEMESTRE,
             'releve_annuel':   docs_ipgei.TYPE_RELEVE_ANNUEL,
         }
-        # Pas pour un relevé de SEMESTRE : le registre ne sait pas lequel il
-        # couvre — cf. `document_deja_delivre`.
-        deja = (None if genre == 'releve_semestre' else document_deja_delivre(
-            etudiant, types_ipgei[genre], inscription.annee_universitaire))
+        deja = document_deja_delivre(
+            etudiant, types_ipgei[genre], inscription.annee_universitaire,
+            semestre.code if semestre is not None else '')
         if deja is not None:
             with deja.fichier_pdf.open('rb') as f:
                 pdf = f.read()

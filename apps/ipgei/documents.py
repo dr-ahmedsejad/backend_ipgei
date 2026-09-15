@@ -128,6 +128,12 @@ def creer_document(inscription: InscriptionIPGEI, type_document: str, *,
     Le signataire est RECOPIÉ ici, pas pointé : la pièce garde le nom qu'elle
     porte, même si l'intéressé change de fonction ou quitte l'établissement.
     C'est aussi ce qui permet de savoir, des mois plus tard, qui a signé.
+
+    Le SEMESTRE est enregistré dans `semestre_code`, et non dans le champ
+    `semestre` : celui-ci pointe vers le `Semestre` du socle, que le cursus
+    IPGEI n'utilise pas. L'argument était reçu depuis toujours et jamais
+    stocké — deux relevés, l'un de S3 et l'autre de S4, sortaient donc du
+    registre indistinguables.
     """
     if type_document not in TYPES_IPGEI:
         raise ValidationError(f'Type de document IPGEI inconnu : {type_document}')
@@ -140,6 +146,7 @@ def creer_document(inscription: InscriptionIPGEI, type_document: str, *,
         type_document=type_document,
         numero_serie=_numero_serie(institution, type_document),
         annee_universitaire=inscription.annee_universitaire,
+        semestre_code=semestre.code if semestre is not None else '',
         genere_par=utilisateur if getattr(utilisateur, 'is_authenticated', False) else None,
         signataire_nom=signataire['nom'],
         signataire_titre=signataire['titre'],

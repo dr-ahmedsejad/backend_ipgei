@@ -80,6 +80,26 @@ class DocumentOfficiel(models.Model):
         'parametres.Semestre', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='documents',
     )
+    #: QUEL SEMESTRE la pièce couvre — « S1 » à « S4 ».
+    #:
+    #: `semestre` ci-dessus pointe vers le `Semestre` du SOCLE, que le cursus
+    #: IPGEI n'utilise pas : il a ses propres semestres (`ipgei.SemestreIPGEI`).
+    #: Un relevé IPGEI sortait donc du registre sans rien qui dise s'il
+    #: couvrait le S3 ou le S4 — deux pièces indistinguables, alors même que la
+    #: numérotation les sépare.
+    #:
+    #: Un CODE et non une clé étrangère : la dépendance ne va aujourd'hui que
+    #: d'IPGEI vers ce module, et l'inverser pour un champ d'identification
+    #: coûterait plus qu'elle ne rapporte. L'année étant déjà sur le document,
+    #: le couple (année, code) désigne le semestre sans ambiguïté.
+    #:
+    #: Vide pour les pièces qui ne visent pas un semestre — attestation, relevé
+    #: annuel — et pour les deux relevés émis avant ce champ, dont rien au
+    #: registre ne permet de retrouver le semestre.
+    semestre_code       = models.CharField(
+        max_length=2, blank=True, default='',
+        help_text='Semestre couvert par la pièce : S1 à S4. Vide si sans objet.',
+    )
     hash_sha256         = models.CharField(max_length=64, blank=True, default='')
     est_valide          = models.BooleanField(default=True)
     date_generation     = models.DateTimeField(auto_now_add=True)

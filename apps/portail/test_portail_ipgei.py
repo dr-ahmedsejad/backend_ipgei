@@ -273,3 +273,57 @@ class PortailIPGEITest(TestCase):
         source = inspect.getsource(views.MesAbsencesView)
         self.assertIn('Presence', source)
         self.assertNotIn('AbsenceSeance', source)
+
+    # ── 7. Le registre distingue enfin les semestres ────────────────────────
+    def test_le_registre_retient_le_semestre_du_releve(self):
+        """
+        `DocumentOfficiel.semestre` pointe vers le `Semestre` du SOCLE, que
+        l'IPGEI n'utilise pas : `creer_document` recevait un `SemestreIPGEI`
+        sans jamais le stocker. Deux relevés du même étudiant, l'un de S3 et
+        l'autre de S4, sortaient donc indistinguables — leur numéro de série
+        les séparait, rien d'autre.
+        """
+        from apps.ipgei import documents as docs_ipgei
+
+        s3 = docs_ipgei.creer_document(
+            self.inscription, docs_ipgei.TYPE_RELEVE_SEMESTRE, semestre=self.s3)
+        s4 = docs_ipgei.creer_document(
+            self.inscription, docs_ipgei.TYPE_RELEVE_SEMESTRE, semestre=self.s4)
+
+        self.assertEqual(s3.semestre_code, 'S3')
+        self.assertEqual(s4.semestre_code, 'S4')
+        self.assertNotEqual(s3.numero_serie, s4.numero_serie)
+
+    def test_une_piece_sans_semestre_garde_le_code_vide(self):
+        """Attestation et relevé annuel ne visent aucun semestre."""
+        from apps.ipgei import documents as docs_ipgei
+
+        doc = docs_ipgei.creer_document(
+            self.inscription, docs_ipgei.TYPE_RELEVE_ANNUEL)
+        self.assertEqual(doc.semestre_code, '')
+
+    def test_la_reutilisation_ne_confond_plus_deux_semestres(self):
+        """
+        Sans le code, resservir le PDF du S3 pour une demande de S4 était un
+        risque réel — c'est pourquoi la réutilisation leur était refusée. Elle
+        leur est rendue, et ce test dit pourquoi elle est sûre.
+        """
+        from apps.ipgei import documents as docs_ipgei
+
+        from apps.portail.ipgei_source import document_deja_delivre
+
+        docs_ipgei.creer_document(
+            self.inscription, docs_ipgei.TYPE_RELEVE_SEMESTRE, semestre=self.s3)
+
+        # Aucun PDF sur le disque : le helper refuse les deux, mais pour la
+        # bonne raison — c'est le filtre par semestre qu'on éprouve ici.
+        for code in ('S3', 'S4'):
+            self.assertIsNone(document_deja_delivre(
+                self.etudiant, docs_ipgei.TYPE_RELEVE_SEMESTRE, self.annee, code))
+
+        from apps.documents.models import DocumentOfficiel
+        self.assertEqual(
+            DocumentOfficiel.objects.filter(semestre_code='S3').count(), 1)
+        self.assertEqual(
+            DocumentOfficiel.objects.filter(semestre_code='S4').count(), 0,
+            'une demande de S4 ne doit pas trouver le document du S3')

@@ -16,7 +16,12 @@ class DocumentIPGEISerializer(serializers.ModelSerializer):
         fields = [
             'id', 'numero_serie', 'type_document', 'type_libelle',
             'etudiant', 'etudiant_nom', 'etudiant_matricule',
-            'annee_universitaire', 'est_valide', 'date_generation',
+            'annee_universitaire',
+            # Quel semestre la pièce couvre. Deux relevés du même étudiant, l'un
+            # de S3 et l'autre de S4, étaient jusqu'ici indistinguables au
+            # registre — leur numéro de série les séparait, rien d'autre.
+            'semestre_code',
+            'est_valide', 'date_generation',
             'premiere_generation', 'genere_par', 'genere_par_nom', 'a_pdf',
             # Qui signe la pièce, recopié à l'émission : c'est la seule trace
             # permettant, des mois plus tard, de savoir au nom de qui elle est
