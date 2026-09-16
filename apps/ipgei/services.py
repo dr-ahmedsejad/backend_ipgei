@@ -419,7 +419,11 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
     note.pct_ds      = regle.pct_ds
     note.pct_tp      = regle.pct_tp if regle.has_tp else Decimal('0')
     note.pct_exam    = regle.pct_exam
-    note.coefficient = matiere.coefficient
+    # Le coefficient suit la même règle : celui de la dérogation s'il y en a
+    # un, sinon celui de la matière. Il est figé ici comme la pondération —
+    # c'est ce qui permet au relevé de dire ce qui a RÉELLEMENT compté.
+    _coef = getattr(regle, 'coefficient', None)
+    note.coefficient = _coef if _coef is not None else matiere.coefficient
     note.moy_ds      = moy_ds
     note.moy_exam    = moy_exam
 
@@ -602,12 +606,12 @@ def moyenne_semestrielle(inscription: InscriptionIPGEI, semestre: SemestreIPGEI,
     return _agreger(
         notes, absents_a_zero=absents_a_zero,
         maquette=maquette_du_semestre(inscription, semestre) if absents_a_zero else None,
-        arrondi=arrondi,
+        arrondi=arrondi, classe=inscription.classe,
     )
 
 
 def _agreger(notes, *, absents_a_zero: bool = False, maquette=None,
-             arrondi: bool = True):
+             arrondi: bool = True, classe=None):
     """
     Agrège des lignes de note en moyenne pondérée par coefficient.
 
@@ -621,11 +625,23 @@ def _agreger(notes, *, absents_a_zero: bool = False, maquette=None,
     matière jamais saisie n'a pas de ligne de note du tout, et compter zéro
     seulement les lignes présentes laisserait un semestre entier hors du calcul.
     """
+    # `classe` sert aux coefficients DÉROGATOIRES, et seulement là où rien n'a
+    # été figé : une note calculée porte déjà le sien. Sans classe, on garde le
+    # coefficient de la matière — le comportement d'avant, intact.
+    attendues = list(maquette) if maquette is not None else []
+    coefs = coefficients_de_la_classe(
+        classe, list({n.matiere for n in notes} | set(attendues))) if classe else {}
+
+    def _coef_de(matiere, fige=None):
+        if fige is not None:
+            return Decimal(fige)
+        return coefs.get(matiere.pk, Decimal(matiere.coefficient))
+
     cumul  = Decimal('0')
     poids  = Decimal('0')
     notees = set()
     for n in notes:
-        coef = Decimal(n.coefficient if n.coefficient is not None else n.matiere.coefficient)
+        coef = _coef_de(n.matiere, n.coefficient)
         if n.note_retenue is None:
             if not absents_a_zero:
                 continue
@@ -640,9 +656,11 @@ def _agreger(notes, *, absents_a_zero: bool = False, maquette=None,
         notees.add(n.matiere_id)
 
     if absents_a_zero and maquette is not None:
-        for matiere in maquette:
+        for matiere in attendues:
             if matiere.pk not in notees:
-                poids += Decimal(matiere.coefficient)
+                # Aucune note, donc aucun instantané : c'est le seul endroit où
+                # le coefficient de la classe doit être relu en direct.
+                poids += _coef_de(matiere)
 
     if poids == 0:
         return None, Decimal('0'), notes
@@ -731,7 +749,7 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
     # Le total des coefficients, inchangé : c'est la colonne « Total coef. » du
     # PV, et elle doit continuer de dire le poids de l'année en matières.
     _, poids_matieres, _ = _agreger(notes, absents_a_zero=absents_a_zero,
-                                    maquette=maquette)
+                                    maquette=maquette, classe=inscription.classe)
 
     rang = rang_du_niveau(inscription.niveau, inscription.classe.institution)
     poids_semestres = PONDERATION_ANNUELLE.get(rang) or {}
@@ -749,7 +767,8 @@ def moyenne_annuelle(inscription: InscriptionIPGEI, annee_universitaire: str,
         # effaçait des écarts réels de l'ordre du millième, et fabriquait des
         # ex æquo qui n'existaient pas.
         moyenne_semestre, _, _ = _agreger(lot, absents_a_zero=absents_a_zero,
-                                          maquette=attendues, arrondi=False)
+                                          maquette=attendues, arrondi=False,
+                                          classe=inscription.classe)
         if moyenne_semestre is None:
             # Semestre muet : il compte zéro pour le jury — une année à moitié
             # faite ne vaut pas une année réussie — et s'efface ailleurs.
@@ -945,6 +964,12 @@ def grille_rattrapage(deliberation: Deliberation) -> dict:
 
     Chaque case rappelle la moyenne de la session normale : on ne saisit pas un
     rattrapage sans savoir ce qu'il doit dépasser.
+
+    Le coefficient affiché en en-tête est celui de la MATIÈRE, jamais une
+    dérogation de classe : un jury porte sur un niveau entier, donc sur
+    plusieurs classes, et une colonne ne peut pas en afficher deux. Il est
+    indicatif — rien ne se calcule ici, et le calcul, lui, lit bien le
+    coefficient de chaque classe.
     """
     codes = codes_semestres_du_niveau(deliberation.niveau, deliberation.institution)
     matieres = list(
@@ -3169,6 +3194,46 @@ def ponderation_applicable(matiere: Matiere, classe):
                   .filter(matiere=matiere, classe=classe)
                   .first())
     return derogation if derogation is not None else matiere
+
+
+def coefficient_applicable(matiere: Matiere, classe) -> Decimal:
+    """
+    Le coefficient qui pèse cette matière pour cette classe.
+
+    Même idiome que `ponderation_applicable` — la dérogation sinon la règle —
+    mais il rend un NOMBRE et non un objet : `Matiere` et `PonderationClasse`
+    n'exposent pas le coefficient de la même façon (celui de la dérogation est
+    optionnel, vide valant « celui de la matière »), si bien qu'un appelant ne
+    peut pas les traiter indifféremment comme il le fait pour la pondération.
+
+    Ce n'est PAS la même nature de décision que la pondération : celle-ci
+    corrige la fidélité d'une moyenne, le coefficient change combien la matière
+    pèse dans la moyenne générale — donc le classement. Voir le champ
+    `PonderationClasse.coefficient`.
+    """
+    regle = ponderation_applicable(matiere, classe)
+    coef = getattr(regle, 'coefficient', None)
+    return Decimal(coef if coef is not None else matiere.coefficient)
+
+
+def coefficients_de_la_classe(classe, matieres) -> dict:
+    """
+    `{matiere_id: Decimal}` pour toute une maquette, en UNE requête.
+
+    `coefficient_applicable` en fait une par matière ; sur une maquette de six
+    à huit matières multipliée par trois cents inscrits, la délibération y
+    passerait ses requêtes. Les appelants qui bouclent prennent ce dictionnaire.
+    """
+    from .models import PonderationClasse
+
+    matieres = list(matieres)
+    coefs = {m.pk: Decimal(m.coefficient) for m in matieres}
+    if classe is None or not matieres:
+        return coefs
+    for d in PonderationClasse.objects.filter(
+            classe=classe, matiere__in=matieres, coefficient__isnull=False):
+        coefs[d.matiere_id] = Decimal(d.coefficient)
+    return coefs
 
 
 def seuil_applicable(inscription: InscriptionIPGEI, annee_universitaire: str,

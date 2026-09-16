@@ -205,6 +205,45 @@ def _lignes(annee_universitaire: str, niveau: str = '', institution=None,
     return resultats
 
 
+def coefficients_derogatoires(resultats: list) -> list:
+    """
+    Les dérogations de coefficient portées par les classes CLASSÉES ici.
+
+    Pourquoi la feuille doit le dire. Le classement met toutes les classes d'un
+    niveau dans une SEULE liste, en concurrence pour les mêmes places au CNIM.
+    Une pondération dérogatoire ne gêne pas : elle corrige la façon de calculer
+    une moyenne de matière, qui reste comparable d'une classe à l'autre. Un
+    COEFFICIENT dérogatoire, lui, change combien la matière pèse dans la
+    moyenne générale — donc ce que le rang récompense. Deux étudiants aux notes
+    identiques, dans deux classes, n'ont plus le même rang.
+
+    Ce n'est pas une erreur, c'est une décision. Mais elle doit être LISIBLE sur
+    la feuille qui en découle, sinon personne ne saura que la comparaison a été
+    faite sous deux règles.
+
+    Rend une liste de chaînes prêtes à imprimer, vide dans le cas normal.
+    """
+    from .models import Classe, PonderationClasse
+
+    noms = {resultat.get('classe') for resultat in resultats if resultat.get('classe')}
+    if not noms:
+        return []
+    derogations = (PonderationClasse.objects
+                   .filter(classe__nom__in=noms, coefficient__isnull=False)
+                   .select_related('matiere', 'classe')
+                   .order_by('classe__nom', 'matiere__code'))
+    # `:g` sur un Decimal garde les décimales de stockage (« 2.00 ») ; on
+    # normalise pour écrire le coefficient comme on le prononce.
+    def _nombre(valeur):
+        return f'{valeur.normalize():f}'
+
+    return [
+        f'{d.classe.nom} : {d.matiere.code} compte {_nombre(d.coefficient)} '
+        f'au lieu de {_nombre(d.matiere.coefficient)} — {d.motif}'
+        for d in derogations
+    ]
+
+
 def _contexte(annee_universitaire: str, niveau: str, institution=None,
               classe=None) -> dict:
     resultats = lignes(annee_universitaire, niveau, institution, classe)
@@ -230,6 +269,9 @@ def _contexte(annee_universitaire: str, niveau: str, institution=None,
         'logo_b64':      _get_logo_b64(institution) if institution else '',
         'date_edition':  date.today().strftime('%d/%m/%Y'),
         'code_semestre': CODE_SEMESTRE,
+        # Vide dans le cas normal. Non vide, la feuille doit le dire : deux
+        # classes classées ensemble sous des coefficients différents.
+        'derogations_coefficient': coefficients_derogatoires(resultats),
     })
     return donnees
 

@@ -267,6 +267,8 @@ def _contexte_releve_annuel(doc, inscription, base_url) -> dict:
 
 def _ligne_note(note, stats_classe: dict | None = None) -> dict:
     """Aplati une ligne de note pour le template (pas de logique dans le HTML)."""
+    # L'instantané d'abord : il porte déjà le coefficient dérogatoire s'il y en
+    # avait un au calcul. Le repli ne sert qu'aux notes jamais calculées.
     coef = note.coefficient if note.coefficient is not None else note.matiere.coefficient
     stats = (stats_classe or {}).get(note.matiere_id, {})
     return {
@@ -770,15 +772,20 @@ def _contexte_attestation(doc, inscription, base_url) -> dict:
         )
         if not matieres:
             continue
+        # Le coefficient IMPRIMÉ est celui de la classe de l'étudiant : une
+        # classe peut déroger (cf. `PonderationClasse.coefficient`), et un total
+        # repris de la maquette générale contredirait alors la moyenne calculée
+        # sur le même document.
+        coefs = services.coefficients_de_la_classe(inscription.classe, matieres)
         elements_par_semestre.append({
             'code':           code_semestre,
             'semestre_label': f'Semestre {code_semestre[1:]} — {code_semestre}',
             'elements': [{
                 'code':        matiere.code,
                 'intitule_fr': matiere.intitule,
-                'coefficient': matiere.coefficient,
+                'coefficient': coefs[matiere.pk],
             } for matiere in matieres],
-            'total_coeff': sum(matiere.coefficient for matiere in matieres),
+            'total_coeff': sum(coefs[matiere.pk] for matiere in matieres),
         })
 
     feminin = (etudiant.genre or 'M').upper() == 'F'

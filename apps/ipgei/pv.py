@@ -146,7 +146,8 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
                     maquettes[cle] = services.maquette_du_semestre(inscription, semestre)
                 valeur, _, _ = services._agreger(
                     notes_par_inscription.get(inscription.pk, []),
-                    absents_a_zero=True, maquette=maquettes[cle])
+                    absents_a_zero=True, maquette=maquettes[cle],
+                    classe=inscription.classe)
             if valeur is not None:
                 moyennes[inscription.pk] = (Decimal(valeur), inscription.classe_id)
 

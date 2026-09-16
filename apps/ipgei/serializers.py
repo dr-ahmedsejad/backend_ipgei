@@ -236,7 +236,7 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
 # ── Matières ─────────────────────────────────────────────────────────────────
 class PonderationClasseSerializer(serializers.ModelSerializer):
     """
-    Une dérogation : la pondération d'une matière pour UNE classe.
+    Une dérogation : ce qu'une classe fait autrement — pondération, coefficient.
 
     Le `motif` est obligatoire au modèle et le reste ici. Une dérogation sans
     raison écrite devient, deux ans plus tard, une anomalie que personne n'ose
@@ -246,13 +246,18 @@ class PonderationClasseSerializer(serializers.ModelSerializer):
     matiere_intitule = serializers.CharField(source='matiere.intitule', read_only=True)
     classe_nom       = serializers.CharField(source='classe.nom', read_only=True)
     semestre_code    = serializers.CharField(source='matiere.code_semestre', read_only=True)
+    #: Le coefficient GÉNÉRAL, pour que l'écran affiche « 14 → 12 » sans avoir à
+    #: recharger la matière.
+    coefficient_matiere = serializers.DecimalField(
+        source='matiere.coefficient', max_digits=4, decimal_places=2, read_only=True)
 
     class Meta:
         model  = PonderationClasse
         fields = [
             'id', 'matiere', 'matiere_code', 'matiere_intitule',
             'classe', 'classe_nom', 'semestre_code',
-            'pct_ds', 'pct_tp', 'pct_exam', 'has_tp', 'motif', 'cree_le',
+            'pct_ds', 'pct_tp', 'pct_exam', 'has_tp',
+            'coefficient', 'coefficient_matiere', 'motif', 'cree_le',
         ]
         read_only_fields = ['cree_le']
 

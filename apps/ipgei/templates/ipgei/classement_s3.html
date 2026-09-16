@@ -32,6 +32,15 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
   }
   .sous-titre { text-align: center; font-size: 10.5pt; margin-bottom: 10px; }
 
+  /* L'avertissement de coefficient dérogatoire. Encadré et non discret : il
+     dit que les rangs ci-dessous ont été établis sous deux règles, ce que la
+     feuille ne montre nulle part ailleurs. */
+  .derogations {
+    border: 1.2pt solid #8a5a00; background: #fff6e5; color: #4a3000;
+    padding: 6px 8px; margin-bottom: 8px; font-size: 9.5pt;
+  }
+  .derogations .titre-alerte { font-weight: 700; margin-bottom: 2px; }
+  .derogations ul { margin: 0; padding-left: 14px; }
   .repere { width: 100%; margin-bottom: 8px; font-size: 10pt; }
   .repere td { padding: 1px 0; }
   .repere .cle { font-weight: 700; width: 30mm; }
@@ -68,6 +77,16 @@ et les deux colonnes vides disent d'elles-mêmes ce qu'on attend d'elles.
     <td class="cle">Édité le :</td><td>{{ date_edition }}</td>
   </tr>
 </table>
+
+{% if derogations_coefficient %}
+<div class="derogations">
+  <div class="titre-alerte">Coefficients dérogatoires — les rangs ci-dessous
+    n'ont pas tous été établis sous la même règle.</div>
+  <ul>
+    {% for ligne in derogations_coefficient %}<li>{{ ligne }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
 
 <table class="classement">
   <thead>

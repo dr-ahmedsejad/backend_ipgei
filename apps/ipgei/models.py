@@ -1217,7 +1217,7 @@ class Matiere(models.Model):
 
 class PonderationClasse(models.Model):
     """
-    LA PONDÉRATION D'UNE MATIÈRE POUR UNE SEULE CLASSE.
+    CE QU'UNE SEULE CLASSE FAIT AUTREMENT — pondération, et coefficient.
 
     `Matiere` règle la pondération pour tout un niveau. C'est le cas général, et
     il tient presque toujours. Mais une classe peut composer autrement : en S4
@@ -1233,8 +1233,16 @@ class PonderationClasse(models.Model):
     est un fait rare et daté, qui mérite son motif. Une colonne par cas d'espèce
     aurait grossi la matière sans jamais dire POURQUOI telle classe s'écarte.
 
-    Le résolveur est `services.ponderation_applicable(matiere, classe)`, sur le
-    modèle de `seuil_applicable` : la dérogation si elle existe, sinon la règle.
+    Le nom dit « pondération » parce que c'est le besoin qui l'a fait naître ;
+    la table porte depuis un COEFFICIENT dérogatoire optionnel. Les deux tiennent
+    dans la même ligne à dessein : ce sont deux façons de dire « cette classe-là
+    s'écarte », et elles méritent un seul motif, un seul écran, une seule
+    décision à relire. Renommer le modèle coûterait une migration et la réécriture
+    de tous ses appelants pour ne gagner qu'un mot.
+
+    Les résolveurs sont `services.ponderation_applicable(matiere, classe)` et
+    `services.coefficient_applicable(matiere, classe)`, sur le modèle de
+    `seuil_applicable` : la dérogation si elle existe, sinon la règle.
 
     ATTENTION — créer une ligne ne recalcule RIEN. `Note` fige sa pondération au
     moment du calcul (cf. `Note.pct_ds`), ce qui protège l'historique mais
@@ -1256,6 +1264,22 @@ class PonderationClasse(models.Model):
     #: de saisie refuse la fiche de TP et l'import écarte la colonne. La classe
     #: aurait une part TP de 10 % qu'elle ne pourrait jamais remplir.
     has_tp   = models.BooleanField(default=True)
+    #: LE COEFFICIENT, quand la classe n'accorde pas le même poids à la matière.
+    #:
+    #: Vide — le cas normal — signifie « celui de la matière ». La dérogation
+    #: porte alors la seule pondération, qui est sa raison d'être première.
+    #:
+    #: Ce n'est PAS la même nature de décision que la pondération. Celle-ci
+    #: corrige la FIDÉLITÉ : MP A a tenu une colle, les autres non, et sa
+    #: moyenne de maths reste comparable à la leur. Le coefficient est un choix
+    #: de POLITIQUE : il change combien la matière pèse dans la moyenne
+    #: générale, donc ce que le classement récompense — et `classement.py` met
+    #: toutes les classes dans la MÊME liste pour le CNIM. D'où l'avertissement
+    #: porté sur la feuille de classement dès qu'une classe classée en use.
+    coefficient = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        help_text='Laisser vide pour garder le coefficient de la matière.',
+    )
     #: POURQUOI cette classe déroge. Exigé : une dérogation sans motif devient,
     #: deux ans plus tard, une anomalie que personne n'ose corriger.
     motif    = models.CharField(
@@ -1277,8 +1301,13 @@ class PonderationClasse(models.Model):
         ]
 
     def __str__(self):
+        coef = f' · coef {self.coefficient:g}' if self.coefficient is not None else ''
         return (f'{self.matiere.code} · {self.classe.nom} — '
-                f'{self.pct_ds:g}/{self.pct_tp:g}/{self.pct_exam:g}')
+                f'{self.pct_ds:g}/{self.pct_tp:g}/{self.pct_exam:g}{coef}')
+
+    def coefficient_effectif(self):
+        """Le coefficient qui compte : celui de la dérogation, sinon la matière."""
+        return self.coefficient if self.coefficient is not None else self.matiere.coefficient
 
     def ponderation(self) -> dict:
         """Même forme que `Matiere.ponderation()` : les deux sont interchangeables."""
@@ -1296,10 +1325,21 @@ class PonderationClasse(models.Model):
         # Une dérogation qui ne déroge pas est un piège : elle survivrait à un
         # changement de la règle générale et figerait l'ancienne valeur en
         # silence.
-        if (self.matiere_id and self.has_tp == self.matiere.has_tp
+        if self.coefficient is not None and Decimal(self.coefficient) <= 0:
+            raise ValidationError(
+                {'coefficient': 'Un coefficient dérogatoire doit être strictement '
+                                'positif. Laissez vide pour garder celui de la matière.'})
+        # Une dérogation qui ne déroge pas est un piège : elle survivrait à un
+        # changement de la règle générale et figerait l'ancienne valeur en
+        # silence. Le coefficient entre dans ce jugement — une ligne dont SEUL
+        # le coefficient s'écarte déroge bel et bien.
+        coef_deroge = (self.matiere_id and self.coefficient is not None
+                       and Decimal(self.coefficient) != Decimal(self.matiere.coefficient))
+        if (self.matiere_id and not coef_deroge
+                and self.has_tp == self.matiere.has_tp
                 and self.ponderation() == self.matiere.ponderation()):
             raise ValidationError(
-                f'Cette pondération est identique à celle de {self.matiere.code} : '
+                f'Cette dérogation est identique à la règle de {self.matiere.code} : '
                 'une dérogation qui ne déroge à rien figerait la règle générale '
                 'sans le dire. Supprimez-la plutôt.'
             )
