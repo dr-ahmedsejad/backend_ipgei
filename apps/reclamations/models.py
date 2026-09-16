@@ -33,14 +33,20 @@ class Reclamation(models.Model):
         null=True, blank=True,
         related_name='reclamations',
     )
-    inscription_element  = models.ForeignKey(
-        'inscriptions.InscriptionElement',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='reclamations',
-    )
-    session_evaluation   = models.ForeignKey(
-        'evaluations.SessionEvaluation',
+    #: LA NOTE CONTESTÉE. Le champ visait `inscriptions.InscriptionElement` et
+    #: `evaluations.SessionEvaluation`, de la couche LMD que le fork a
+    #: remplacée : **zéro ligne**. Aucun étudiant ne pouvait donc désigner la
+    #: note qu'il conteste, et le périmètre de l'enseignant — bâti sur le même
+    #: chemin — ne lui montrait jamais rien.
+    #:
+    #: Pas de session séparée : `ipgei.Note` porte déjà son semestre, et c'est
+    #: `PeriodeReclamation.type_session` qui dit quelle campagne est ouverte.
+    #: Deux champs pour une seule information se contredisent tôt ou tard.
+    #:
+    #: `SET_NULL` conservé : supprimer une note ne doit pas effacer la
+    #: réclamation qu'elle a suscitée, ni le motif que l'étudiant a écrit.
+    note_ipgei           = models.ForeignKey(
+        'ipgei.Note',
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name='reclamations',

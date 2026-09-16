@@ -8,19 +8,26 @@ class ReclamationSerializer(serializers.ModelSerializer):
     etudiant_nom       = serializers.CharField(source='etudiant.nom',       read_only=True)
     etudiant_matricule = serializers.CharField(source='etudiant.matricule', read_only=True)
     traitee_par_nom    = serializers.CharField(source='traitee_par.name',   read_only=True, default=None)
+    # Les clés gardent leur nom — `em_*` — pour ne pas retoucher des écrans qui
+    # marchent : le socle dit « EM », l'IPGEI dit « matière », et la
+    # réclamation d'absence continue de lire le suivi.
     em_code            = serializers.SerializerMethodField()
     em_intitule        = serializers.SerializerMethodField()
+    semestre_code      = serializers.CharField(source='note_ipgei.semestre.code',
+                                               read_only=True, default=None)
+    classe_nom         = serializers.CharField(source='note_ipgei.inscription.classe.nom',
+                                               read_only=True, default=None)
 
     def get_em_code(self, obj):
-        if obj.inscription_element and obj.inscription_element.em:
-            return obj.inscription_element.em.code_em
+        if obj.note_ipgei_id and obj.note_ipgei.matiere:
+            return obj.note_ipgei.matiere.code
         if obj.presence and obj.presence.suivi and obj.presence.suivi.em:
             return obj.presence.suivi.em.code_em
         return None
 
     def get_em_intitule(self, obj):
-        if obj.inscription_element and obj.inscription_element.em:
-            return obj.inscription_element.em.intitule
+        if obj.note_ipgei_id and obj.note_ipgei.matiere:
+            return obj.note_ipgei.matiere.intitule
         if obj.presence and obj.presence.suivi and obj.presence.suivi.em:
             return obj.presence.suivi.em.intitule
         return None
@@ -30,7 +37,7 @@ class ReclamationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'etudiant', 'etudiant_nom', 'etudiant_matricule',
             'type_reclamation', 'statut',
-            'presence', 'inscription_element', 'session_evaluation',
+            'presence', 'note_ipgei', 'semestre_code', 'classe_nom',
             'motif', 'justificatif',
             'em_code', 'em_intitule',
             'reponse', 'traitee_par', 'traitee_par_nom',
@@ -47,7 +54,7 @@ class ReclamationCreateSerializer(serializers.ModelSerializer):
         model  = Reclamation
         fields = [
             'type_reclamation', 'presence',
-            'inscription_element', 'session_evaluation',
+            'note_ipgei',
             'motif', 'justificatif',
         ]
 

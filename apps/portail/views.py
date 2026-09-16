@@ -878,131 +878,54 @@ class MesReclamationsView(APIView):
         serializer = ReclamationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Garde-fou : reclamation possible uniquement sur les notes de l'annee
-        # universitaire active. Empeche tout abus si quelqu'un forge la requete.
-        ie = serializer.validated_data.get('inscription_element')
-        if ie is not None:
-            from apps.parametres.models import Year
-            try:
-                ie_annee = ie.inscription_ped.inscription_admin.annee_univ
-            except Exception:
-                ie_annee = None
-            annee_active = Year.objects.filter(est_active=True).first()
-            if not ie_annee or not annee_active or ie_annee.pk != annee_active.pk:
-                return Response(
-                    {'detail': "Vous ne pouvez réclamer que sur les notes de l'année universitaire en cours."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            # Verifier aussi que l'IE appartient bien a cet etudiant
-            if ie.inscription_ped.inscription_admin.etudiant_id != etudiant.id:
+        # La note contestée. Le champ visait `InscriptionElement`, de la couche
+        # LMD à zéro ligne : aucun étudiant ne pouvait désigner sa note, et
+        # cette garde rendait 403 à tout le monde — elle s'appuyait de surcroît
+        # sur `Year.est_active`, qu'aucune année ne porte en base.
+        from .ipgei_source import peut_reclamer
+
+        note = serializer.validated_data.get('note_ipgei')
+        if note is not None:
+            if note.inscription.etudiant_id != etudiant.id:
                 return Response(
                     {'detail': "Cette note ne vous appartient pas."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-
-            # Verifier qu'une periode de reclamation est ouverte pour cette note
-            if not _periode_reclamation_active(etudiant, ie):
+            # La période fait foi, et elle seule : elle porte déjà l'année, la
+            # parité, l'institution, la filière et le niveau. Le contrôle
+            # d'année séparé disait la même chose une seconde fois, et les deux
+            # ne pouvaient que diverger.
+            if not peut_reclamer(note):
                 return Response(
-                    {'detail': "Aucune periode de reclamation n'est ouverte pour ces notes en ce moment. Contactez la scolarite."},
+                    {'detail': "Aucune période de réclamation n'est ouverte pour "
+                               'ces notes en ce moment. Contactez la scolarité.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
         reclamation = serializer.save(etudiant=etudiant)
-        return Response(ReclamationSerializer(reclamation).data, status=status.HTTP_201_CREATED)
-
-
-def _periode_reclamation_active(etudiant, inscription_element):
-    """
-    Retourne True si au moins une PeriodeReclamation est en cours pour
-    l'etudiant + l'inscription_element donnee. Le scope verifie :
-      - annee_univ matche
-      - type_semestre (parite) matche
-      - filiere matche (ou periode.filiere=null = toutes)
-      - niveau matche (ou periode.niveau=null = tous)
-      - periode est actif=True ET dans la fenetre [date_ouverture, date_fermeture]
-      - periode.institution matche celle de l'IA
-    """
-    from apps.reclamations.models import PeriodeReclamation
-    from django.utils import timezone
-    from django.db.models import Q
-
-    try:
-        ia      = inscription_element.inscription_ped.inscription_admin
-        ip      = inscription_element.inscription_ped
-        annee   = ia.annee_univ
-        niveau  = ia.niveau
-        institution = ia.institution
-        filiere = ia.filiere_id
-        sem     = ip.semestre
-    except Exception:
-        return False
-
-    if not annee or not sem:
-        return False
-
-    parite = sem.type_semestre  # 'I' ou 'P'
-    now = timezone.now()
-
-    return PeriodeReclamation.objects.filter(
-        actif=True,
-        date_ouverture__lte=now,
-        date_fermeture__gte=now,
-        annee_univ=annee,
-        type_semestre=parite,
-        institution=institution,
-    ).filter(
-        Q(filiere__isnull=True) | Q(filiere_id=filiere)
-    ).filter(
-        Q(niveau__isnull=True) | Q(niveau=niveau)
-    ).exists()
+        return Response(ReclamationSerializer(reclamation).data,
+                        status=status.HTTP_201_CREATED)
 
 
 class PeriodesReclamationActivesView(APIView):
     """
-    GET /api/v1/portail/reclamations/periodes-actives/
-    Retourne la liste des periodes de reclamation actuellement ouvertes
-    pour l'etudiant connecte (selon son institution + filiere + niveau + annee).
+    `GET /api/v1/portail/reclamations/periodes-actives/`
+
+    Les fenêtres de réclamation ouvertes pour l'étudiant connecté. Elle
+    déduisait son périmètre d'`InscriptionAdministrative` — couche LMD, zéro
+    ligne —, si bien qu'elle rendait toujours une liste vide : l'écran affichait
+    « aucune période ouverte » même une période ouverte.
     """
     permission_classes = [IsEtudiant]
 
     def get(self, request):
-        from apps.reclamations.models import PeriodeReclamation
         from apps.reclamations.serializers import PeriodeReclamationSerializer
-        from django.utils import timezone
-        from django.db.models import Q
-        from apps.inscriptions.models import InscriptionAdministrative
+
+        from .ipgei_source import periodes_ouvertes
 
         etudiant = _get_etudiant(request)
-        # On regarde les IA pour cet etudiant pour deduire son scope (institution, filiere, niveau)
-        ias = InscriptionAdministrative.objects.filter(etudiant=etudiant).select_related(
-            'annee_univ', 'filiere', 'institution',
-        )
-        if not ias.exists():
-            return Response([])
-
-        now = timezone.now()
-        # Toutes les periodes potentiellement actives
-        periodes_qs = PeriodeReclamation.objects.filter(
-            actif=True,
-            date_ouverture__lte=now,
-            date_fermeture__gte=now,
-        ).select_related('annee_univ', 'institution', 'filiere')
-
-        # On ne garde que celles qui matchent au moins une IA de l'etudiant
-        active = []
-        for periode in periodes_qs:
-            for ia in ias:
-                if ia.annee_univ_id != periode.annee_univ_id:
-                    continue
-                if ia.institution_id != periode.institution_id:
-                    continue
-                if periode.filiere_id and ia.filiere_id != periode.filiere_id:
-                    continue
-                if periode.niveau is not None and ia.niveau != periode.niveau:
-                    continue
-                active.append(periode)
-                break
-        return Response(PeriodeReclamationSerializer(active, many=True).data)
+        periodes = periodes_ouvertes(etudiant)
+        return Response(PeriodeReclamationSerializer(periodes, many=True).data)
 
 
 class DetailReclamationView(generics.RetrieveAPIView):

@@ -176,3 +176,106 @@ def document_deja_delivre(etudiant, type_document: str, annee: str,
         if chemin and os.path.exists(chemin):
             return doc
     return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Réclamations sur les notes
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# `PeriodeReclamation` décrit la fenêtre pendant laquelle un étudiant peut
+# contester une note. Elle est restée telle quelle — ses champs (année, parité,
+# institution, filière, niveau) gardent leur sens. Ce qui a changé, c'est la
+# façon de savoir SI une note tombe dedans : le test passait par
+# `InscriptionElement → InscriptionPedagogique → InscriptionAdministrative`,
+# chaîne de la couche LMD dont les trois tables portent zéro ligne. Il rendait
+# donc `False` pour tout le monde, silencieusement.
+#
+# Le pont entre les deux vocabulaires tient en trois correspondances :
+#   `Year.annee` (« 2025-2026 ») ↔ `InscriptionIPGEI.annee_universitaire`
+#   `PeriodeReclamation.niveau` (entier)  ↔ `NiveauIPGEI.rang`
+#   `type_semestre` ('I' / 'P')           ↔ parité du code de semestre
+
+def _parite(code_semestre: str) -> str:
+    """'S1'/'S3' → 'I', 'S2'/'S4' → 'P'. Le chiffre décide, rien d'autre."""
+    try:
+        return 'I' if int(code_semestre[1:]) % 2 else 'P'
+    except (ValueError, IndexError):
+        return ''
+
+
+def _rang_du_niveau(classe) -> int:
+    """
+    Le rang IPGEI de la classe — 1 pour MPSI, 2 pour MP.
+
+    `PeriodeReclamation.niveau` est un entier hérité du LMD, où il désignait
+    l'année d'étude. Le rang dit exactement la même chose, et c'est lui qui
+    fait foi à l'IPGEI.
+    """
+    from apps.ipgei.models import NiveauIPGEI
+
+    rang = (NiveauIPGEI.objects
+            .filter(institution=classe.institution, code=classe.niveau_code)
+            .values_list('rang', flat=True).first())
+    return rang
+
+
+def periodes_ouvertes(etudiant, note=None):
+    """
+    Les périodes de réclamation ouvertes pour cet étudiant, maintenant.
+
+    `note` restreint au périmètre de CETTE note — son année, son semestre, sa
+    classe. Sans elle, on rend tout ce qui est ouvert pour l'étudiant, ce dont
+    l'écran a besoin pour dire « vous pouvez réclamer jusqu'au … ».
+    """
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from apps.reclamations.models import PeriodeReclamation
+
+    if note is not None:
+        inscriptions = [note.inscription]
+        parite_voulue = _parite(note.semestre.code)
+    else:
+        inscriptions = list(inscriptions_de(etudiant))
+        parite_voulue = None
+    if not inscriptions:
+        return []
+
+    ouvertes = list(
+        PeriodeReclamation.objects
+        .filter(actif=True, date_ouverture__lte=timezone.now(),
+                date_fermeture__gte=timezone.now())
+        .select_related('annee_univ', 'institution', 'filiere')
+    )
+    if not ouvertes:
+        return []
+
+    retenues = []
+    for periode in ouvertes:
+        if parite_voulue and periode.type_semestre != parite_voulue:
+            continue
+        for inscription in inscriptions:
+            classe = inscription.classe
+            if periode.institution_id != classe.institution_id:
+                continue
+            annee_periode = getattr(periode.annee_univ, 'annee', None)
+            if annee_periode != inscription.annee_universitaire:
+                continue
+            # Filière et niveau vides valent « toutes » : c'est le cas courant à
+            # l'IPGEI, qui n'a qu'une filière technique.
+            if periode.filiere_id:
+                from apps.ipgei.socle import filiere_socle
+                if periode.filiere_id != filiere_socle(classe.institution).pk:
+                    continue
+            if periode.niveau is not None and periode.niveau != _rang_du_niveau(classe):
+                continue
+            retenues.append(periode)
+            break
+    return retenues
+
+
+def peut_reclamer(note) -> bool:
+    """Une période couvre-t-elle cette note, en ce moment ?"""
+    if note is None:
+        return False
+    return bool(periodes_ouvertes(note.inscription.etudiant, note=note))

@@ -23,8 +23,8 @@ class ReclamationAdminViewSet(viewsets.ModelViewSet):
     queryset = Reclamation.objects.select_related(
         'etudiant', 'traitee_par',
         'presence__suivi__em',
-        'inscription_element__em',
-        'session_evaluation',
+        'note_ipgei__matiere', 'note_ipgei__semestre',
+        'note_ipgei__inscription__classe',
     ).all()
     serializer_class   = ReclamationSerializer
     permission_classes = [RBACPermission]
@@ -39,12 +39,16 @@ class ReclamationAdminViewSet(viewsets.ModelViewSet):
         # portant sur SES matieres. `get_object` passe par ici aussi : traiter une
         # reclamation hors perimetre rend 404, sans garde supplementaire.
         qs = super().get_queryset()
-        from apps.ipgei.perimetre import ems_autorises
-        em_ids = ems_autorises(self.request.user)
-        if em_ids is None:
+        # Deux périmètres pour deux chemins : la note contestée est IPGEI, le
+        # pointage d'absence reste projeté en EM du socle. Une réclamation de
+        # note se filtre donc sur la MATIÈRE, non sur son miroir.
+        from apps.ipgei.perimetre import ems_autorises, matieres_autorisees
+        matiere_ids = matieres_autorisees(self.request.user)
+        if matiere_ids is None:
             return qs
+        em_ids = ems_autorises(self.request.user) or set()
         return qs.filter(
-            models.Q(inscription_element__em__in=em_ids)
+            models.Q(note_ipgei__matiere__in=matiere_ids)
             | models.Q(presence__suivi__em__in=em_ids)
         ).distinct()
 
@@ -81,12 +85,17 @@ class ReclamationAdminViewSet(viewsets.ModelViewSet):
             qs_suivi = qs_suivi.filter(annee_universitaire=annee)
         em_ids = list(qs_suivi.values_list('em_id', flat=True).distinct())
 
+        # `em_ids` vient du pointage : il désigne les EM miroirs. Pour la note
+        # contestée on remonte à la matière qui les porte — le lien est
+        # `Matiere.em_miroir`, et le traverser à l'envers évite de redemander
+        # un périmètre déjà calculé.
         qs = Reclamation.objects.select_related(
             'etudiant', 'traitee_par',
             'presence__suivi__em',
-            'inscription_element__em',
+            'note_ipgei__matiere', 'note_ipgei__semestre',
+            'note_ipgei__inscription__classe',
         ).filter(
-            models.Q(inscription_element__em__in=em_ids) |
+            models.Q(note_ipgei__matiere__em_miroir__in=em_ids) |
             models.Q(presence__suivi__em__in=em_ids)
         ).distinct().order_by('-date_soumission')
 
@@ -108,7 +117,8 @@ class ReclamationAdminViewSet(viewsets.ModelViewSet):
                 from apps.suivi.models import SuiviePointage
                 em_ids = list(SuiviePointage.objects.filter(prof=prof).values_list('em_id', flat=True).distinct())
                 em_ok = (
-                    (reclamation.inscription_element and reclamation.inscription_element.em_id in em_ids) or
+                    (reclamation.note_ipgei_id
+                     and reclamation.note_ipgei.matiere.em_miroir_id in em_ids) or
                     (reclamation.presence and reclamation.presence.suivi.em_id in em_ids)
                 )
                 if not em_ok:
