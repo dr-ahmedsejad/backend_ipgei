@@ -243,27 +243,50 @@ class SaisieNoteEnLigne(models.Model):
 
     Ce n'est PAS une note officielle : la direction exporte le classeur, puis
     saisit en local, où seule la note fait foi. On n'écrit jamais dans
-    `evaluations_note` depuis ici — le miroir n'a pas autorité sur les résultats.
+    `ipgei_note` depuis ici — le miroir n'a pas autorité sur les résultats.
 
-    La cible reprend l'identité d'une note — inscription à l'élément, session,
-    type — mais en identifiants nus, avec l'instantané qu'il faut pour afficher
-    et exporter sans rien interroger d'autre.
+    ELLE VISE UNE NOTE IPGEI. La cible était `InscriptionElement` et
+    `SessionEvaluation`, de la couche LMD que le fork a remplacée et dont les
+    tables portent **zéro ligne** : l'écran rendait une grille vide à tout
+    enseignant, sans erreur. Les champs pointent désormais `ipgei.Note`.
+
+    Des identifiants NUS, sans clé étrangère, comme partout dans cette boîte de
+    réception : ces lignes survivent au dump qui restaure le miroir (cf.
+    `SYNC_EXCLUDE_TABLE`), donc elles ne peuvent pas dépendre d'objets que la
+    restauration remplace. L'instantané qui les accompagne — matricule, code de
+    matière, classe — permet d'afficher et d'exporter sans rien interroger.
+
+    `numero` porte le rang du devoir : l'IPGEI compte DS 1..N et examens 1..N,
+    là où le LMD n'avait qu'une case par type. Sans lui, saisir le DS 2
+    écraserait le DS 1.
     """
     prof_id  = models.IntegerField(db_index=True)
     prof_nom = models.CharField(max_length=200, blank=True, default='')
     user_id  = models.IntegerField(null=True, blank=True)
 
-    inscription_element_id = models.IntegerField(db_index=True)
-    session_id             = models.IntegerField(db_index=True)
-    type_note              = models.CharField(max_length=10)
-    em_id                  = models.IntegerField(null=True, blank=True, db_index=True)
-    institution_id         = models.IntegerField(null=True, blank=True, db_index=True)
+    #: La ligne de notes visée — `ipgei.Note.id`. Identifiant nu : le miroir est
+    #: une copie du local, les identifiants y sont les mêmes.
+    note_ipgei_id  = models.IntegerField(db_index=True)
+    #: 'ds' | 'tp' | 'exam' | 'ratt' — le vocabulaire IPGEI, pas le 'CC' du socle.
+    type_note      = models.CharField(max_length=10)
+    #: Rang du devoir dans son type. 1 pour le TP et le rattrapage, qui sont uniques.
+    numero         = models.PositiveSmallIntegerField(default=1)
+    matiere_id     = models.IntegerField(null=True, blank=True, db_index=True)
+    classe_id      = models.IntegerField(null=True, blank=True, db_index=True)
+    semestre_id    = models.IntegerField(null=True, blank=True, db_index=True)
+    institution_id = models.IntegerField(null=True, blank=True, db_index=True)
+    #: L'année, que la table ne portait pas : rien n'aurait distingué les
+    #: brouillons d'une promotion de ceux de la suivante, et la table n'est
+    #: jamais réinitialisée par une publication.
+    annee_universitaire = models.CharField(max_length=20, blank=True, default='',
+                                           db_index=True)
 
     etudiant_matricule = models.CharField(max_length=50,  blank=True, default='')
     etudiant_nom       = models.CharField(max_length=255, blank=True, default='')
-    em_code            = models.CharField(max_length=50,  blank=True, default='')
-    em_intitule        = models.CharField(max_length=255, blank=True, default='')
-    session_code       = models.CharField(max_length=50,  blank=True, default='')
+    matiere_code       = models.CharField(max_length=50,  blank=True, default='')
+    matiere_intitule   = models.CharField(max_length=255, blank=True, default='')
+    classe_nom         = models.CharField(max_length=100, blank=True, default='')
+    semestre_code      = models.CharField(max_length=10,  blank=True, default='')
 
     valeur = models.DecimalField(max_digits=5, decimal_places=2,
                                  null=True, blank=True)
@@ -278,13 +301,17 @@ class SaisieNoteEnLigne(models.Model):
         db_table = 'saisie_note_en_ligne'
         ordering = ['-date_modification']
         #: Un seul brouillon par case : la saisie se rejoue autant qu'on veut,
-        #: elle écrase la précédente au lieu d'empiler des doublons.
-        unique_together = ('prof_id', 'inscription_element_id', 'session_id',
-                           'type_note')
+        #: elle écrase la précédente au lieu d'empiler des doublons. `numero`
+        #: en fait partie, sans quoi le DS 2 écraserait le DS 1.
+        unique_together = ('prof_id', 'note_ipgei_id', 'type_note', 'numero')
         indexes = [
-            models.Index(fields=['prof_id', 'session_id', 'statut']),
+            models.Index(fields=['prof_id', 'semestre_id', 'statut'],
+                         name='saisie_note_prof_sem_idx'),
+            models.Index(fields=['classe_id', 'matiere_id', 'semestre_id'],
+                         name='saisie_note_feuille_idx'),
         ]
 
     def __str__(self):
+        rang = f' {self.numero}' if self.type_note in ('ds', 'exam') else ''
         return (f'{self.prof_nom} — {self.etudiant_matricule} '
-                f'{self.type_note}={self.valeur} ({self.statut})')
+                f'{self.type_note}{rang}={self.valeur} ({self.statut})')

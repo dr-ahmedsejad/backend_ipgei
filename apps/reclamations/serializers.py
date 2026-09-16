@@ -137,9 +137,11 @@ class SaisieNoteEnLigneSerializer(serializers.ModelSerializer):
         model  = SaisieNoteEnLigne
         fields = [
             'id', 'prof_id', 'prof_nom',
-            'inscription_element_id', 'session_id', 'type_note', 'em_id',
-            'etudiant_matricule', 'etudiant_nom', 'em_code', 'em_intitule',
-            'session_code', 'valeur',
+            'note_ipgei_id', 'type_note', 'numero',
+            'matiere_id', 'classe_id', 'semestre_id', 'annee_universitaire',
+            'etudiant_matricule', 'etudiant_nom',
+            'matiere_code', 'matiere_intitule', 'classe_nom', 'semestre_code',
+            'valeur',
             'statut', 'statut_display', 'date_saisie', 'date_modification',
             'exporte_le',
         ]
