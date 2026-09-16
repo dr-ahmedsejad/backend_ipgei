@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ipgei-backend",
+      "runtimeExecutable": "backend_ipgei/.venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "backend_ipgei/manage.py",
+        "runserver",
+        "8001"
+      ],
+      "port": 8001,
+      "autoPort": false
+    },
+    {
+      "name": "ipgei-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "frontend_ipgei",
+        "run",
+        "dev"
+      ],
+      "port": 3010,
+      "autoPort": false
+    }
+  ]
+}

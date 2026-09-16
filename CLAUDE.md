@@ -217,6 +217,25 @@ deploy/            → pile Docker, Nginx, sauvegardes chiffrées
 python -m pytest -q --no-migrations                   # SQLite jetable
 ```
 
+### Lancer les deux serveurs — `.claude/launch.json`
+
+Ce dépôt en porte la version de référence : back sur **8001**, front sur
+**3010**. Il est versionné ici parce que `C:\SIR\IPGEI` n'est pas un dépôt —
+sans quoi la configuration resterait locale à une machine.
+
+**Il doit être RECOPIÉ à la racine pour servir.** L'outil de prévisualisation ne
+lit qu'un seul chemin, `C:\SIR\IPGEI\.claude\launch.json`, et ne cherche
+pas dans les sous-dépôts :
+
+```bash
+cp backend_ipgei/.claude/launch.json .claude/launch.json    # depuis C:\SIR\IPGEI
+```
+
+Les chemins qu'il contient (`backend_ipgei/…`, `frontend_ipgei/…`) sont donc
+relatifs à la RACINE, pas à ce dépôt. Modifier la copie racine sans reporter ici
+laisserait les deux diverger en silence : c'est le prix de ce montage, et la
+seule raison de le préférer à rien.
+
 ## Commits
 
 `feat(domaine): …`, `fix(domaine): …`, `chore(deploy): …` — en français,
