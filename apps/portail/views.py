@@ -3,7 +3,6 @@ Portail étudiant — vues.
 Toutes les vues exigent le rôle 'etudiant' via IsEtudiant.
 L'étudiant ne voit que ses propres données (filtrées par request.user.etudiant_profile).
 """
-import threading as _threading
 
 from rest_framework import generics, status
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -18,8 +17,6 @@ from .serializers import ProfilEtudiantSerializer, AbsenceEtudiantSerializer
 
 # ── Suivi des générations PDF en cours ────────────────────────────────────────
 # Évite de lancer plusieurs wkhtmltopdf simultanément pour le même document.
-_gen_lock: _threading.Lock = _threading.Lock()
-_gen_in_progress: set = set()   # doc PKs en cours de génération
 
 
 def _get_etudiant(request):
@@ -325,190 +322,39 @@ class MesResultatsView(APIView):
 
 
 # ── Documents ─────────────────────────────────────────────────────────────────
-def _pregen_pdf_bg(doc_pk, etudiant_pk, annee_univ, semestre_id):
-    """
-    Génère le PDF d'un DocumentOfficiel en arrière-plan (thread daemon).
-    Lance wkhtmltopdf hors du cycle de vie de la requête HTTP.
-    Utilise _gen_lock/_gen_in_progress pour éviter les générations en double.
-    """
-    # ── Exclusion mutuelle : un seul thread par document ─────────────────────
-    with _gen_lock:
-        if doc_pk in _gen_in_progress:
-            return   # déjà en cours → ne pas relancer wkhtmltopdf en parallèle
-        _gen_in_progress.add(doc_pk)
-
-    import hashlib, os, logging
-    logger = logging.getLogger('siga')
-    try:
-        from apps.documents.models import DocumentOfficiel
-        from apps.documents.services import _generer_pdf
-        from apps.evaluations.models import Note
-        from apps.inscriptions.models import InscriptionPedagogique
-        from apps.absence.models import Etudiant
-        from django.core.files.base import ContentFile
-
-        etudiant = Etudiant.objects.get(pk=etudiant_pk)
-        doc      = DocumentOfficiel.objects.get(pk=doc_pk)
-
-        # Calcul du hash des notes pour ce semestre
-        hash_actuel = ''
-        try:
-            ip = InscriptionPedagogique.objects.filter(
-                inscription_admin__etudiant=etudiant,
-                semestre_id=doc.semestre_id or semestre_id,
-            ).first()
-            if ip:
-                notes_qs = Note.objects.filter(
-                    inscription_element__inscription_ped=ip,
-                ).order_by('inscription_element_id', 'type_note').values_list(
-                    'inscription_element_id', 'type_note', 'valeur'
-                )
-                hash_data = '|'.join(f'{ie},{t},{v}' for ie, t, v in notes_qs)
-            else:
-                hash_data = ''
-            hash_actuel = hashlib.sha256(hash_data.encode()).hexdigest()
-        except Exception:
-            pass
-
-        besoin_regen = (
-            not doc.fichier_pdf or
-            not os.path.exists(doc.fichier_pdf.path if doc.fichier_pdf else '') or
-            doc.hash_sha256 != hash_actuel
-        )
-        if not besoin_regen:
-            return  # PDF déjà à jour — rien à faire
-
-        # Supprimer l'ancien fichier si présent
-        if doc.fichier_pdf:
-            try:
-                old_path = doc.fichier_pdf.path
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-            except Exception:
-                pass
-            doc.fichier_pdf = None
-            doc.save(update_fields=['fichier_pdf'])
-
-        pdf_bytes = _generer_pdf(doc, etudiant, {
-            'annee_universitaire': annee_univ,
-            'semestre':            semestre_id,
-        })
-        if not pdf_bytes:
-            logger.warning('_pregen_pdf_bg: _generer_pdf a retourné None pour doc %s', doc_pk)
-            return
-
-        doc.hash_sha256 = hash_actuel
-        from apps.documents.services import enregistrer_pdf_document
-        enregistrer_pdf_document(doc, pdf_bytes)
-        doc.save(update_fields=['hash_sha256'])
-        logger.info('_pregen_pdf_bg: PDF généré en arrière-plan pour doc %s', doc_pk)
-
-    except Exception as e:
-        logger.exception('_pregen_pdf_bg: erreur pour doc %s: %s', doc_pk, e)
-    finally:
-        with _gen_lock:
-            _gen_in_progress.discard(doc_pk)
-        # Fermer la connexion DB propre au thread
-        try:
-            from django.db import connection as _db
-            _db.close()
-        except Exception:
-            pass
-
-
-def _releve_disponible_pour_etudiant(etudiant, annee_univ_label, semestre_id):
-    """
-    Verifie qu'un releve est telechargeable par l'etudiant : il faut qu'au moins
-    un PVDeliberation cloture (est_clos=True) couvre cet (etudiant, annee, semestre).
-
-    Couverture acceptee :
-      - PV semestriel : meme annee + meme code_semestre OU meme parite (I/P)
-                        + ligne de deliberation pour cet etudiant
-      - PV annuel     : meme annee + ligne de deliberation pour cet etudiant
-                        (le PV annuel englobe les 2 semestres de l'annee)
-
-    Retourne True/False. Sans semestre_id : verifie le PV annuel uniquement.
-    """
-    from apps.evaluations.models import PVDeliberation, LigneDeliberation
-    from apps.parametres.models import Semestre
-
-    base_q = LigneDeliberation.objects.filter(
-        pv__est_clos=True,
-        inscription_admin__etudiant=etudiant,
-    )
-    if not base_q.exists():
-        return False
-
-    if not semestre_id:
-        # On regarde uniquement le PV annuel
-        return base_q.filter(
-            pv__type_pv='annuel',
-            pv__annee_univ__annee=annee_univ_label,
-        ).exists()
-
-    # Parite du semestre demande (Impairs si S1/S3/S5, Pairs si S2/S4/S6)
-    sem = Semestre.objects.filter(pk=semestre_id).first()
-    if not sem:
-        return False
-    parite = sem.type_semestre  # 'I' ou 'P'
-    code   = sem.code_semestre  # 'S1', 'S2', etc.
-
-    # PV annuel couvrant l'annee
-    if base_q.filter(
-        pv__type_pv='annuel',
-        pv__annee_univ__annee=annee_univ_label,
-    ).exists():
-        return True
-
-    # PV semestriel couvrant ce semestre (par code OU parite)
-    from django.db.models import Q
-    return base_q.filter(
-        pv__type_pv='semestriel',
-        pv__session__annee_univ__annee=annee_univ_label,
-    ).filter(
-        Q(pv__semestre_code=code) | Q(pv__session__type_semestre=parite)
-    ).exists()
-
-
-def _find_or_create_doc(etudiant, type_document, annee_univ, semestre_id, user):
-    """Trouve ou crée le DocumentOfficiel sans générer le PDF."""
-    from apps.documents.models import DocumentOfficiel
-    from apps.documents.services import generer_document
-
-    qs = DocumentOfficiel.objects.filter(
-        etudiant=etudiant,
-        type_document=type_document,
-        annee_universitaire=annee_univ,
-    )
-    if semestre_id:
-        qs = qs.filter(semestre_id=semestre_id)
-    doc = qs.order_by('-date_generation').first()
-
-    if not doc:
-        doc_data = generer_document({
-            'etudiant':           etudiant.pk,
-            'type_document':      type_document,
-            'annee_universitaire': annee_univ,
-            **({'semestre': semestre_id} if semestre_id else {}),
-        }, user)
-        doc = DocumentOfficiel.objects.get(pk=doc_data['id'])
-
-    return doc
-
-
 class DocumentsDisponiblesView(APIView):
-    """GET /api/v1/portail/documents/disponibles/
-    Retourne la liste des documents que l'étudiant peut générer/télécharger :
-    - une attestation d'inscription (pour l'année active)
-    - un relevé de notes par semestre inscrit
-    Lance également la pré-génération des PDFs en arrière-plan (threads daemon)
-    afin que le téléchargement ultérieur soit instantané.
+    """
+    `GET /api/v1/portail/documents/disponibles/`
+
+    La liste des documents que l'étudiant peut télécharger : l'attestation
+    d'inscription, et un relevé par semestre dont le jury a statué.
+
+    PAS DE PRÉ-GÉNÉRATION, ET IL NE FAUT PAS LA RÉINTRODUIRE TELLE QU'ELLE ÉTAIT.
+    Le socle pré-rendait les PDF en threads démons pour rendre le téléchargement
+    instantané (`_pregen_pdf_bg`). Ce code était débranché et lisait la couche
+    LMD vide ; il a été retiré plutôt que porté, pour deux raisons qui tiennent
+    au registre officiel de l'IPGEI :
+
+    1. Il RÉÉCRIVAIT un document déjà émis. Quand les notes changeaient, il
+       supprimait le PDF et le régénérait sous le MÊME numéro de série et le
+       MÊME jeton de vérification. Une pièce remise à un étudiant aurait donc,
+       vérifiée en ligne plus tard, affiché un autre contenu que celui qu'il
+       tient en main. À l'IPGEI une pièce émise est scellée : si les notes
+       changent, on émet une NOUVELLE pièce, l'ancienne reste ce qu'elle était.
+
+    2. Il écrasait le SCEAU. `hash_sha256` est l'empreinte des OCTETS du PDF
+       (`ipgei.documents.generer_pdf`) ; ce code y écrivait une empreinte des
+       NOTES. Deux sens dans un même champ, et le premier cassé.
+
+    Pré-générer sans ces défauts exigerait de créer les entrées du registre
+    AVANT toute demande — des numéros de série consommés et des pièces
+    inscrites que personne n'a demandées, dans un registre dont c'est
+    précisément le rôle de dire ce qui a été délivré. Le premier
+    téléchargement prend quelques secondes ; c'est le prix d'un registre juste.
     """
     permission_classes = [IsEtudiant]
 
     def get(self, request):
-        import threading
-
         from apps.ipgei.models import Deliberation, LigneDeliberation, SemestreIPGEI
 
         from .ipgei_source import inscription_courante, inscriptions_de
@@ -551,118 +397,6 @@ class DocumentsDisponiblesView(APIView):
                     'label': f'Relevé de notes — {semestre.code} '
                              f'({insc.annee_universitaire})',
                 })
-        return Response({'attestation': attestation, 'releves': releves})
-
-    def _pregeneration_desactivee(self, request):
-        """
-        L'ANCIEN CORPS, conservé pour mémoire et volontairement débranché.
-
-        Il pré-générait les PDF en threads démons pour rendre le
-        téléchargement instantané. Ce mécanisme visait les types de documents
-        du socle (`attestation_inscription`, `releve_semestre`) et leurs
-        générateurs ; l'IPGEI a les siens, avec son propre registre, sa
-        numérotation et son QR de vérification.
-
-        Le rebrancher demande de reprendre `_find_or_create_doc` et
-        `_pregen_pdf_bg` sur `apps/ipgei/documents.py` — un travail à part, qui
-        ne doit pas retarder le rétablissement de la LISTE. Sans
-        pré-génération, le premier téléchargement prend quelques secondes de
-        plus ; avec l'ancien code, il ne prenait rien du tout parce qu'il ne
-        produisait rien.
-        """
-        import threading
-        from apps.inscriptions.models import InscriptionAdministrative, InscriptionPedagogique
-
-        etudiant = _get_etudiant(request)
-        ia = (
-            InscriptionAdministrative.objects
-            .filter(etudiant=etudiant)
-            .select_related('annee_univ')
-            .order_by('-annee_univ__annee')
-            .first()
-        )
-        if not ia:
-            return Response({'attestation': None, 'releves': []})
-
-        annee_univ = ia.annee_univ.annee
-
-        attestation = {
-            'type_document': 'attestation_inscription',
-            'label':         "Attestation d'inscription",
-            'annee_univ':    annee_univ,
-        }
-
-        # Variante A (stricte) : on parcourt TOUTES les IP (toutes annees)
-        # pour exposer aussi les releves historiques deja deliberes.
-        # Un releve n'est expose que si la deliberation pour ce
-        # (etudiant, annee, semestre) est cloturee.
-        ips_all = (
-            InscriptionPedagogique.objects
-            .filter(inscription_admin__etudiant=etudiant)
-            .select_related('semestre', 'inscription_admin__annee_univ')
-            .order_by('-inscription_admin__annee_univ__annee', 'semestre__code_semestre')
-        )
-        releves = []
-        for ip in ips_all:
-            if not ip.semestre:
-                continue
-            ip_annee = ip.inscription_admin.annee_univ.annee if ip.inscription_admin.annee_univ_id else None
-            if not ip_annee:
-                continue
-            if not _releve_disponible_pour_etudiant(etudiant, ip_annee, ip.semestre_id):
-                continue
-            releves.append({
-                'type_document':  'releve_semestre',
-                'semestre_id':    ip.semestre_id,
-                'semestre_code':  ip.semestre.code_semestre,
-                'semestre_label': ip.semestre.semestre,
-                'annee_univ':     ip_annee,
-                'label':          f"Relevé de notes — {ip.semestre.semestre} ({ip_annee})",
-            })
-        # Pour la pre-generation, on garde aussi la liste des IP de l'annee courante
-        ips = ips_all.filter(inscription_admin=ia)
-
-        # ── Pré-génération des PDFs en arrière-plan ───────────────────────────
-        # wkhtmltopdf est lancé depuis un thread daemon : sa fermeture n'affecte
-        # pas la socket HTTP active → pas de "Failed to fetch" au téléchargement.
-        try:
-            docs_a_pregen = []
-
-            # Attestation
-            try:
-                doc_att = _find_or_create_doc(
-                    etudiant, 'attestation_inscription', annee_univ, None, request.user
-                )
-                docs_a_pregen.append((doc_att.pk, None))
-            except Exception:
-                pass
-
-            # Relevés — uniquement ceux dont la deliberation est cloturee
-            for ip in ips:
-                if not ip.semestre:
-                    continue
-                if not _releve_disponible_pour_etudiant(etudiant, annee_univ, ip.semestre_id):
-                    continue   # pas de pre-generation tant que pas delibere
-                try:
-                    doc_rel = _find_or_create_doc(
-                        etudiant, 'releve_semestre', annee_univ, ip.semestre_id, request.user
-                    )
-                    docs_a_pregen.append((doc_rel.pk, ip.semestre_id))
-                except Exception:
-                    pass
-
-            for doc_pk, sem_id in docs_a_pregen:
-                with _gen_lock:
-                    if doc_pk not in _gen_in_progress:
-                        t = threading.Thread(
-                            target=_pregen_pdf_bg,
-                            args=(doc_pk, etudiant.pk, annee_univ, sem_id),
-                            daemon=True,
-                        )
-                        t.start()
-        except Exception:
-            pass  # La pré-génération est best-effort — ne pas bloquer la réponse
-
         return Response({'attestation': attestation, 'releves': releves})
 
 class TelechargerDirectView(APIView):

@@ -232,6 +232,35 @@ class PortailIPGEITest(TestCase):
         self.assertEqual(apres['releves'][0]['type_document'],
                          'ipgei_releve_semestre')
 
+    def test_lister_les_documents_n_inscrit_rien_au_registre(self):
+        """
+        LISTER n'est pas DÉLIVRER.
+
+        L'ancienne pré-génération (`_pregen_pdf_bg`, retirée) appelait
+        `_find_or_create_doc` dès l'affichage de la liste : chaque visite créait
+        les entrées du registre — numéros de série consommés, pièces inscrites
+        que personne n'avait demandées. Elle réécrivait en outre le PDF d'une
+        pièce déjà émise sous le même numéro quand les notes changeaient.
+
+        Ce test échoue si quelqu'un la réintroduit sous cette forme : le
+        registre d'une pièce officielle doit dire ce qui a été délivré, rien
+        de plus.
+        """
+        from apps.documents.models import DocumentOfficiel
+        from apps.portail.views import DocumentsDisponiblesView
+
+        self._jury(portee=Deliberation.PORTEE_SEMESTRE, semestre=self.s3)
+        avant = DocumentOfficiel.objects.count()
+
+        for _ in range(3):                     # l'étudiant revient, rafraîchit
+            reponse = self._appeler(DocumentsDisponiblesView)
+        self.assertTrue(reponse.data['releves'],
+                        'la liste doit bien proposer un relevé — sinon le test '
+                        'passerait pour une mauvaise raison')
+
+        self.assertEqual(DocumentOfficiel.objects.count(), avant,
+                         "afficher la liste a inscrit des pièces au registre")
+
     # ── 6. Le registre ne se remplit pas à chaque clic ──────────────────────
     def test_sans_pdf_sur_le_disque_on_regenere(self):
         """
