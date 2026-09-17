@@ -11,11 +11,11 @@ from django_filters.rest_framework import DjangoFilterBackend
 from core.permissions import IsAdmin
 from core.mixins import AuditMixin, SelectAllMixin
 from core.pagination import StandardPagination, NoPagination
-from .models import Year, Niveau, Semestre, Seance, Creneau, Jour, Semaine, Paiement, Ramadan, Institution
+from .models import Year, Niveau, Semestre, Seance, Creneau, Jour, Semaine, Paiement, Ramadan, Institution, JourFerieFixe
 from .serializers import (
     YearSerializer, NiveauSerializer, SemestreSerializer, SeanceSerializer,
     CreneauSerializer, JourSerializer, SemaineSerializer, PaiementSerializer,
-    RamadanSerializer, InstitutionSerializer, GenerateSemainesSerializer,
+    RamadanSerializer, InstitutionSerializer, GenerateSemainesSerializer, JourFerieFixeSerializer,
     AddBatchSemainesSerializer,
 )
 
@@ -356,7 +356,19 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
         Semaine.objects.bulk_create(to_create)
         logger.info('Added batch of %d weeks (%d rows) for %s/%s starting %s',
                     nb, len(to_create), annee, typ, start_of_week)
+
+        # Les fériés fixes s'appliquent aux jours TOUT JUSTE créés, et à eux
+        # seuls : un jour plus ancien laissé en cours l'a peut-être été
+        # volontairement. On relit les lignes par leurs dates — `bulk_create`
+        # ne rend pas toujours les clés — sur ce seul lot.
+        from apps.ipgei import feries
+        crees = Semaine.objects.filter(
+            annee_universitaire=annee, type_semestre=typ,
+            date__in=[r.date for r in to_create])
+        feries_appliques = feries.appliquer_feries_fixes(crees.order_by('date'))
+
         return Response({
+            'feries':        feries_appliques,
             'created':       len(to_create),
             'weeks':         nb,
             'start_of_week': str(start_of_week),
@@ -391,27 +403,46 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
             qs = qs.filter(type_semestre=ts)
 
         # Regrouper en memoire (volume limite : ~200-300 lignes par annee/semestre)
+        from apps.ipgei.feries import libelle_date
+
         groups: dict = {}
         for s in qs.order_by('date', 'jour_fk_id'):
-            # Cle : si type=cours -> par numero_semaine, sinon par (date_debut_semaine)
-            if s.type_semaine == Semaine.TYPE_COURS and s.numero_semaine is not None:
-                key = ('cours', s.type_semestre, s.numero_semaine)
+            # Clé : le NUMÉRO dès qu'il existe, quel que soit le type du jour.
+            # On groupait sur « type = cours ET numéro » : une semaine contenant
+            # un jour férié isolé (numéroté, de type `ferie`) s'affichait en
+            # DEUX lignes, la seconde réduite au seul jour férié.
+            if s.numero_semaine is not None:
+                key = ('seq', s.type_semestre, s.numero_semaine)
             else:
                 # Aligner sur le lundi de la semaine ISO pour regrouper les 5-7 jours
                 week_anchor = s.date - timedelta(days=s.date.weekday())
                 key = ('autre', s.type_semestre, week_anchor.isoformat())
+            en_sequence = s.numero_semaine is not None
             g = groups.setdefault(key, {
                 'numero_semaine':       s.numero_semaine,
-                'type_semaine':         s.type_semaine,
-                'type_semaine_display': s.get_type_semaine_display(),
-                'description':          s.description,
+                # Une semaine numérotée est une semaine de cours, même si le
+                # premier jour lu est férié : son type ne se lit pas sur lui.
+                'type_semaine':         Semaine.TYPE_COURS if en_sequence else s.type_semaine,
+                'type_semaine_display': ('Cours' if en_sequence
+                                         else s.get_type_semaine_display()),
+                'description':          '',
                 'date_debut':           s.date,
                 'date_fin':             s.date,
                 'annee_universitaire':  s.annee_universitaire,
                 'type_semestre':        s.type_semestre,
                 'ids':                  [],
+                'jours_feries':         [],
             })
             g['ids'].append(s.pk)
+            if en_sequence and s.type_semaine == Semaine.TYPE_FERIE:
+                g['jours_feries'].append({
+                    'id': s.pk, 'date': s.date.isoformat(),
+                    'jour': libelle_date(s.date), 'libelle': s.description,
+                })
+            elif not g['description']:
+                # La description de la semaine vient de ses jours ordinaires :
+                # celle d'un férié est le nom du férié.
+                g['description'] = s.description
             if s.date < g['date_debut']:
                 g['date_debut'] = s.date
             if s.date > g['date_fin']:
@@ -423,6 +454,97 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
             r['date_debut'] = r['date_debut'].isoformat()
             r['date_fin']   = r['date_fin'].isoformat()
         return Response(result)
+
+    # ── Jours fériés ISOLÉS — voir apps/ipgei/feries.py ───────────────────
+    def _feries_reponse(self, fonction, *args):
+        """Traduit les refus du service dans l'enveloppe de cette vue."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from apps.ipgei import feries
+        try:
+            return Response(fonction(*args))
+        except feries.JourIntrouvable as exc:
+            return Response({'error': str(exc)}, status=404)
+        except feries.MarquageBloque as exc:
+            return Response({'error': str(exc)}, status=409)
+        except DjangoValidationError as exc:
+            return Response({'error': ' '.join(exc.messages)}, status=400)
+
+    @staticmethod
+    def _date_param(valeur):
+        from datetime import date as _date
+        try:
+            return _date.fromisoformat(valeur)
+        except (TypeError, ValueError):
+            return None
+
+    @action(detail=False, methods=['post'], url_path='marquer-jour-ferie')
+    def marquer_jour_ferie(self, request):
+        """
+        Marque UN jour férié : il garde son numéro, rien n'est renuméroté, et
+        ses séances sont annulées avec le motif `ferie`.
+        Corps : `{annee_universitaire, type_semestre, date, libelle}`.
+        """
+        from apps.ipgei import feries
+
+        annee = request.data.get('annee_universitaire')
+        typ   = request.data.get('type_semestre')
+        d     = self._date_param(request.data.get('date'))
+        if not (annee and typ and d):
+            return Response({'error': 'Champs requis : annee_universitaire, '
+                                      'type_semestre, date (AAAA-MM-JJ).'}, status=400)
+        return self._feries_reponse(feries.marquer_jour_ferie, annee, typ, d,
+                                    request.data.get('libelle'))
+
+    @action(detail=False, methods=['post'], url_path='retirer-jour-ferie')
+    def retirer_jour_ferie(self, request):
+        """Rend un jour férié aux cours et rétablit les séances que le férié avait annulées."""
+        from apps.ipgei import feries
+
+        annee = request.data.get('annee_universitaire')
+        typ   = request.data.get('type_semestre')
+        d     = self._date_param(request.data.get('date'))
+        if not (annee and typ and d):
+            return Response({'error': 'Champs requis : annee_universitaire, '
+                                      'type_semestre, date (AAAA-MM-JJ).'}, status=400)
+        return self._feries_reponse(feries.retirer_jour_ferie, annee, typ, d)
+
+    @action(detail=False, methods=['get'], url_path='jours-feries')
+    def jours_feries(self, request):
+        """Les jours fériés isolés marqués sur une période."""
+        from apps.ipgei import feries
+
+        annee = request.query_params.get('annee_universitaire')
+        if not annee:
+            return Response({'error': 'annee_universitaire requis.'}, status=400)
+        return Response(feries.jours_feries_de_la_periode(
+            annee, request.query_params.get('type_semestre') or None))
+
+    @action(detail=False, methods=['get'], url_path='apercu-feries-fixes')
+    def apercu_feries_fixes(self, request):
+        """Les jours qui tomberaient sur un férié fixe — SANS rien marquer."""
+        from apps.ipgei import feries
+
+        return Response(feries.apercu_feries_fixes(
+            request.query_params.get('annee_universitaire') or None,
+            request.query_params.get('type_semestre') or None))
+
+    @action(detail=False, methods=['post'], url_path='appliquer-feries-fixes')
+    def appliquer_feries_fixes(self, request):
+        """
+        Applique les fériés fixes au calendrier d'une période. Un jour bloqué par
+        un suivi est écarté avec son motif, sans empêcher les autres.
+        """
+        from apps.ipgei import feries
+
+        annee = request.data.get('annee_universitaire')
+        typ   = request.data.get('type_semestre')
+        if not annee:
+            return Response({'error': 'annee_universitaire requis.'}, status=400)
+        lignes = Semaine.objects.filter(annee_universitaire=annee)
+        if typ:
+            lignes = lignes.filter(type_semestre=typ)
+        return Response(feries.appliquer_feries_fixes(lignes.order_by('date')))
 
     # ── POST /api/v1/parametres/semaines/marquer-type/ ────────────────────
     @action(detail=False, methods=['post'], url_path='marquer-type')
@@ -493,18 +615,29 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                          f"{type_semestre} commencant le {week_anchor}.",
             }, status=404)
 
-        # Tous les rows de la semaine cible doivent partager le meme type/numero
-        # actuel (invariant). Sinon, etat incoherent, on refuse.
-        types_actuels = {r.type_semaine for r in target_rows}
-        if len(types_actuels) > 1:
+        # Invariant : tous les jours d'une semaine partagent le même type
+        # EFFECTIF et le même numéro. Un jour NUMÉROTÉ compte comme « cours »
+        # pour sa semaine — c'est la convention des jours fériés isolés : le
+        # 28 novembre garde le numéro de sa semaine avec le type `ferie`.
+        # Comparer les types bruts refusait de marquer toute semaine contenant
+        # un férié, avec un « état incohérent » qui n'en était pas un.
+        def type_effectif(r):
+            return Semaine.TYPE_COURS if r.numero_semaine is not None else r.type_semaine
+
+        types_actuels   = {type_effectif(r) for r in target_rows}
+        numeros_actuels = {r.numero_semaine for r in target_rows}
+        if len(types_actuels) > 1 or len(numeros_actuels) > 1:
             return Response({
                 'error': "Etat incoherent : les jours de cette semaine ont des "
                          "types differents. Contactez un administrateur.",
             }, status=409)
 
-        type_actuel        = target_rows[0].type_semaine
+        type_actuel        = type_effectif(target_rows[0])
         numero_actuel      = target_rows[0].numero_semaine
-        description_actuel = target_rows[0].description
+        # La description d'une semaine de cours se lit sur ses jours de COURS :
+        # celle d'un jour férié est le nom du férié, pas celle de la semaine.
+        lignes_type        = [r for r in target_rows if r.type_semaine == type_actuel]
+        description_actuel = (lignes_type or target_rows)[0].description
 
         # Idempotence : pas de changement effectif demande
         if type_actuel == nouveau_type and description_actuel == description:
@@ -559,7 +692,7 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
             cours_apres = (Semaine.objects
                            .filter(annee_universitaire=annee,
                                    type_semestre=type_semestre,
-                                   type_semaine=Semaine.TYPE_COURS,
+                                   numero_semaine__isnull=False,
                                    date__gt=week_end)
                            .order_by('date')
                            .first())
@@ -580,6 +713,7 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                 }, status=409)
 
         # ── Cascade atomique ──────────────────────────────────────────────
+        retablies = 0
         with transaction.atomic():
             target_ids = [r.pk for r in target_rows]
 
@@ -592,10 +726,14 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                     type_semaine=nouveau_type,
                     description=description,
                 )
+                # Filtre sur « numéro non NULL », pas sur le type : un férié
+                # isolé d'une semaine suivante est numéroté mais de type
+                # `ferie`. Filtrer sur « cours » lui laissait l'ancien numéro,
+                # et sa semaine se trouvait coupée en deux.
                 Semaine.objects.filter(
                     annee_universitaire=annee,
                     type_semestre=type_semestre,
-                    type_semaine=Semaine.TYPE_COURS,
+                    numero_semaine__isnull=False,
                     numero_semaine__gt=numero_actuel,
                 ).update(numero_semaine=F('numero_semaine') - 1)
                 renumerotation = 'decrement'
@@ -605,10 +743,12 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                 #   1. Trouver la position d'insertion (numero de la 1ere cours apres)
                 #   2. Incrementer toutes les cours >= ce numero
                 #   3. Assigner ce numero a la semaine cible
+                # Même règle partout : appartenir à la séquence, c'est avoir un
+                # numéro — insertion, incrément et maximum compris.
                 cours_apres = (Semaine.objects
                                .filter(annee_universitaire=annee,
                                        type_semestre=type_semestre,
-                                       type_semaine=Semaine.TYPE_COURS,
+                                       numero_semaine__isnull=False,
                                        date__gt=week_end)
                                .order_by('date')
                                .first())
@@ -617,7 +757,7 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                     Semaine.objects.filter(
                         annee_universitaire=annee,
                         type_semestre=type_semestre,
-                        type_semaine=Semaine.TYPE_COURS,
+                        numero_semaine__isnull=False,
                         numero_semaine__gte=num_insertion,
                     ).update(numero_semaine=F('numero_semaine') + 1)
                 else:
@@ -625,7 +765,7 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                     max_num = (Semaine.objects.filter(
                         annee_universitaire=annee,
                         type_semestre=type_semestre,
-                        type_semaine=Semaine.TYPE_COURS,
+                        numero_semaine__isnull=False,
                     ).aggregate(m=Max('numero_semaine'))['m']) or 0
                     num_insertion = max_num + 1
                 Semaine.objects.filter(pk__in=target_ids).update(
@@ -633,11 +773,22 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
                     type_semaine=Semaine.TYPE_COURS,
                     description=description,
                 )
+                # Rendue aux cours, la semaine rend aussi ses séances annulées
+                # PAR UN FÉRIÉ sur ses jours — jamais une annulation manuelle.
+                from apps.ipgei import feries
+                for r in target_rows:
+                    retablies += feries.retablir_seances_ferie(
+                        feries.seances_du_jour(annee, type_semestre, r.date))
                 renumerotation = 'increment'
 
             elif type_actuel == Semaine.TYPE_COURS and nouveau_type == Semaine.TYPE_COURS:
                 # CAS C : cours -> cours (changement de description uniquement)
-                Semaine.objects.filter(pk__in=target_ids).update(description=description)
+                # Sur les jours de COURS seulement : un jour férié de la semaine
+                # porte le NOM de son férié dans ce champ, et l'écraser lui
+                # ferait perdre ce nom.
+                Semaine.objects.filter(
+                    pk__in=target_ids, type_semaine=Semaine.TYPE_COURS,
+                ).update(description=description)
                 renumerotation = 'none'
 
             else:
@@ -658,6 +809,7 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
         target_rows = list(Semaine.objects.filter(pk__in=target_ids))
         return Response({
             'changed':           True,
+            'seances_retablies': retablies,
             'ancien_type':       type_actuel,
             'nouveau_type':      nouveau_type,
             'ancien_numero':     numero_actuel,
@@ -695,6 +847,19 @@ class PaiementViewSet(AuditMixin, viewsets.ModelViewSet):
             if p.type not in result:
                 result[p.type] = p.taux
         return Response(result)
+
+
+class JourFerieFixeViewSet(AuditMixin, viewsets.ModelViewSet):
+    """Les jours fériés fixes — lecture pour tout connecté, écriture admin."""
+    queryset           = JourFerieFixe.objects.all()
+    serializer_class   = JourFerieFixeSerializer
+    permission_classes = [IsAdmin]
+    pagination_class   = NoPagination
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthenticated()]
+        return super().get_permissions()
 
 
 class RamadanViewSet(AuditMixin, viewsets.ModelViewSet):

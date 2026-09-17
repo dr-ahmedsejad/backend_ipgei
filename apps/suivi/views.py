@@ -232,7 +232,9 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
             .filter(
                 annee_universitaire=annee,
                 type_semestre=ts or 'I',
-                type_semaine='cours',
+                # Le NUMÉRO suffit : un jour férié isolé en porte un, et
+                # l'exclure réduisait les bornes de la semaine — un lundi
+                # férié la faisait commencer le mardi.
                 numero_semaine__isnull=False,
             )
             .values('numero_semaine')
@@ -2003,7 +2005,9 @@ class SuiviGenerationAuthorizationViewSet(viewsets.GenericViewSet):
         # (on ignore grace_days ici car admin voit tout pour decision RH)
         weeks_calendar = list(
             SemaineParam.objects
-            .filter(annee_universitaire=annee, type_semestre=ts, type_semaine='cours', numero_semaine__isnull=False)
+            # Sur le numéro seul : un samedi férié exclu, la semaine se
+            # « clôturait » dès le vendredi.
+            .filter(annee_universitaire=annee, type_semestre=ts, numero_semaine__isnull=False)
             .values('numero_semaine').annotate(date_fin=_Max('date'))
             .order_by('numero_semaine')
         )

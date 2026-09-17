@@ -161,6 +161,53 @@ class Paiement(models.Model):
         return p.taux if p else 0.0
 
 
+class JourFerieFixe(models.Model):
+    """
+    Un jour férié qui tombe chaque année à la même date — 1er janvier, 28 novembre…
+
+    Appliqué AUTOMATIQUEMENT aux jours du calendrier tout juste générés, et à
+    eux seuls : un jour plus ancien laissé en cours l'a peut-être été
+    volontairement, et le repasser en férié annulerait ses séances en silence.
+    Pour le calendrier existant, l'action « appliquer au calendrier » le fait
+    sur demande, et dit ce qu'elle a écarté.
+
+    Les fêtes religieuses suivent le calendrier LUNAIRE : elles ne reviennent
+    pas à la même date grégorienne et n'ont rien à faire ici. Elles se marquent
+    jour par jour, à la main.
+    """
+    jour    = models.PositiveSmallIntegerField()
+    mois    = models.PositiveSmallIntegerField()
+    libelle = models.CharField(max_length=100)
+    actif   = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'parametres_jour_ferie_fixe'
+        ordering = ['mois', 'jour']
+        constraints = [
+            models.UniqueConstraint(fields=['jour', 'mois'],
+                                    name='uniq_jour_ferie_fixe_jour_mois'),
+        ]
+
+    def __str__(self):
+        return f'{self.jour:02d}/{self.mois:02d} — {self.libelle}'
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        import calendar
+
+        if not 1 <= (self.mois or 0) <= 12:
+            raise ValidationError({'mois': 'Le mois va de 1 à 12.'})
+        # Le 29 février est VALIDE : il existe les années bissextiles, et
+        # simplement pas les autres — le calendrier n'y trouvera aucun jour.
+        # On borne donc sur une année bissextile, et non sur l'année courante.
+        maximum = calendar.monthrange(2024, self.mois)[1]
+        if not 1 <= (self.jour or 0) <= maximum:
+            raise ValidationError(
+                {'jour': f'Le mois {self.mois} compte {maximum} jours au plus.'})
+        if not (self.libelle or '').strip():
+            raise ValidationError({'libelle': 'Le nom du jour férié est obligatoire.'})
+
+
 class Ramadan(models.Model):
     debut = models.DateField()
     fin   = models.DateField()

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Year, Niveau, Semestre, Seance, Creneau, Jour, Semaine, Paiement, Ramadan, Institution
+from .models import Year, Niveau, Semestre, Seance, Creneau, Jour, Semaine, Paiement, Ramadan, Institution, JourFerieFixe
 
 
 class YearSerializer(serializers.ModelSerializer):
@@ -130,6 +130,39 @@ class PaiementSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Paiement
         fields = '__all__'
+
+
+class JourFerieFixeSerializer(serializers.ModelSerializer):
+    """
+    Un férié fixe. La validation est celle du modèle — mois 1..12, jour borné
+    sur une année bissextile pour que le 29 février reste valide, libellé
+    requis — et l'unicité (jour, mois) est dite en clair plutôt que laissée à
+    une erreur d'intégrité.
+    """
+    class Meta:
+        model  = JourFerieFixe
+        fields = ['id', 'jour', 'mois', 'libelle', 'actif']
+        validators = []
+
+    def validate(self, attrs):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        instance = JourFerieFixe(**{
+            **({f: getattr(self.instance, f) for f in ('jour', 'mois', 'libelle', 'actif')}
+               if self.instance else {}),
+            **attrs,
+        })
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict)
+        doublon = JourFerieFixe.objects.filter(jour=instance.jour, mois=instance.mois)
+        if self.instance is not None:
+            doublon = doublon.exclude(pk=self.instance.pk)
+        if doublon.exists():
+            raise serializers.ValidationError({'jour': (
+                f'Un férié fixe existe déjà au {instance.jour:02d}/{instance.mois:02d}.')})
+        return attrs
 
 
 class RamadanSerializer(serializers.ModelSerializer):

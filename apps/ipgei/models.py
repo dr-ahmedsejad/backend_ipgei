@@ -2275,6 +2275,18 @@ class SeanceReelle(models.Model):
         SeanceType, on_delete=models.SET_NULL, null=True, blank=True, related_name='occurrences',
     )
     annulee      = models.BooleanField(default=False)
+    #: POURQUOI la séance est annulée, quand ce n'est pas une décision humaine.
+    #:
+    #: `'ferie'` : annulée parce que son jour a été marqué férié. C'est ce qui
+    #: permet, au retrait du férié, de rétablir CES séances-là et jamais une
+    #: annulation faite à la main — un enseignant malade reste absent même si
+    #: le jour redevient ouvré. Vide pour une annulation manuelle, et toute
+    #: annulation ou tout rétablissement faits à la main l'effacent.
+    #:
+    #: On ANNULE et l'on ne supprime pas : la trace reste, et c'est `annulee`
+    #: qui retire la séance du pointage et de la paie.
+    MOTIF_FERIE = 'ferie'
+    motif_annulation = models.CharField(max_length=20, blank=True, default='')
     # Seconde moitié du verrou de cohérence (cf. `SemaineIPGEI.suivi_genere_le`).
     # `auto_now` est posé par `pre_save`, donc honoré aussi par `bulk_create` —
     # mais PAS par un `QuerySet.update()`, qui doit être évité sur ce modèle.

@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from core.audit_helpers import write_audit
 from core.models import ACTION_BULK_CREATE, ACTION_BULK_UPDATE
 from django.db import transaction
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 
 from .models import (
@@ -2014,17 +2014,34 @@ def synchroniser_calendrier(semestre: SemestreIPGEI, *, remplacer=False) -> dict
     if remplacer:
         semestre.semaines.filter(seances__isnull=True).delete()
 
-    groupes = (
-        SemaineSocle.objects
-        .filter(annee_universitaire=semestre.annee_universitaire,
-                type_semestre=semestre.type_semestre,
-                numero_semaine__isnull=False)
-        .values('numero_semaine', 'type_semaine')
-        .annotate(debut=Min('date'), fin=Max('date'))
-        .order_by('numero_semaine')
-    )
+    lignes_numerotees = SemaineSocle.objects.filter(
+        annee_universitaire=semestre.annee_universitaire,
+        type_semestre=semestre.type_semestre,
+        numero_semaine__isnull=False)
 
-    au_socle = {g['numero_semaine']: g for g in groupes}
+    # Regroupées par NUMÉRO SEUL. On regroupait par (numéro, type) : une semaine
+    # dont un jour est férié produisait deux groupes au même numéro, et le
+    # second écrasait le premier dans le dictionnaire — la semaine passait en
+    # « vacances » et ses dates se réduisaient au seul jour férié. Toutes les
+    # dates des séances, calculées depuis `date_debut`, auraient glissé.
+    groupes = (lignes_numerotees.values('numero_semaine')
+               .annotate(debut=Min('date'), fin=Max('date'))
+               .order_by('numero_semaine'))
+    types_par_numero = {}
+    for numero, type_jour in lignes_numerotees.values_list('numero_semaine',
+                                                           'type_semaine'):
+        types_par_numero.setdefault(numero, set()).add(type_jour)
+
+    au_socle = {}
+    for g in groupes:
+        types = types_par_numero.get(g['numero_semaine'], {'cours'})
+        # Un jour numéroté appartient à la séquence : un férié isolé laisse sa
+        # semaine « de cours ». Seule une semaine sans aucun jour de cours ni
+        # férié isolé prend un autre type — cas qui ne naît plus du marquage,
+        # une semaine entière hors cours perdant son numéro.
+        g['type_semaine'] = ('cours' if types & {'cours', 'ferie'}
+                             else next(iter(types)))
+        au_socle[g['numero_semaine']] = g
     existantes = {s.numero: s for s in semestre.semaines.all()}
 
     # ── Ce que le socle porte et que le semestre n'a pas encore ─────────────
@@ -2290,10 +2307,23 @@ def dupliquer_grille(grille: GrilleType, semaines, *, ecraser=False) -> dict:
     occupation = _occupation_ailleurs(grille.classe, semaines)
     epreuves = creneaux_pris_par_epreuve(grille.classe, semaines)
 
+    from . import feries
+
     for semaine in semaines:
         if semaine.type_semaine != SemaineIPGEI.TYPE_COURS:
             continue
+        etats = feries.etats_de_la_semaine(semaine)
         for modele in modeles:
+            # Un jour FERMÉ de la semaine — un 28 novembre dans une semaine de
+            # cours — n'accueille pas de séance, et `ecraser` n'y change rien :
+            # on l'écarte avant même de regarder la case, sans quoi l'écrasement
+            # remplacerait une séance annulée par le férié par une séance active.
+            etat = etats.get(modele.jour_id)
+            if etat is not None and etat.ferme:
+                conflits.append(
+                    f'{_case_en_conflit(semaine, modele)} — '
+                    f'{feries.libelle_date(etat.date)} : {etat.libelle}')
+                continue
             filtre = {
                 'classe':      grille.classe,
                 'semaine':     semaine,
@@ -2390,9 +2420,14 @@ def alimenter_patron_depuis_semaine(grille: GrilleType, semaine: SemaineIPGEI,
             f'or {semaine.semestre.code} ne l\'est pas : un modèle ne traverse '
             'pas les parités.')
 
+    # Les séances annulées À CAUSE D'UN FÉRIÉ sont de vrais cours du modèle :
+    # on les reprend. Seules les annulations MANUELLES sont écartées. Sans
+    # cela, reprendre la semaine du 28 novembre vidait ce jour du patron — et
+    # de toutes les semaines dupliquées ensuite.
     sources = list(
         SeanceReelle.objects
-        .filter(classe=grille.classe, semaine=semaine, annulee=False)
+        .filter(classe=grille.classe, semaine=semaine)
+        .filter(Q(annulee=False) | Q(motif_annulation=SeanceReelle.MOTIF_FERIE))
         .select_related('jour', 'creneau', 'matiere', 'prof', 'prof_initial',
                         'salle', 'sous_groupe', 'type_seance')
     )
@@ -2469,11 +2504,18 @@ def dupliquer_semaine(classe, source: SemaineIPGEI, cibles, *, ecraser=False) ->
     """
     from .models import SeanceReelle
 
+    from . import feries
+
     cibles = [s for s in cibles
               if s.type_semaine == SemaineIPGEI.TYPE_COURS and s.pk != source.pk]
+    # Même raisonnement que la reprise en patron : une séance annulée PAR LE
+    # FÉRIÉ est un vrai cours de la semaine source. La laisser de côté aurait
+    # vidé ce jour de toutes les semaines recopiées. Les annulations manuelles,
+    # elles, restent hors de la copie.
     modeles = list(
         SeanceReelle.objects
-        .filter(classe=classe, semaine=source, annulee=False)
+        .filter(classe=classe, semaine=source)
+        .filter(Q(annulee=False) | Q(motif_annulation=SeanceReelle.MOTIF_FERIE))
         .select_related('jour', 'creneau', 'matiere', 'prof', 'salle',
                         'sous_groupe', 'type_seance')
     )
@@ -2492,7 +2534,14 @@ def dupliquer_semaine(classe, source: SemaineIPGEI, cibles, *, ecraser=False) ->
     epreuves = creneaux_pris_par_epreuve(classe, cibles)
 
     for semaine in cibles:
+        etats = feries.etats_de_la_semaine(semaine)
         for modele in modeles:
+            etat = etats.get(modele.jour_id)
+            if etat is not None and etat.ferme:
+                conflits.append(
+                    f'{_case_en_conflit(semaine, modele)} — '
+                    f'{feries.libelle_date(etat.date)} : {etat.libelle}')
+                continue
             filtre = {
                 'classe':      classe,
                 'semaine':     semaine,
@@ -2593,7 +2642,13 @@ def appliquer_permutation_prof(permutation: PermutationProf, utilisateur=None) -
     if permutation.statut != StatutWorkflow.VALIDEE:
         raise ValidationError('La permutation doit être validée par le directeur avant application.')
 
+    from . import feries
+
     a, b = permutation.seance_a, permutation.seance_b
+    # Permuter, c'est MODIFIER deux séances : refusé si l'une des deux désignées
+    # tombe sur un férié isolé — elle reviendrait échangée au retrait du férié.
+    feries.refuser_modification(a, 'permuter')
+    feries.refuser_modification(b, 'permuter')
     semaines_a = semaines_du_lot(a.semaine, permutation.nb_semaines)
     impactees = 0
 
@@ -2603,6 +2658,12 @@ def appliquer_permutation_prof(permutation: PermutationProf, utilisateur=None) -
         if sa is None or sb is None:
             # Semaine où l'une des deux séances n'existe pas (férié, séance
             # supprimée) : on saute plutôt que de créer un échange bancal.
+            continue
+        etats = feries.etats_de_la_semaine(semaine)
+        if any(getattr(etats.get(s.jour_id), 'etat', None) == feries.FERIE
+               for s in (sa, sb)):
+            # Sur la portée : on SAUTE la semaine où l'une tombe un jour férié,
+            # plutôt que d'interrompre l'échange des autres semaines.
             continue
 
         sa_prof, sa_salle, sa_matiere = sa.prof_id, sa.salle_id, sa.matiere_id

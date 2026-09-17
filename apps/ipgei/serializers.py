@@ -164,6 +164,7 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
     # comme le PDF puissent dire ce que vaut ce qu'ils montrent.
     etat_coherence    = serializers.SerializerMethodField()
     libelle_coherence = serializers.SerializerMethodField()
+    jours_feries      = serializers.SerializerMethodField()
 
     def get_etat_coherence(self, obj) -> str:
         # Le lot prime quand il est disponible ; sinon calcul unitaire, pour
@@ -172,6 +173,26 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
         if etats:
             return etats.get(obj.pk)
         return obj.etat_coherence_pour(self.context.get('classe_coherence'))
+
+    def get_jours_feries(self, obj) -> list:
+        """
+        Les jours FERMÉS de la semaine — ce que l'emploi du temps doit griser.
+
+        Lu sur le calendrier du socle, qui fait foi : la semaine IPGEI reste
+        « de cours » quand un seul de ses jours est férié. Deux requêtes par
+        semaine ; une liste de semestre en compte une vingtaine, sans rien que
+        l'écran ne sente.
+        """
+        from . import feries
+
+        return [
+            {'jour': jour_id, 'jour_libelle': feries.JOURS_FR[etat.date.weekday()],
+             'date': etat.date.isoformat(), 'libelle': etat.libelle,
+             'etat': etat.etat}
+            for jour_id, etat in sorted(feries.etats_de_la_semaine(obj).items(),
+                                        key=lambda e: e[1].date)
+            if etat.ferme
+        ]
 
     def get_libelle_coherence(self, obj) -> str:
         return {
@@ -187,6 +208,7 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
             'id', 'semestre', 'semestre_code', 'numero', 'date_debut', 'date_fin',
             'type_semaine', 'description',
             'suivi_genere_le', 'etat_coherence', 'libelle_coherence',
+            'jours_feries',
         ]
 
 
@@ -1596,10 +1618,12 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
             'prof', 'prof_nom', 'prof_initial', 'prof_initial_nom',
             'salle', 'salle_nom', 'sous_groupe', 'sous_groupe_libelle',
             'type_seance', 'type_seance_libelle', 'type_seance_special',
-            'date', 'origine', 'annulee', 'observations',
+            'date', 'origine', 'annulee', 'motif_annulation', 'observations',
             'nb_absents',
         ]
-        read_only_fields = ['prof_initial']
+        # Le motif n'est posé que par le marquage d'un jour férié : l'écran ne
+        # l'écrit jamais, il le lit pour afficher « ANNULÉE — FÉRIÉ ».
+        read_only_fields = ['prof_initial', 'motif_annulation']
         # DRF dérive un validateur d'unicité de chaque UniqueConstraint du
         # modèle — mais en IGNORANT sa condition. La contrainte partielle qui
         # protège les cases de classe entière (`sous_groupe IS NULL`) se
@@ -1620,6 +1644,7 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
         def valeur(champ):
             return attrs.get(champ, getattr(self.instance, champ, None))
 
+        self._refuser_jour_ferme(attrs, valeur)
         _exiger_matiere(valeur('type_seance'), valeur('matiere'))
         self._refuser_creneau_d_epreuve(
             valeur('classe'), valeur('semaine'), valeur('jour'), valeur('creneau'))
@@ -1648,6 +1673,43 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
 
         _refuser_case_mixte(voisines, self.instance, sous_groupe)
         return attrs
+
+    def _refuser_jour_ferme(self, attrs, valeur):
+        """
+        Les règles des jours fériés, CÔTÉ SERVEUR — l'écran ne fait que les refléter.
+
+          * AJOUTER une séance : refusé sur tout jour hors cours ;
+          * MODIFIER une séance existante : refusé sur un férié ISOLÉ — elle
+            reviendrait autre qu'elle n'était au retrait du férié ;
+          * la RÉTABLIR à la main : refusé sur tout jour hors cours, c'est la
+            placer ;
+          * la DÉPLACER vers un jour fermé : refusé, c'est l'y ajouter.
+        """
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from . import feries
+
+        try:
+            if self.instance is None:
+                feries.refuser_ajout(valeur('semaine'), valeur('jour'))
+                return
+            feries.refuser_modification(self.instance)
+            deplacee = (valeur('semaine') != self.instance.semaine
+                        or valeur('jour') != self.instance.jour)
+            if deplacee:
+                feries.refuser_ajout(valeur('semaine'), valeur('jour'))
+            if self.instance.annulee and attrs.get('annulee') is False:
+                feries.refuser_retablissement(self.instance)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({'jour': exc.messages})
+
+    def update(self, instance, validated_data):
+        # Une annulation ou un rétablissement faits À LA MAIN effacent le motif :
+        # la séance n'est plus « annulée par le férié », et le retrait du férié
+        # ne doit plus y toucher.
+        if 'annulee' in validated_data and validated_data['annulee'] != instance.annulee:
+            validated_data['motif_annulation'] = ''
+        return super().update(instance, validated_data)
 
     @staticmethod
     def _refuser_creneau_d_epreuve(classe, semaine, jour, creneau):

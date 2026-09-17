@@ -3469,6 +3469,15 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
     ordering           = ['semaine', 'jour_id', 'creneau__ordre']
     pagination_class   = NoPagination
 
+    def perform_destroy(self, instance):
+        # Sur un férié ISOLÉ seulement : supprimée, la séance ne pourrait plus
+        # être rétablie au retrait du férié. Sur une semaine ENTIÈRE de
+        # vacances, la suppression reste permise — il n'y a pas de
+        # rétablissement, et la bloquer empêcherait de nettoyer la semaine.
+        from . import feries
+        self._executer(feries.refuser_modification, instance, 'supprimer')
+        super().perform_destroy(instance)
+
     @action(detail=False, methods=['post'], url_path='dupliquer-semaine')
     def dupliquer_semaine(self, request):
         """
@@ -3707,12 +3716,24 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
         `semaines_du_lot` ne retient que les semaines de COURS : aucune séance
         n'est posée sur des vacances ou des examens.
         """
+        from . import feries
+
         seance = self.get_object()
         entree = EditionLotSerializer(data=request.data)
         entree.is_valid(raise_exception=True)
         donnees = entree.validated_data
 
+        # La séance de départ est MODIFIÉE par le report : même règle qu'une
+        # édition unitaire, elle ne se touche pas sur un férié isolé.
+        self._executer(feries.refuser_modification, seance, 'reporter')
+
         semaines = services.semaines_du_lot(seance.semaine, donnees['nb_semaines'])
+        # Le jour visé, semaine par semaine : un jour fermé est ÉCARTÉ du lot,
+        # sans l'interrompre — sur seize semaines, tout refuser pour un 28
+        # novembre serait pire que de passer ce seul jour.
+        etats = {s.pk: feries.etats_de_la_semaine(s).get(seance.jour_id)
+                 for s in semaines}
+        ecartees = 0
         champs = {
             cle: donnees[cle]
             for cle in ('prof', 'salle', 'matiere', 'annulee')
@@ -3735,9 +3756,21 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
         # d'un lot de semaines, jamais massif.
         modifiees = 0
         for cible in SeanceReelle.objects.filter(**case, semaine__in=semaines):
-            for champ, valeur in maj.items():
+            etat = etats.get(cible.semaine_id)
+            if etat is not None and etat.etat == feries.FERIE:
+                ecartees += 1          # intacte : elle sera rétablie telle quelle
+                continue
+            if (etat is not None and etat.ferme and cible.annulee
+                    and maj.get('annulee') is False):
+                ecartees += 1          # la rétablir, c'est la placer
+                continue
+            champs = dict(maj)
+            if 'annulee' in champs and champs['annulee'] != cible.annulee:
+                # À la main : le motif « férié » ne tient plus.
+                champs['motif_annulation'] = ''
+            for champ, valeur in champs.items():
                 setattr(cible, champ, valeur)
-            cible.save(update_fields=[*maj.keys(), 'modifiee_le'])
+            cible.save(update_fields=[*champs.keys(), 'modifiee_le'])
             modifiees += 1
 
         # Semaines du lot où la case restait vide : on y pose la séance.
@@ -3748,6 +3781,11 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
         creees = 0
         for semaine in semaines:
             if semaine.pk in deja:
+                continue
+            etat = etats.get(semaine.pk)
+            if etat is not None and etat.ferme:
+                # On ne PLACE une séance que sur un jour de cours.
+                ecartees += 1
                 continue
             SeanceReelle.objects.create(
                 **case, semaine=semaine,
@@ -3766,6 +3804,9 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
             'seances_modifiees': modifiees,
             'seances_creees':    creees,
             'semaines_traitees': len(semaines),
+            # Dit à part : un report qui « oublie » le 28 novembre doit dire
+            # pourquoi, sinon il se lit comme une panne.
+            'jours_fermes_ecartes': ecartees,
         })
 
     @action(detail=True, methods=['get', 'post'], url_path='absences')
