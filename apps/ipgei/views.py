@@ -40,7 +40,7 @@ from core.permissions import RBACPermission
 
 from .perimetre import PerimetreMatiereMixin
 
-from . import detail_notes, edt_pdf, pv, services
+from . import detail_notes, edt_pdf, fraudes, pv, services
 from .filters import ClasseFilter, InscriptionIPGEIFilter
 from .models import (
     PonderationClasse,
@@ -2151,11 +2151,18 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
         traitees    = 0
         classes     = set()
 
+        # Les notes sanctionnées pour fraude de la matière, en une requête : la
+        # grille renvoie toutes ses cases, et un zéro de sanction ne doit pas
+        # repartir sous la valeur d'origine au prochain enregistrement.
+        sanctionnees = fraudes.elements_actifs(
+            Note.objects.filter(matiere=matiere, semestre=semestre).values_list('pk', flat=True))
+
         with transaction.atomic():
             for ligne in lignes:
                 note, _ = Note.objects.get_or_create(
                     inscription_id=ligne['inscription'], matiere=matiere, semestre=semestre,
                 )
+                elements = sanctionnees.get(note.pk, [])
                 # Une note verrouillée par le jury annuel accepte encore SA
                 # NOTE DE RATTRAPAGE, et elle seule : la session se compose
                 # après le jury, et l'interdire rendait la seconde chance
@@ -2163,6 +2170,8 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
                 if note.verrouillee:
                     if 'note_rattrapage' not in ligne:
                         continue
+                    self._executer(fraudes.controler_saisie_sanctionnee, note, 'rattrapage',
+                                   None, ligne['note_rattrapage'], elements=elements)
                     note.note_rattrapage = ligne['note_rattrapage']
                     note.save(update_fields=['note_rattrapage', 'date_modification'])
                     self._executer(services.calculer_note, note,
@@ -2179,11 +2188,17 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
                     regle = services.ponderation_applicable(
                         matiere, note.inscription.classe)
                     note.note_tp = ligne['note_tp'] if regle.has_tp else None
+                    self._executer(fraudes.controler_saisie_sanctionnee, note, 'tp',
+                                   None, note.note_tp, elements=elements)
                 if 'note_rattrapage' in ligne:
+                    self._executer(fraudes.controler_saisie_sanctionnee, note, 'rattrapage',
+                                   None, ligne['note_rattrapage'], elements=elements)
                     note.note_rattrapage = ligne['note_rattrapage']
                 note.save(update_fields=['note_tp', 'note_rattrapage', 'date_modification'])
 
                 for ev in ligne.get('evaluations', []):
+                    self._executer(fraudes.controler_evaluation, note, ev['type_evaluation'],
+                                   ev['numero'], ev['valeur'], elements=elements)
                     cle = {
                         'note': note,
                         'type_evaluation': ev['type_evaluation'],
@@ -2245,6 +2260,8 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
             )
             if note.verrouillee:
                 raise ValidationError('Note verrouillée par une délibération validée.')
+            self._executer(fraudes.controler_evaluation, note, donnees['type_evaluation'],
+                           donnees['numero'], donnees['valeur'])
 
             Evaluation.objects.update_or_create(
                 note=note, type_evaluation=donnees['type_evaluation'],
@@ -2400,6 +2417,8 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
                     raise ValidationError(
                         f"Copie n° {ligne['numero_anonymat']} : note verrouillée "
                         'par une délibération validée.')
+                self._executer(fraudes.controler_evaluation, note, donnees['type_evaluation'],
+                               donnees['numero'], ligne.get('valeur'))
 
                 if ligne.get('valeur') is None:
                     Evaluation.objects.filter(
@@ -2456,18 +2475,34 @@ class EvaluationViewSet(_ErreurMetierMixin, ModelViewSet):
     pagination_class   = StandardPagination
 
     def perform_create(self, serializer):
-        self._garder(serializer.validated_data['note'])
+        donnees = serializer.validated_data
+        self._garder(donnees['note'])
+        self._executer(fraudes.controler_evaluation, donnees['note'],
+                       donnees['type_evaluation'], donnees['numero'], donnees['valeur'])
         evaluation = serializer.save(saisie_par=_utilisateur(self.request))
         self._recalculer(evaluation.note)
 
     def perform_update(self, serializer):
-        self._garder(serializer.instance.note)
+        instance, donnees = serializer.instance, serializer.validated_data
+        self._garder(instance.note)
+        type_ev = donnees.get('type_evaluation', instance.type_evaluation)
+        numero  = donnees.get('numero', instance.numero)
+        valeur  = donnees.get('valeur', instance.valeur)
+        deplacee = (type_ev, numero) != (instance.type_evaluation, instance.numero)
+        # L'ancienne case comme la nouvelle : déplacer un zéro de sanction vers
+        # un autre numéro reviendrait à l'effacer.
+        self._executer(fraudes.controler_evaluation, instance.note, instance.type_evaluation,
+                       instance.numero, None if deplacee else valeur)
+        self._executer(fraudes.controler_evaluation, donnees.get('note', instance.note),
+                       type_ev, numero, valeur)
         evaluation = serializer.save()
         self._recalculer(evaluation.note)
 
     def perform_destroy(self, instance):
         note = instance.note
         self._garder(note)
+        self._executer(fraudes.controler_evaluation, note, instance.type_evaluation,
+                       instance.numero, None)
         instance.delete()
         if not note.verrouillee:
             self._recalculer(note)

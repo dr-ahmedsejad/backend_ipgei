@@ -733,6 +733,17 @@ class NoteSerializer(serializers.ModelSerializer):
         instance = self.instance
         if instance is not None and instance.verrouillee:
             raise serializers.ValidationError('Note verrouillée par une délibération validée.')
+        if instance is not None:
+            from django.core.exceptions import ValidationError as ErreurDjango
+
+            from . import fraudes
+            try:
+                for champ, composante in (('note_tp', 'tp'), ('note_rattrapage', 'rattrapage')):
+                    if champ in attrs:
+                        fraudes.controler_saisie_sanctionnee(instance, composante, None,
+                                                             attrs[champ])
+            except ErreurDjango as erreur:
+                raise serializers.ValidationError(erreur.messages)
         semestre = attrs.get('semestre', getattr(instance, 'semestre', None))
         matiere  = attrs.get('matiere',  getattr(instance, 'matiere', None))
         if semestre is not None:
@@ -1313,6 +1324,7 @@ class DeliberationSerializer(serializers.ModelSerializer):
     #: l'ouverture — ou pour renvoyer vers le jury qui existe.
     nb_au_rattrapage    = serializers.SerializerMethodField()
     jury_rattrapage     = serializers.SerializerMethodField()
+    fraudes_non_vues    = serializers.SerializerMethodField()
 
     class Meta:
         model  = Deliberation
@@ -1325,9 +1337,21 @@ class DeliberationSerializer(serializers.ModelSerializer):
             'validee_par', 'validee_par_nom', 'nb_lignes',
             'nb_membres_jury', 'nb_signatures', 'nb_decisions_emises',
             'decisions_niveau', 'jury_source', 'nb_au_rattrapage',
-            'jury_rattrapage',
+            'jury_rattrapage', 'fraudes_non_vues',
         ]
         read_only_fields = ['statut', 'date_calcul', 'date_validation', 'validee_par']
+
+    def get_fraudes_non_vues(self, obj) -> list:
+        """
+        Sanctions pour fraude posées ou levées APRÈS la validation de ce jury,
+        sur des notes qu'il a arrêtées : il a statué sur d'autres notes que
+        celles qui figurent aujourd'hui en base, et doit redélibérer.
+        """
+        from .fraudes import sanctions_non_vues
+        return [{'id': s.pk, 'etudiant_matricule': s.inscription.etudiant.matricule,
+                 'etudiant_nom': s.inscription.etudiant.nom_display,
+                 'statut': s.statut, 'cree_le': s.cree_le, 'levee_le': s.levee_le}
+                for s in sanctions_non_vues(obj)]
 
     def get_nb_lignes(self, obj) -> int:
         return obj.lignes.count()

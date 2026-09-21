@@ -338,7 +338,7 @@ def _tracer_session(session: SessionEvaluationIPGEI, acte: str, utilisateur) -> 
 # ═════════════════════════════════════════════════════════════════════════════
 def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
                   epreuves: dict = None, rattrapage_seulement: bool = False,
-                  partagee: Note = None) -> Note:
+                  partagee: Note = None, malgre_verrou: bool = False) -> Note:
     """
     Recalcule une ligne de note et **fige la pondération** de la matière dedans.
 
@@ -357,7 +357,11 @@ def calculer_note(note: Note, *, plafond_rattrapage=None, sauvegarder=True,
     La note retenue applique ensuite la règle SIGA `max(moyenne, rattrapage)`,
     bornée par le plafond éventuel.
     """
-    if note.verrouillee and not rattrapage_seulement:
+    # `malgre_verrou` est réservé à la SANCTION POUR FRAUDE (`fraudes.py`) : une
+    # fraude se découvre souvent après le jury, et c'est précisément une note
+    # arrêtée qu'il faut alors mettre à zéro. Le jury concerné est signalé à
+    # redélibérer ; aucun autre chemin ne doit passer ce verrou.
+    if note.verrouillee and not rattrapage_seulement and not malgre_verrou:
         raise ValidationError('Note verrouillée par une délibération validée — recalcul refusé.')
 
     if rattrapage_seulement:
@@ -1114,6 +1118,8 @@ def saisir_rattrapage(deliberation: Deliberation, saisies: list) -> dict:
 
         note, _ = Note.objects.get_or_create(
             inscription_id=inscription_id, matiere=matiere, semestre=semestre)
+        from .fraudes import controler_saisie_sanctionnee
+        controler_saisie_sanctionnee(note, 'rattrapage', None, saisie.get('note_rattrapage'))
         note.note_rattrapage = saisie.get('note_rattrapage')
         note.save(update_fields=['note_rattrapage', 'date_modification'])
         calculer_note(note, plafond_rattrapage=plafond_effectif(semestre),

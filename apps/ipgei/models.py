@@ -22,6 +22,7 @@ from django.db import models
 # et Emplois utilisables sans copie ni synchronisation.
 from apps.departement.models import Departement
 from core.types_seance import LIBELLES_EPREUVE
+from core.validators import validate_document
 
 
 # ── Vocabulaire du cursus ────────────────────────────────────────────────────
@@ -2087,6 +2088,153 @@ class MembreJuryIPGEI(models.Model):
     @property
     def a_signe(self) -> bool:
         return self.signature_le is not None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Fraudes — sanction des notes, justifiée par un PV
+# ═════════════════════════════════════════════════════════════════════════════
+class SanctionFraude(models.Model):
+    """
+    UNE FRAUDE CONSTATÉE, ET CE QU'ON EN A FAIT AUX NOTES.
+
+    Un étudiant pris avec un téléphone, une antisèche, un voisin qui souffle :
+    la fiche nomme la nature des faits, en écrit le motif, joint le PV de
+    délibération qui la fonde, et désigne les notes à mettre à zéro — une
+    matière entière ou une seule épreuve (cf. `ElementSanctionne`).
+
+    ELLE NE PRONONCE AUCUNE DÉCISION DE PASSAGE. Elle pénalise des notes ; c'est
+    le jury qui décide ensuite, en voyant la fiche et son PV. Une note arrêtée
+    par un jury validé peut être sanctionnée malgré son verrou — une fraude se
+    découvre souvent après la délibération —, et ce jury est alors signalé
+    « à redélibérer ».
+
+    ELLE SE LÈVE, ET NE S'EFFACE PAS. Une erreur, un recours accepté : les
+    valeurs d'origine, gardées dans chaque élément, sont remises. La fiche reste,
+    marquée levée, avec son motif de levée — une sanction qui disparaîtrait sans
+    trace laisserait des notes changer deux fois sans explication.
+    """
+    NATURE_TELEPHONE     = 'telephone'
+    NATURE_DOCUMENT      = 'document'
+    NATURE_COMMUNICATION = 'communication'
+    NATURE_SUBSTITUTION  = 'substitution'
+    NATURE_AUTRE         = 'autre'
+    NATURE_CHOICES = [
+        (NATURE_TELEPHONE,     'Téléphone ou appareil électronique'),
+        (NATURE_DOCUMENT,      'Document non autorisé (antisèche)'),
+        (NATURE_COMMUNICATION, 'Communication avec un autre candidat'),
+        (NATURE_SUBSTITUTION,  'Substitution de copie ou de personne'),
+        (NATURE_AUTRE,         'Autre'),
+    ]
+    STATUT_APPLIQUEE = 'appliquee'
+    STATUT_LEVEE     = 'levee'
+    STATUT_CHOICES = [
+        (STATUT_APPLIQUEE, 'Appliquée'),
+        (STATUT_LEVEE,     'Levée'),
+    ]
+
+    inscription = models.ForeignKey(
+        InscriptionIPGEI, on_delete=models.PROTECT, related_name='sanctions_fraude',
+    )
+    nature      = models.CharField(max_length=20, choices=NATURE_CHOICES)
+    date_faits  = models.DateField()
+    #: Obligatoire : une note mise à zéro sans motif écrit devient, un an plus
+    #: tard, une anomalie que personne ne sait expliquer.
+    motif       = models.TextField()
+    #: Le PV de délibération qui fonde la sanction. Obligatoire, pour la même
+    #: raison, et contrôlé comme toute pièce jointe (PDF, JPEG, PNG, 5 Mo).
+    pv_deliberation = models.FileField(
+        upload_to='ipgei/fraudes/', validators=[validate_document],
+    )
+    statut      = models.CharField(max_length=10, choices=STATUT_CHOICES,
+                                   default=STATUT_APPLIQUEE)
+    cree_par    = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='sanctions_fraude_prononcees',
+    )
+    cree_le     = models.DateTimeField(auto_now_add=True)
+    motif_levee = models.TextField(blank=True, default='')
+    levee_par   = models.ForeignKey(
+        'authentication.CustomUser', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='sanctions_fraude_levees',
+    )
+    levee_le    = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'ipgei_sanction_fraude'
+        ordering = ['-cree_le']
+        verbose_name        = 'sanction pour fraude'
+        verbose_name_plural = 'sanctions pour fraude'
+
+    def __str__(self):
+        return (f'Fraude — {self.inscription.etudiant.matricule} '
+                f'({self.get_nature_display()}, {self.date_faits})')
+
+    @property
+    def est_active(self) -> bool:
+        return self.statut == self.STATUT_APPLIQUEE
+
+    @property
+    def date_derniere_action(self):
+        """Ce que le jury n'a pas vu : la pose, puis la levée s'il y en a une."""
+        return self.levee_le or self.cree_le
+
+
+class ElementSanctionne(models.Model):
+    """
+    Une note visée par la fiche : la matière entière, ou une seule épreuve.
+
+    `valeurs_origine` garde ce que la sanction a remplacé — c'est ce qui permet
+    de la lever en rendant EXACTEMENT les notes d'avant, y compris une épreuve
+    que l'étudiant n'avait pas rendue et que la sanction a dû créer.
+
+    Seules des épreuves que la CLASSE a passées sont sanctionnables : le
+    diviseur d'une moyenne est le nombre d'épreuves tenues par la classe, et en
+    inventer une pour un seul étudiant changerait la moyenne de tous.
+    """
+    PORTEE_MATIERE = 'matiere'
+    PORTEE_EPREUVE = 'epreuve'
+    PORTEE_CHOICES = [
+        (PORTEE_MATIERE, 'Matière entière'),
+        (PORTEE_EPREUVE, 'Une épreuve'),
+    ]
+    COMPOSANTE_DS         = 'ds'
+    COMPOSANTE_EXAM       = 'exam'
+    COMPOSANTE_TP         = 'tp'
+    COMPOSANTE_RATTRAPAGE = 'rattrapage'
+    COMPOSANTE_CHOICES = [
+        (COMPOSANTE_DS,         'Devoir surveillé'),
+        (COMPOSANTE_EXAM,       'Examen'),
+        (COMPOSANTE_TP,         'TP'),
+        (COMPOSANTE_RATTRAPAGE, 'Rattrapage'),
+    ]
+
+    sanction   = models.ForeignKey(SanctionFraude, on_delete=models.CASCADE,
+                                   related_name='elements')
+    note       = models.ForeignKey(Note, on_delete=models.PROTECT,
+                                   related_name='elements_sanctionnes')
+    portee     = models.CharField(max_length=10, choices=PORTEE_CHOICES)
+    #: Vide pour la matière entière.
+    composante = models.CharField(max_length=12, choices=COMPOSANTE_CHOICES,
+                                  blank=True, default='')
+    #: Rang du DS ou de l'examen ; vide pour le TP et le rattrapage.
+    numero     = models.PositiveSmallIntegerField(null=True, blank=True)
+    valeurs_origine = models.JSONField(default=dict, blank=True)
+    note_retenue_avant = models.DecimalField(max_digits=5, decimal_places=2,
+                                             null=True, blank=True)
+
+    class Meta:
+        db_table = 'ipgei_element_sanctionne'
+        ordering = ['note__semestre__code', 'note__matiere__code']
+
+    def __str__(self):
+        return f'{self.note.matiere.code} — {self.libelle}'
+
+    @property
+    def libelle(self) -> str:
+        if self.portee == self.PORTEE_MATIERE:
+            return 'matière entière'
+        rang = f' {self.numero}' if self.numero else ''
+        return f'{self.get_composante_display()}{rang}'
 
 
 class DetailLigneDeliberation(models.Model):

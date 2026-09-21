@@ -33,6 +33,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from . import services
+from .fraudes import controler_evaluation, controler_saisie_sanctionnee
 from .collecte import (
     LIBELLES_TYPE, LIGNES_ORDRE, TYPE_DS, TYPE_EXAM, TYPE_RATT, TYPE_TP,
     TYPES_NOTE, campagne_du_type,
@@ -324,6 +325,18 @@ def importer_classeur(fichier, *, semestre, classe, type_note: str, numero: int 
                     bilan['erreurs'].append({
                         'feuille': feuille.title, 'ligne': numero_ligne,
                         'motif': f'{cle} : note verrouillée par une délibération validée.'})
+                    continue
+                # Réimporter le classeur de l'enseignant ne doit pas effacer une
+                # sanction pour fraude : la case est écartée, et le bilan le dit.
+                try:
+                    if type_note == TYPE_TP:
+                        controler_saisie_sanctionnee(note, 'tp', None, valeur)
+                    else:
+                        controler_evaluation(note, type_evaluation, numero, valeur)
+                except ValidationError as exc:
+                    bilan['erreurs'].append({
+                        'feuille': feuille.title, 'ligne': numero_ligne,
+                        'motif': ' '.join(exc.messages)})
                     continue
 
                 if type_note == TYPE_TP:

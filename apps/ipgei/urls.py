@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .perimetre import PerimetreResponsableView
+from .views_fraudes import SanctionFraudeViewSet
 
 from .views import (
     AbsenceSeanceViewSet, ClassementS3ViewSet, ClasseViewSet, ConcoursCNIMViewSet,
@@ -46,6 +47,7 @@ router.register(r'evaluations',     EvaluationViewSet,           basename='ipgei
 router.register(r'epreuves',        EpreuveIPGEIViewSet,         basename='ipgei-epreuve')
 router.register(r'deliberations',   DeliberationViewSet,         basename='ipgei-deliberation')
 router.register(r'lignes-deliberation', LigneDeliberationViewSet, basename='ipgei-ligne-deliberation')
+router.register(r'fraudes',         SanctionFraudeViewSet,       basename='ipgei-fraude')
 router.register(r'membres-jury',    MembreJuryIPGEIViewSet,      basename='ipgei-membre-jury')
 # Concours CNIM : résultat externe, constaté puis appliqué — pas un jury.
 router.register(r'concours',        ConcoursCNIMViewSet,         basename='ipgei-concours')
