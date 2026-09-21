@@ -45,7 +45,7 @@ OPTIONS_PDF = {
 }
 
 EN_TETES = [
-    'Rang', 'Matricule', 'Nom et prénom', 'Classe', 'Moyenne générale',
+    'Rang promotion', 'Matricule', 'Nom et prénom', 'Classe', 'Moyenne générale',
     'Total coef.', 'Décision proposée', 'Décision du jury', 'Motif', 'Observations',
 ]
 
@@ -176,6 +176,71 @@ def _poser_rangs(deliberation: Deliberation, lignes) -> dict:
     }
 
 
+def _poser_rang_promotion_annuel(deliberation: Deliberation, lignes) -> dict:
+    """
+    Pose sur chaque ligne son rang sur la PROMOTION, NON TASSÉ — celui des PV de l'IPGEI.
+
+    Le PV que l'institut édite classe toute la promotion (MP A à MP D ensemble)
+    et saute les rangs après un ex æquo : deux 13ᵉ, puis un 15ᵉ. Le rang du jury
+    (`LigneDeliberation.rang`) est un rang de CLASSE, et tassé : imprimé sur le
+    PV, il ne correspondait à aucun chiffre de la pièce officielle.
+
+    Les moyennes comparées sont celles que chaque jury a arrêtées, à la même
+    étape : pour un jury annuel, les lignes des jurys annuels de l'année ; pour
+    un jury de rattrapage, la ligne de rattrapage quand l'étudiant en a une,
+    sinon sa ligne annuelle — c'est la moyenne finale. Un inscrit qu'aucun jury
+    n'a encore vu est calculé à la règle du jury, absents comptés zéro.
+
+    L'égalité se lit sur la moyenne PUBLIÉE, au centième : deux étudiants qui
+    lisent 12,50 sur la pièce partagent leur rang.
+    """
+    from .models import InscriptionIPGEI
+
+    promotion = (InscriptionIPGEI.objects
+                 .cursus()
+                 .filter(actif=True, annee_universitaire=deliberation.annee_universitaire)
+                 .select_related('classe__niveau', 'classe__institution'))
+    if deliberation.classe_id:
+        promotion = promotion.filter(classe__niveau_id=deliberation.classe.niveau_id)
+    else:
+        promotion = promotion.filter(classe__niveau__niveau=deliberation.niveau)
+    promotion = list(promotion)
+    ids = [i.pk for i in promotion]
+
+    portees = [Deliberation.PORTEE_ANNUELLE]
+    if deliberation.portee == Deliberation.PORTEE_RATTRAPAGE:
+        # Le rattrapage d'abord : c'est lui qui arrête la moyenne finale.
+        portees = [Deliberation.PORTEE_RATTRAPAGE, Deliberation.PORTEE_ANNUELLE]
+    arretees = {}
+    for portee in reversed(portees):
+        for inscription_id, moyenne in (
+                LigneDeliberation.objects
+                .filter(inscription_id__in=ids, moyenne_generale__isnull=False,
+                        deliberation__portee=portee,
+                        deliberation__annee_universitaire=deliberation.annee_universitaire)
+                .order_by('deliberation__date_calcul', 'deliberation_id')
+                .values_list('inscription_id', 'moyenne_generale')):
+            arretees[inscription_id] = moyenne
+    # Celles de ce jury priment : le PV dit ce que CE jury a vu.
+    arretees.update({l.inscription_id: l.moyenne_generale for l in lignes
+                     if l.moyenne_generale is not None})
+
+    moyennes = {}
+    for inscription in promotion:
+        valeur = arretees.get(inscription.pk)
+        if valeur is None:
+            valeur, _, _ = services.moyenne_annuelle(
+                inscription, deliberation.annee_universitaire, absents_a_zero=True)
+        if valeur is not None:
+            moyennes[inscription.pk] = Decimal(valeur).quantize(Decimal('0.01'))
+
+    for ligne in lignes:
+        mienne = moyennes.get(ligne.inscription_id)
+        ligne.rang_promotion = (None if mienne is None
+                                else 1 + sum(1 for v in moyennes.values() if v > mienne))
+    return {'effectif_promotion': len(moyennes)}
+
+
 def _libelle_decision(code: str) -> str:
     return dict(LigneDeliberation.DECISION_CHOICES).get(code, '')
 
@@ -198,7 +263,8 @@ def contexte(deliberation: Deliberation, *, base_url: str = '') -> dict:
     # ni motif d'écart — trois colonnes vides sur toute la hauteur de la page.
     # Il porte à la place ce qu'il arrête vraiment : deux classements.
     semestrielle = deliberation.portee == Deliberation.PORTEE_SEMESTRE
-    effectifs = _poser_rangs(deliberation, lignes) if semestrielle else {}
+    effectifs = (_poser_rangs(deliberation, lignes) if semestrielle
+                 else _poser_rang_promotion_annuel(deliberation, lignes))
 
     # Répartition des décisions : le jury la relit avant de signer, et elle
     # évite de recompter à la main sur une promotion de 80 élèves.
@@ -349,11 +415,13 @@ def generer_excel(deliberation: Deliberation) -> bytes:
         _moyennes_par_semestre(lignes, codes_semestres)
     if semestrielle:
         _poser_rangs(deliberation, lignes)
+    else:
+        _poser_rang_promotion_annuel(deliberation, lignes)
 
     for index, ligne in enumerate(lignes, start=ligne_entetes + 1):
         etudiant = ligne.inscription.etudiant
         valeurs = [
-            *([] if semestrielle else [ligne.rang]),
+            *([] if semestrielle else [getattr(ligne, 'rang_promotion', None)]),
             etudiant.matricule,
             getattr(etudiant, 'nom_display', None) or etudiant.nom,
             ligne.inscription.classe.nom,

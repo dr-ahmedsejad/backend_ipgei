@@ -185,11 +185,11 @@ de documents se ressemblent.
     <thead>
       <tr>
         {% comment %}
-        La colonne « Rang » du PV annuel est celle du jury. Sur un PV de
-        semestre, elle répéterait mot pour mot l'une des deux colonnes de
-        rang — la même valeur deux fois sur chaque ligne d'une pièce signée.
+        La colonne « Rang » du PV annuel est le rang sur la PROMOTION, non
+        tassé, comme sur les PV de l'institut (`pv._poser_rang_promotion_annuel`).
+        Un PV de semestre porte ses deux colonnes de rang plus loin.
         {% endcomment %}
-        {% if not semestrielle %}<th style="width:12mm">Rang</th>{% endif %}
+        {% if not semestrielle %}<th style="width:18mm">Rang promo.</th>{% endif %}
         <th style="width:24mm">Matricule</th>
         <th class="gauche">Nom et prénom</th>
         {% if not deliberation.classe %}<th style="width:20mm">Classe</th>{% endif %}
@@ -219,7 +219,7 @@ de documents se ressemblent.
     <tbody>
       {% for ligne in lignes %}
       <tr>
-        {% if not semestrielle %}<td>{{ ligne.rang|default_if_none:"—" }}</td>{% endif %}
+        {% if not semestrielle %}<td>{{ ligne.rang_promotion|default_if_none:"—" }}{% if ligne.rang_promotion and effectif_promotion %} / {{ effectif_promotion }}{% endif %}</td>{% endif %}
         <td>{{ ligne.inscription.etudiant.matricule }}</td>
         <td class="gauche">{{ ligne.inscription.etudiant.nom_display }}</td>
         {% if not deliberation.classe %}<td>{{ ligne.inscription.classe.nom }}</td>{% endif %}
