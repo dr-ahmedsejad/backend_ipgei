@@ -840,7 +840,8 @@ def _build_context_inscription(doc, etudiant, institution, data: dict) -> dict:
     else:
         # Domaine depuis site_web de l'institution, sinon fallback
         _site = (getattr(institution, 'site_web', '') or '').strip().lstrip('https://').lstrip('http://').lstrip('www.').strip('/')
-        _domain = _site if _site else 'isms.esp.mr'
+        from django.conf import settings
+        _domain = _site if _site else settings.EMAIL_DOMAINE_ETUDIANT
         email_univ = f"{etudiant.matricule}@{_domain}"
 
     return {

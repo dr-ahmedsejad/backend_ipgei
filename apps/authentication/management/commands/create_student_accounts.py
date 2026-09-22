@@ -7,6 +7,7 @@ Usage :
     python manage.py create_student_accounts --dry-run
     python manage.py create_student_accounts --filiere-id 3
 """
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 
@@ -58,7 +59,7 @@ class Command(BaseCommand):
                 continue
 
             nom_complet = f"{etudiant.prenom_fr or ''} {etudiant.nom_fr or etudiant.nom}".strip()
-            email_cible = f"{mat}@isms.esp.mr"
+            email_cible = f"{mat}@{settings.EMAIL_DOMAINE_ETUDIANT}"
 
             existing = User.objects.filter(username=cni).first() or User.objects.filter(username=mat).first()
             if existing:

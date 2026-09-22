@@ -116,7 +116,8 @@ def _creer_compte_etudiant(etudiant):
         return
 
     nom_complet = f"{etudiant.prenom_fr or ''} {etudiant.nom_fr or etudiant.nom}".strip()
-    email       = f"{etudiant.matricule}@isms.esp.mr"
+    from django.conf import settings
+    email       = f"{etudiant.matricule}@{settings.EMAIL_DOMAINE_ETUDIANT}"
 
     new_user = User.objects.create_user(
         username         = cni,

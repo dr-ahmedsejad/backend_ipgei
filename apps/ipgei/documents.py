@@ -793,7 +793,9 @@ def _contexte_attestation(doc, inscription, base_url) -> dict:
     for prefixe in ('https://', 'http://', 'www.'):
         if site.startswith(prefixe):
             site = site[len(prefixe):]
-    domaine = site.strip('/') or 'ipgei.mr'
+    # Même domaine que celui des comptes créés par la scolarité.
+    from django.conf import settings
+    domaine = site.strip('/') or settings.EMAIL_DOMAINE_ETUDIANT
 
     contexte.update({
         # Identité, accordée au genre comme sur l'attestation du socle.

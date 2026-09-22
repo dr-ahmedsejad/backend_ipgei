@@ -414,7 +414,8 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
                 'filiere':    e.filiere.intitule_fr if e.filiere_id else '',
                 'statut_compte': statut,
                 'login_propose': cni or '',
-                'email_propose': f'{e.matricule}@isms.esp.mr' if e.matricule else '',
+                'email_propose': (f'{e.matricule}@{settings.EMAIL_DOMAINE_ETUDIANT}'
+                                  if e.matricule else ''),
             })
         return Response({
             'count':   len(items),
@@ -437,7 +438,7 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
             "dry_run":      false       # optionnel
         }
         Reutilise la meme logique que la commande create_student_accounts :
-            username = CNI, password = NBAC, email = {matricule}@isms.esp.mr,
+            username = CNI, password = NBAC, email = {matricule}@<EMAIL_DOMAINE_ETUDIANT>,
             doit_changer_mdp = True. Au 1er login, username -> matricule (FirstLoginView).
         """
         from django.contrib.auth import get_user_model
@@ -462,7 +463,7 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
             if User.objects.filter(username=cni).exists():
                 ignores.append({'matricule': e.matricule, 'raison': f"username '{cni}' deja pris"})
                 continue
-            email = f'{mat}@isms.esp.mr'
+            email = f'{mat}@{settings.EMAIL_DOMAINE_ETUDIANT}'
             nom_complet = f"{e.prenom_fr or ''} {e.nom_fr or e.nom}".strip()
             if not dry_run:
                 u = User.objects.create_user(

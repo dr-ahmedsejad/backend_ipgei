@@ -467,3 +467,8 @@ LOGGING = {
         'siga':   {'handlers': ['console', 'file'], 'level': 'INFO', 'propagate': False},
     },
 }
+
+# Domaine des adresses universitaires des étudiants : `{matricule}@<domaine>`.
+# Hérité du socle SIGA, il valait `isms.esp.mr` en dur à six endroits ; un
+# réglage unique évite qu'un écran propose un domaine et le serveur un autre.
+EMAIL_DOMAINE_ETUDIANT = config('EMAIL_DOMAINE_ETUDIANT', default='ipgei.mr')
