@@ -241,20 +241,33 @@ class SemaineViewSet(AuditMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='actif')
     def actif(self, request):
         """Retourne le type_semestre actif aujourd'hui d'apres la table Semaine.
-        Si aucune semaine ne match la date du jour, fallback sur la derniere
-        semaine passee. Utilise par la page de login pour pre-cocher le bon
-        semestre dans le selecteur."""
+
+        HORS PERIODE, on prend la semaine la PLUS PROCHE — en avant comme en
+        arriere. L'ancienne regle preferait toujours le passe, si lointain
+        fut-il : entre deux annees, elle proposait le semestre revolu depuis
+        trois mois plutot que celui qui commence la semaine suivante. Chacun
+        corrigeait alors l'annee ET la periode a chaque connexion, et une
+        inattention faisait saisir dans l'annee passee — une erreur qui ne se
+        voit qu'au pointage, des semaines plus tard.
+
+        A EGALE DISTANCE, c'est celle qui VIENT : entre un semestre qu'on
+        termine et un qu'on entame, on ouvre le second.
+
+        Utilise par la page de login pour pre-cocher le bon semestre.
+        """
         from datetime import date as _date
         today = _date.today()
 
-        # 1. Match exact sur la date du jour
+        # 1. Le jour meme l'emporte sur tout.
         match = Semaine.objects.filter(date=today).order_by('-date').first()
-        # 2. Fallback : derniere semaine <= today (inter-semestres)
         if not match:
-            match = Semaine.objects.filter(date__lte=today).order_by('-date').first()
-        # 3. Ultime fallback : la 1ere semaine future (debut d'annee)
-        if not match:
-            match = Semaine.objects.filter(date__gt=today).order_by('date').first()
+            # 2. La plus proche des deux voisines, l'avenir l'emportant a egalite.
+            passee = Semaine.objects.filter(date__lt=today).order_by('-date').first()
+            future = Semaine.objects.filter(date__gt=today).order_by('date').first()
+            if passee and future:
+                match = future if (future.date - today) <= (today - passee.date) else passee
+            else:
+                match = passee or future
 
         if not match:
             return Response({'type_semestre': 'I', 'annee_universitaire': '', 'source': 'default'})
