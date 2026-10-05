@@ -127,10 +127,13 @@ class MonEmploiView(APIView):
             seance_to_label[str(s['id'])]     = s['type_seance']
             seance_to_label[s['type_seance']] = s['type_seance']
 
-        # ── Semaines disponibles pour ce dept/annee ──
+        # ── Semaines disponibles pour la classe ET le sous-groupe de TP ──
+        # La copie de l'emploi du temps range les séances de TP sous l'identifiant
+        # du sous-groupe (`miroir.py`) : sans lui, l'étudiant ne voyait pas ses TP.
+        unites = [dept_id] + ([inscription.sous_groupe_id] if inscription.sous_groupe_id else [])
         base_qs = Suivie.objects.filter(
             annee_universitaire=annee_univ,
-            departement_id=dept_id,
+            departement_id__in=unites,
         )
         semaines_dispo = sorted(
             base_qs.values_list('numero_semaine', flat=True).distinct()
@@ -240,11 +243,19 @@ class MonEmploiView(APIView):
         # Le semestre affiché en en-tête vient du cursus IPGEI : celui de la
         # parité en cours pour le niveau de la classe. `ip.semestre` venait de
         # l'inscription pédagogique du socle, que ce module ne lit plus.
+        # Le semestre est celui qui CONTIENT la semaine affichée (ses dates) ;
+        # à défaut de dates, le premier du niveau, comme avant.
         semestre_nom = ''
+        semestres_niveau = [s for s in SemestreIPGEI.objects.filter(
+            annee_universitaire=annee_univ).order_by('code')
+            if inscription.niveau in s.niveaux]
+        jour_semaine = (SemaineModel.objects
+                        .filter(annee_universitaire=annee_univ, numero_semaine=semaine_num)
+                        .order_by('date').values_list('date', flat=True).first())
         semestre_courant = next(
-            (s for s in SemestreIPGEI.objects.filter(
-                annee_universitaire=annee_univ).order_by('code')
-             if inscription.niveau in s.niveaux), None)
+            (s for s in semestres_niveau
+             if jour_semaine and s.date_debut and s.date_fin and s.date_debut <= jour_semaine <= s.date_fin),
+            semestres_niveau[0] if semestres_niveau else None)
         if semestre_courant is not None:
             semestre_nom = semestre_courant.code
 
