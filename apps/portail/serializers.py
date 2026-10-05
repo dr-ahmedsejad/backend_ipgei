@@ -146,10 +146,12 @@ class AbsenceEtudiantSerializer(serializers.ModelSerializer):
     suivi_semaine = serializers.IntegerField(source='suivi.numero_semaine',      read_only=True)
     suivi_creneau = serializers.CharField(source='suivi.creneau_fk.creneau',     read_only=True, default=None)
     suivi_type    = serializers.CharField(source='suivi.type_seance_fk.type_seance', read_only=True, default=None)
+    suivi_annee   = serializers.CharField(source='suivi.annee_universitaire',  read_only=True, default=None)
 
     class Meta:
         model  = Presence
         fields = [
             'id', 'statut', 'statut_label', 'commentaire', 'date_modification',
             'suivi_jour', 'suivi_creneau', 'suivi_type', 'suivi_em', 'suivi_prof', 'suivi_semaine',
+            'suivi_annee',
         ]

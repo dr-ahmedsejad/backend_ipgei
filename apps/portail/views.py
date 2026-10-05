@@ -40,6 +40,43 @@ class MonProfilView(generics.RetrieveUpdateAPIView):
 
 
 # ── Emploi du temps ───────────────────────────────────────────────────────────
+def _annee_demandee(request):
+    """Année universitaire consultée (« 2025-2026 »), passée en `?annee=` par
+    l'app mobile pour revoir une année passée ; None = année en cours."""
+    return (request.query_params.get('annee') or '').strip() or None
+
+
+class MesAnneesView(APIView):
+    """GET /api/v1/portail/annees/
+    Années où l'étudiant a été inscrit (inscriptions IPGEI), de la plus récente
+    à la plus ancienne : l'app mobile permet de revoir une année passée. La
+    première est l'année en cours.
+    """
+    permission_classes = [IsEtudiant]
+
+    def get(self, request):
+        from .ipgei_source import _rang_du_niveau, inscriptions_de
+        etudiant = _get_etudiant(request)
+        vues, annees = set(), []
+        for inscription in inscriptions_de(etudiant):
+            annee = inscription.annee_universitaire
+            if annee in vues:
+                continue
+            vues.add(annee)
+            classe = inscription.classe
+            try:
+                niveau = _rang_du_niveau(classe)
+            except Exception:
+                niveau = 0
+            annees.append({
+                'annee':    annee,
+                'filiere':  getattr(classe, 'niveau_code', '') or '',
+                'niveau':   niveau or 0,
+                'courante': not annees,
+            })
+        return Response(annees)
+
+
 class MonEmploiView(APIView):
     """GET /api/v1/portail/emploi-du-temps/
     Retourne la grille emploi du temps de l'étudiant (même format que suivi/grille).
@@ -66,7 +103,7 @@ class MonEmploiView(APIView):
         # `apps/ipgei/miroir.py` —, et son `departement_id` EST l'identifiant
         # de la classe : une classe IPGEI hérite de `Departement`, une seule
         # ligne logique pour les deux. Rien à rebrancher de ce côté.
-        inscription = inscription_courante(etudiant)
+        inscription = inscription_courante(etudiant, _annee_demandee(request))
         if inscription is None:
             return Response({'creneaux': [], 'grille': {}, 'annee': '', 'semestre': ''})
 
@@ -232,8 +269,11 @@ class MesAbsencesView(APIView):
         qs = Presence.objects.select_related(
             'suivi__creneau_fk', 'suivi__em', 'suivi__prof', 'suivi__jour_fk',
         ).filter(etudiant=etudiant).exclude(statut=0).order_by(
-            '-suivi__numero_semaine', 'suivi__jour_fk__jour'
+            '-suivi__annee_universitaire', '-suivi__numero_semaine', 'suivi__jour_fk__jour'
         )
+        annee = _annee_demandee(request)
+        if annee:
+            qs = qs.filter(suivi__annee_universitaire=annee)
         serializer = AbsenceEtudiantSerializer(qs, many=True)
         return Response(serializer.data)
 
@@ -259,7 +299,7 @@ class MesNotesView(APIView):
 
         etudiant = _get_etudiant(request)
         lignes = []
-        for inscription in inscriptions_de(etudiant):
+        for inscription in inscriptions_de(etudiant, _annee_demandee(request)):
             seuil = services.seuil_applicable(
                 inscription, inscription.annee_universitaire)
             lignes += [note_en_ligne(n, seuil)

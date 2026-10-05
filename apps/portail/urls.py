@@ -9,9 +9,11 @@ from .views import (
     DocumentsDisponiblesView, TelechargerDirectView,
     MesReclamationsView, DetailReclamationView,
     SemaniesEtudiantView, PeriodesReclamationActivesView,
+    MesAnneesView,
 )
 
 urlpatterns = [
+    path('annees/',                         MesAnneesView.as_view(),          name='portail-annees'),
     # Boîte de réception : l'enseignant conteste EN LIGNE une séance « Non
     # fait ». Écrit dans une table exclue de la synchronisation, donc
     # préservée au push suivant — d'où son chemin dans MIRROR_WRITE_ALLOWLIST.
