@@ -43,6 +43,24 @@ POINTAGE_SELECT_RELATED = (
 _audit_bulk_safe = write_audit_bulk
 
 
+#: Roles qui generent le suivi d'une semaine ECOULEE sans autorisation prealable.
+#:
+#: Le rattrapage etait reserve a l'admin : tout autre compte devait lui demander
+#: une autorisation, semaine par semaine. Le DIRECTEUR DES ETUDES tient l'emploi
+#: du temps et le suivi — lui faire reclamer une autorisation pour rattraper une
+#: semaine de retard arretait son travail sur un geste purement administratif.
+#:
+#: Les autres comptes gardent le circuit d'autorisation : la garde protege d'une
+#: generation accidentelle sur une semaine close, pas d'une malveillance.
+ROLES_RATTRAPAGE_SUIVI = {'admin', 'DE'}
+
+
+def peut_rattraper_suivi(user) -> bool:
+    """Ce compte peut-il generer le suivi d'une semaine deja close ?"""
+    return bool(getattr(user, 'is_superuser', False)
+                or getattr(user, 'role', None) in ROLES_RATTRAPAGE_SUIVI)
+
+
 class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, viewsets.ModelViewSet):
     queryset = Suivie.objects.select_related(*SUIVIE_SELECT_RELATED).all()
     permission_classes = [RBACPermission, EDTDepartementPermission]
@@ -201,11 +219,11 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         if not annee:
             return Response({'error': 'annee_universitaire requis.'}, status=400)
 
-        # Indicateurs frontend : admin et grace period pour filtrer la liste
-        is_admin_user = (
-            request.user.is_superuser
-            or getattr(request.user, 'role', None) == 'admin'
-        )
+        # Indicateurs frontend : qui peut rattraper, et grace period pour
+        # filtrer la liste. Le nom reste `is_admin_user` — le frontend le lit —
+        # mais il dit desormais « ce compte peut rattraper », directeur des
+        # etudes compris (cf. `ROLES_RATTRAPAGE_SUIVI`).
+        is_admin_user = peut_rattraper_suivi(request.user)
         grace_days = getattr(_settings, 'SUIVI_GRACE_DAYS_AFTER_WEEK_END', 0)
 
         # Autorisations de rattrapage actives pour ce user (non-admin) sur cette
@@ -400,10 +418,7 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         from django.db.models import Max as _Max
         from django.utils import timezone as _tz
         import datetime as _dt
-        is_admin_or_su = (
-            request.user.is_superuser
-            or getattr(request.user, 'role', None) == 'admin'
-        )
+        is_admin_or_su = peut_rattraper_suivi(request.user)
         consumed_authorization = None   # pour marquer used_at apres generation reussie
         if not is_admin_or_su:
             grace_days = getattr(_settings, 'SUIVI_GRACE_DAYS_AFTER_WEEK_END', 0)
@@ -426,8 +441,8 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
                     return Response({
                         'error': (
                             f"La semaine {numero_sem} ({sem_max_date.strftime('%d/%m/%Y')}) "
-                            f"est cloturee. Seul un administrateur peut generer son suivi "
-                            f"(rattrapage). Contactez votre admin pour proceder."
+                            f"est cloturee. Son suivi ne se genere qu'en rattrapage : "
+                            f"demandez-le a l'administrateur ou au directeur des etudes."
                         )
                     }, status=403)
 
@@ -2015,10 +2030,13 @@ class SuiviGenerationAuthorizationViewSet(viewsets.GenericViewSet):
         if not cloturees:
             return Response({'users': []})
 
-        # Tous les users non-admin avec au moins 1 dept attribue
+        # Les comptes a qui une autorisation sert encore : ni les enseignants et
+        # etudiants, qui ne generent pas de suivi, ni ceux qui rattrapent de
+        # plein droit (`ROLES_RATTRAPAGE_SUIVI`) — les proposer reviendrait a
+        # faire accorder une autorisation sans objet.
         users_qs = (
             CustomUser.objects.filter(is_active=True)
-            .exclude(role='admin').exclude(is_superuser=True)
+            .exclude(role__in=ROLES_RATTRAPAGE_SUIVI).exclude(is_superuser=True)
             .exclude(role__in=['enseignant', 'etudiant'])
             .prefetch_related('managed_departements')
         )
