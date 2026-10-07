@@ -4028,7 +4028,8 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(classe_id=classe_id)
             version = request.query_params.get('version')
             if version:
-                return qs.filter(version=version).order_by('jour_ref', 'creneau_ordre')
+                return self._nom_de_classe_a_jour(
+                    qs.filter(version=version).order_by('jour_ref', 'creneau_ordre'))
         if prof_id:
             qs = qs.filter(prof_ref=prof_id)
         if salle_id:
@@ -4048,8 +4049,29 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
             a.pk for a in qs.only('id', 'classe_id', 'version')
             if a.version == dernieres.get(a.classe_id)
         ]
-        return (EmploiArchive.objects.filter(pk__in=retenues)
-                .order_by('jour_ref', 'creneau_ordre'))
+        return self._nom_de_classe_a_jour(
+            EmploiArchive.objects.filter(pk__in=retenues)
+            .order_by('jour_ref', 'creneau_ordre'))
+
+    @staticmethod
+    def _nom_de_classe_a_jour(archives):
+        """
+        Le nom de la classe lu sur la classe D'AUJOURD'HUI.
+
+        La prise de vue recopie le nom au moment où elle est faite. Renommer
+        une classe — « MP MPA » corrigé en « MP A » — laissait donc les semaines
+        déjà publiées annoncer l'ancien nom, sur l'écran comme sur le PDF, alors
+        qu'il s'agit de la même classe.
+
+        Seul le NOM est rafraîchi, et rien d'autre : l'enseignant et la salle
+        archivés restent ceux de la semaine. Un remplaçant n'est pas une erreur
+        de saisie, c'est ce qui s'est passé ce jour-là.
+        """
+        lignes = list(archives.select_related('classe'))
+        for ligne in lignes:
+            if ligne.classe_id and ligne.classe.nom:
+                ligne.classe_nom = ligne.classe.nom     # en mémoire seulement
+        return lignes
 
     def _axe(self, request):
         """Axe de lecture, déduit du filtre demandé."""
