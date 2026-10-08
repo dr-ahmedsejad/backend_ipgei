@@ -78,6 +78,23 @@ from .serializers import (
 )
 
 
+def _libelle_semestres(semaines) -> str:
+    """
+    « Semestre S3 », ou « Semestres S1 · S3 » quand la feuille en couvre deux.
+
+    Une semaine de calendrier existe une fois par semestre de la période. Un
+    emploi du temps d'enseignant ou de salle les réunit : annoncer un seul
+    semestre ferait mentir l'en-tête sur la moitié de ses cases.
+    """
+    codes = [s.semestre.code for s in semaines if s.semestre_id]
+    uniques = list(dict.fromkeys(codes))
+    if not uniques:
+        return ''
+    if len(uniques) == 1:
+        return f'Semestre {uniques[0]}'
+    return 'Semestres ' + ' · '.join(uniques)
+
+
 def _epreuves_de_la_semaine(classe, semaine):
     """
     Les épreuves qui convoquent cette classe pendant cette semaine.
@@ -3943,8 +3960,12 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
         """La même grille, au même gabarit que l'emploi du temps courant."""
         seances = list(self._prise_de_vue(request))
         axe      = self._axe(request)
-        semaine  = SemaineIPGEI.objects.select_related('semestre').filter(
-            pk=request.query_params.get('semaine')).first()
+        # Plusieurs semaines : elles couvrent les mêmes dates, l'en-tête se lit
+        # donc sur la première ; les semestres, eux, sont tous nommés.
+        semaines = list(SemaineIPGEI.objects.select_related('semestre')
+                        .filter(pk__in=self._semaines_demandees(request))
+                        .order_by('semestre__code'))
+        semaine  = semaines[0] if semaines else None
 
         # Les épreuves ne sont pas archivées — elles ne sont pas des séances et
         # ne passent pas par la prise de vue du suivi. Elles n'en doivent pas
@@ -3981,8 +4002,7 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
                 'semaine':      semaine.numero if semaine else '',
                 'debut':        edt_pdf._date_fr(semaine.date_debut) if semaine else '',
                 'fin':          edt_pdf._date_fr(semaine.date_fin) if semaine else '',
-                'semestre_nom': (f'Semestre {semaine.semestre.code}'
-                                 if semaine and semaine.semestre_id else ''),
+                'semestre_nom': _libelle_semestres(semaines),
                 # Un document d'archive doit dire qu'il en est un, et de quand.
                 # Sans cette mention il se confondrait avec l'emploi du temps
                 # courant, alors qu'ils diffèrent souvent — c'est la raison même
@@ -4013,8 +4033,8 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
         dernière version, une classe régénérée ne devant pas ressortir deux
         fois dans l'emploi du temps d'un enseignant.
         """
-        semaine_id = request.query_params.get('semaine')
-        if not semaine_id:
+        semaines_ids = self._semaines_demandees(request)
+        if not semaines_ids:
             raise ValidationError('Paramètre requis : semaine.')
 
         classe_id = request.query_params.get('classe')
@@ -4023,7 +4043,7 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
         if not (classe_id or prof_id or salle_id):
             raise ValidationError('Paramètre requis : classe, prof ou salle.')
 
-        qs = EmploiArchive.objects.filter(semaine_id=semaine_id)
+        qs = EmploiArchive.objects.filter(semaine_id__in=semaines_ids)
         if classe_id:
             qs = qs.filter(classe_id=classe_id)
             version = request.query_params.get('version')
@@ -4041,7 +4061,7 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
         dernieres = {
             l['classe_id']: l['v']
             for l in (EmploiArchive.objects
-                      .filter(semaine_id=semaine_id)
+                      .filter(semaine_id__in=semaines_ids)
                       .values('classe_id')
                       .annotate(v=Max('version')))
         }
@@ -4072,6 +4092,33 @@ class EmploiArchiveViewSet(ReadOnlyModelViewSet):
             if ligne.classe_id and ligne.classe.nom:
                 ligne.classe_nom = ligne.classe.nom     # en mémoire seulement
         return lignes
+
+    @staticmethod
+    def _semaines_demandees(request):
+        """
+        Les semaines visées — une, ou PLUSIEURS de mêmes dates.
+
+        Une même semaine de calendrier existe en deux exemplaires, un par
+        semestre de la période : S1 pour les MPSI, S3 pour les MP. L'emploi du
+        temps d'un ENSEIGNANT ou d'une SALLE traverse les deux niveaux ; le
+        limiter à un semestre n'en montrait que la moitié, et obligeait à
+        essayer l'autre entrée pour voir le reste de sa semaine.
+
+        `?semaine=12,19` réunit donc les deux. La forme à un seul identifiant
+        reste valable : c'est celle d'un emploi de CLASSE, qui n'a qu'un
+        semestre.
+        """
+        ids = []
+        for morceau in (request.query_params.get('semaine') or '').split(','):
+            morceau = morceau.strip()
+            if not morceau:
+                continue
+            try:
+                ids.append(int(morceau))
+            except ValueError:
+                raise ValidationError(
+                    {'semaine': f'Identifiant de semaine invalide : {morceau}.'})
+        return ids
 
     def _axe(self, request):
         """Axe de lecture, déduit du filtre demandé."""
