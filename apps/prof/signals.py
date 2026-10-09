@@ -138,11 +138,20 @@ def _auto_create_account_for_prof(sender, instance, created, **kwargs):
         return  # Déjà lié — rien à faire
 
     try:
-        from .services import creer_compte_pour_prof
-        # Sentinel pour éviter le re-déclenchement quand creer_compte_pour_prof
+        from .services import creer_compte_pour_prof_detaille
+        # Sentinel pour éviter le re-déclenchement quand la création de compte
         # appelle prof.save(update_fields=['user']) en interne
         instance._skip_account_signal = True
-        creer_compte_pour_prof(instance)
+        cree, raison = creer_compte_pour_prof_detaille(instance)
+        if not cree:
+            # Le refus est TRACÉ, et nommé. Il ne l'était pas : la fonction ne
+            # rendait qu'un booléen, le signal n'en faisait rien, et l'écran
+            # annonçait la création du prof comme si le compte avait suivi.
+            # Vingt-sept enseignants sont restés sans accès de cette façon.
+            logger.warning(
+                "Pas de compte pour le prof #%s (%s) : %s",
+                instance.pk, instance.nom, raison,
+            )
     except Exception as exc:
         # On ne casse jamais la création d'un Prof si le compte échoue
         # (ex: téléphone déjà pris) — l'admin pourra rattraper via l'endpoint.

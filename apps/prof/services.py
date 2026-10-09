@@ -158,61 +158,99 @@ def payes_a_lheure_ids_legacy() -> list[int]:
     )
 
 
-def creer_compte_pour_prof(prof) -> bool:
-    """Crée un CustomUser pour un prof et le lie. Retourne True si créé, False sinon.
+def creer_compte_pour_prof_detaille(prof) -> tuple[bool, str]:
+    """Crée un CustomUser pour un prof et le lie. Rend `(créé, raison)`.
 
-    Conditions cumulatives pour la création :
-      - prof.user_id doit être null (pas déjà lié)
-      - prof.telephone doit être renseigné (sert de username)
-      - le username (= telephone) ne doit pas déjà exister
+    Conditions cumulatives, toutes vérifiées AVANT la moindre écriture :
+
+      - `prof.user_id` vide — pas déjà lié ;
+      - `prof.telephone` renseigné — il sert d'identifiant de connexion ;
+      - `prof.email` renseigné — et c'est la condition qui a coûté le plus
+        cher. `CustomUser.email` est UNIQUE, et une chaîne vide n'est pas un
+        NULL : PostgreSQL l'indexe comme une valeur ordinaire. Un seul compte
+        à courriel vide suffit donc à empêcher la création de TOUS les
+        suivants. C'est arrivé en production : le compte de test « 22000001 »,
+        créé le 28/07/2026, a bloqué 27 enseignants pendant trois mois sans
+        que rien ne s'affiche à l'écran ;
+      - ni l'identifiant ni le courriel déjà portés par un autre compte.
 
     Le compte est créé avec :
-      - username = prof.telephone
-      - password = prof.NNI (à changer obligatoirement au 1er login)
-      - role     = 'enseignant'
-      - UserContexte.annee_universitaire = Year la plus récente
-      - UserContexte.semestre = 'Impairs'
+      - username = `prof.telephone`
+      - password = `prof.NNI`, changement imposé à la première connexion
+      - role     = `enseignant`
+      - `UserContexte` sur l'année la plus récente, semestre « Impairs »
 
-    Cette fonction est appelée :
-      1. Automatiquement par le signal post_save sur Prof (toute création unitaire)
-      2. Manuellement par les endpoints REST `/profs/generer-comptes/` et
-         `/profs/{id}/generer-compte/` pour rattraper les imports en masse,
-         migrations, ou cas de silent fail.
+    La raison rendue est faite pour être AFFICHÉE : elle dit quoi corriger.
+    C'est tout l'objet de cette variante — l'ancienne ne rendait qu'un booléen,
+    et l'appelant ne pouvait que constater l'échec sans jamais le nommer.
+
+    Appelée :
+      1. par le signal `post_save` sur Prof (toute création unitaire) ;
+      2. par `/profs/generer-comptes/` et `/profs/{id}/generer-compte/` pour
+         rattraper les imports en masse — `bulk_create` ne déclenche aucun
+         signal — et les créations antérieures restées sans compte.
     """
     from django.contrib.auth import get_user_model
+    from django.db import transaction
 
     User = get_user_model()
 
-    if prof.user_id or not prof.telephone:
-        return False
+    if prof.user_id:
+        return False, 'Ce professeur a déjà un compte.'
+    if not prof.telephone:
+        return False, ("Téléphone manquant : c'est l'identifiant de connexion.")
+
+    email = (prof.email or '').strip()
+    if not email:
+        return False, ('Courriel manquant : il identifie le compte, et un '
+                       'courriel vide empêcherait la création de tous les suivants.')
+
     username = str(prof.telephone)
     if User.objects.filter(username=username).exists():
-        return False
+        return False, (f"Le téléphone {username} sert déjà d'identifiant à un "
+                       'autre compte : deux professeurs ne peuvent pas le partager.')
+    if User.objects.filter(email__iexact=email).exists():
+        return False, f'Le courriel {email} est déjà porté par un autre compte.'
 
-    user = User.objects.create_user(
-        username=username,
-        password=str(prof.NNI),
-        name=prof.nom,
-        email=prof.email or '',
-        role='enseignant',
-        is_active=True,
-    )
-    user.doit_changer_mdp = True
-    user.save(update_fields=['doit_changer_mdp'])
-
-    prof.user = user
-    prof.save(update_fields=['user'])
-
-    # UserContexte avec l'année la plus récente (FK vers annee.annee — refuse '')
     from apps.authentication.models import UserContexte
     from apps.parametres.models import Year
-    latest_year = (
-        Year.objects.filter(est_active=True).order_by('-annee').values_list('annee', flat=True).first()
-        or Year.objects.order_by('-annee').values_list('annee', flat=True).first()
-    )
-    if latest_year:
-        UserContexte.objects.get_or_create(
-            user=user,
-            defaults={'annee_universitaire': latest_year, 'semestre': 'Impairs'},
+
+    # Un seul bloc, et un point de reprise : si la pose du contexte échoue, le
+    # compte ne reste pas orphelin, à moitié créé. Il permet surtout à
+    # l'appelant d'attraper une erreur de base sans condamner la transaction
+    # qui l'englobe — celle qui crée le prof lui-même, notamment : sans
+    # savepoint, une exception rattrapée ici ferait échouer tout le POST au
+    # moment du commit.
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=username,
+            password=str(prof.NNI),
+            name=prof.nom,
+            email=email,
+            role='enseignant',
+            is_active=True,
         )
-    return True
+        user.doit_changer_mdp = True
+        user.save(update_fields=['doit_changer_mdp'])
+
+        prof.user = user
+        prof.save(update_fields=['user'])
+
+        # FK vers annee.annee, qui refuse '' : sans année en base, on pose le
+        # compte sans contexte plutôt que de ne pas le poser du tout.
+        latest_year = (
+            Year.objects.filter(est_active=True).order_by('-annee').values_list('annee', flat=True).first()
+            or Year.objects.order_by('-annee').values_list('annee', flat=True).first()
+        )
+        if latest_year:
+            UserContexte.objects.get_or_create(
+                user=user,
+                defaults={'annee_universitaire': latest_year, 'semestre': 'Impairs'},
+            )
+
+    return True, f'Compte « {username} » créé.'
+
+
+def creer_compte_pour_prof(prof) -> bool:
+    """Variante booléenne, pour les appelants qui n'affichent pas la raison."""
+    return creer_compte_pour_prof_detaille(prof)[0]

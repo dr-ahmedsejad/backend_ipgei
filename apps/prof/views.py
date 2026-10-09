@@ -151,34 +151,44 @@ class ProfViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='generer-comptes')
     def generer_comptes(self, request):
-        """Crée les comptes enseignants pour tous les profs sans user."""
-        from .services import creer_compte_pour_prof
-        profs = Prof.objects.filter(user__isnull=True)
-        created = sum(1 for p in profs if creer_compte_pour_prof(p))
-        return Response({'created': created, 'detail': f'{created} compte(s) créé(s).'})
+        """Crée les comptes enseignants pour tous les profs sans user.
+
+        Rend le détail des ÉCHECS, pas seulement le nombre de réussites. Un
+        rattrapage qui répond « 1 compte créé » sur vingt-huit professeurs a
+        échoué vingt-sept fois, et c'est cela qu'il faut lire.
+        """
+        from .services import creer_compte_pour_prof_detaille
+        profs = Prof.objects.filter(user__isnull=True).order_by('nom')
+        created, echecs = 0, []
+        for p in profs:
+            ok, raison = creer_compte_pour_prof_detaille(p)
+            if ok:
+                created += 1
+            else:
+                echecs.append({'id': p.pk, 'nom': p.nom, 'raison': raison})
+        detail = f'{created} compte(s) créé(s)'
+        if echecs:
+            detail += f', {len(echecs)} en échec'
+        return Response({'created': created, 'echecs': echecs,
+                         'detail': detail + '.'})
 
     @action(detail=True, methods=['post'], url_path='generer-compte')
     def generer_compte(self, request, pk=None):
         """Crée le compte enseignant pour un prof spécifique."""
-        from .services import creer_compte_pour_prof
+        from .services import creer_compte_pour_prof_detaille
         prof = self.get_object()
         if prof.user_id:
             return Response(
                 {'detail': 'Ce professeur a déjà un compte.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not prof.telephone:
-            return Response(
-                {'detail': 'Impossible de créer le compte : numéro de téléphone manquant.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        created = creer_compte_pour_prof(prof)
-        if created:
-            return Response({'detail': 'Compte créé avec succès.'})
-        return Response(
-            {'detail': 'Username déjà utilisé (doublon de téléphone).'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        cree, raison = creer_compte_pour_prof_detaille(prof)
+        if cree:
+            return Response({'detail': raison})
+        # La raison est rendue telle quelle : elle nomme le champ à corriger,
+        # là où l'ancien message accusait toujours le téléphone — y compris
+        # quand le vrai coupable était un courriel vide.
+        return Response({'detail': raison}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):

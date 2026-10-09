@@ -34,6 +34,33 @@ class ProfSerializer(serializers.ModelSerializer):
             if not attrs.get('banque'):
                 errors['banque'] = 'La banque est requise.'
 
+        # Le COURRIEL est obligatoire, et pas pour la forme : il devient
+        # l'adresse du compte enseignant, et `CustomUser.email` est UNIQUE.
+        # Une chaîne vide n'y est pas un NULL — PostgreSQL l'indexe comme une
+        # valeur ordinaire —, si bien qu'un seul professeur sans adresse
+        # empêche la création du compte de TOUS les suivants. C'est ce qui
+        # s'est produit : un compte de test à courriel vide a privé vingt-sept
+        # enseignants d'accès pendant trois mois, en silence.
+        #
+        # Aucun domaine n'est imposé : une adresse personnelle convient.
+        if not is_update or 'email' in attrs:
+            courriel = (attrs.get('email') or '').strip()
+            if not courriel:
+                errors['email'] = ('Le courriel est requis : il sert '
+                                   "d'adresse au compte de l'enseignant.")
+            else:
+                # Unicité insensible à la casse. La même adresse sur deux
+                # fiches ne se verrait qu'au moment où le second compte
+                # échouerait — c'est-à-dire nulle part.
+                doublon = Prof.objects.filter(email__iexact=courriel)
+                if self.instance is not None:
+                    doublon = doublon.exclude(pk=self.instance.pk)
+                autre = doublon.first()
+                if autre:
+                    errors['email'] = (f'Ce courriel est déjà celui de '
+                                       f'{autre.nom}. Chaque enseignant doit '
+                                       'avoir le sien.')
+
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
