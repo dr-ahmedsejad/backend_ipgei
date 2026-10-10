@@ -61,6 +61,22 @@ def peut_rattraper_suivi(user) -> bool:
                 or getattr(user, 'role', None) in ROLES_RATTRAPAGE_SUIVI)
 
 
+def _ordre_fiche(fiche):
+    """Ordre d'une ligne sur une feuille de présence : CRÉNEAU, puis CLASSE.
+
+    Le jour est déjà porté par le regroupement. À l'intérieur d'un créneau, les
+    lignes arrivaient dans l'ordre que la base rendait — MP B pouvait précéder
+    MP A, et la classe qu'on cherche se trouvait au jugé. Le tri alphabétique
+    rend la feuille parcourable : à 08h00, MP A, puis MP B, puis MP C.
+
+    Une ligne sans département passe EN DERNIER plutôt qu'en premier : c'est
+    l'exception, elle n'a pas à ouvrir le groupe. Le booléen intermédiaire s'en
+    charge — `False` avant `True`.
+    """
+    departement = fiche.get('departement') or ''
+    return (fiche['creneau'], departement == '', departement)
+
+
 class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, viewsets.ModelViewSet):
     queryset = Suivie.objects.select_related(*SUIVIE_SELECT_RELATED).all()
     permission_classes = [RBACPermission, EDTDepartementPermission]
@@ -1735,7 +1751,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
             {
                 'jour': jour,
                 'date': by_jour[jour][0]['date_suivie'] if by_jour[jour] else None,
-                'fiches': sorted(by_jour[jour], key=lambda f: f['creneau']),
+                'fiches': sorted(by_jour[jour], key=_ordre_fiche),
             }
             for jour in jours_sorted
         ])
@@ -1804,7 +1820,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
 
         result = []
         for jour in sorted(by_jour.keys(), key=lambda j: jours_order.get(j, 99)):
-            fiches_jour = sorted(by_jour[jour], key=lambda f: f['creneau'])
+            fiches_jour = sorted(by_jour[jour], key=_ordre_fiche)
             date_jour = fiches_jour[0]['date_suivie'] if fiches_jour else None
             if date_jour:
                 try:
