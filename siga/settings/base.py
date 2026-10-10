@@ -410,6 +410,14 @@ AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT = False
 LOGIN_ECHECS_PAR_IP       = config('LOGIN_ECHECS_PAR_IP', default=300, cast=int)
 AXES_HTTP_RESPONSE_CODE   = 429
 
+# ── Notifications push (app Groupe Polytechnique) ────────────────────────────
+# Clé d'envoi PROPRE à l'IPGEI dans le projet Firebase commun du groupe :
+# SECRET, hors git, déposée à la main dans secrets/ (monté sur /app/secrets).
+# Vide ou illisible → aucun push ne part ; la cloche fonctionne comme avant.
+FIREBASE_CREDENTIALS_GP = config('FIREBASE_CREDENTIALS_GP', default='')
+ETABLISSEMENT_CODE      = config('ETABLISSEMENT_CODE',  default='ipgei')
+ETABLISSEMENT_SIGLE     = config('ETABLISSEMENT_SIGLE', default='IPGEI')
+
 # Cache des consultations étudiantes (notes, emploi du temps) : durée maximale
 # d'une copie, en secondes. Une écriture l'invalide avant (apps/portail/
 # cache_portail.py). 0 = cache coupé (retour immédiat à l'ancien comportement).

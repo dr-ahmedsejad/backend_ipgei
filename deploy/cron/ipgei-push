@@ -1,0 +1,10 @@
+# ════════════════════════════════════════════════════════════════════
+# IPGEI — Notifications push vers l'app Groupe Polytechnique
+# À installer dans la crontab de l'utilisateur qui lance docker compose
+# (crontab -e). Toutes les 2 minutes : chaque nouvelle notification de la
+# cloche part vers le téléphone de son destinataire.
+# Sans clé Firebase (secrets/, FIREBASE_CREDENTIALS_GP dans deploy/.env), la
+# commande répond « Push désactivé » et ne fait rien.
+# flock -n : jamais deux envois en même temps.
+# ════════════════════════════════════════════════════════════════════
+*/2 * * * * cd /opt/ipgei/deploy && flock -n /tmp/ipgei-push.lock docker compose -f docker-compose.ipgei.yml exec -T backend python manage.py envoyer_push >> $HOME/logs/ipgei-push.log 2>&1

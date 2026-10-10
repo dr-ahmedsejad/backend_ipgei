@@ -160,6 +160,9 @@ services:
       BACKUP_BASE_DIR: /app/backups
       # Cache partagé par les workers (voir le service redis).
       REDIS_URL: redis://redis:6379/1
+      # Notifications push (app Groupe Polytechnique) : la clé d'envoi de l'IPGEI
+      # dans le projet commun, déposée dans ../secrets (absente → push désactivé).
+      FIREBASE_CREDENTIALS_GP: ${FIREBASE_CREDENTIALS_GP:-/app/secrets/firebase-gp-ipgei.json}
     volumes:
       - ../media:/app/media
       - ../../backups:/app/backups
