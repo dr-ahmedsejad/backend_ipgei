@@ -65,7 +65,7 @@
             <td>{{ fiche.prof_nom }}</td>
             <td>{{ fiche.tel_prof }}</td>
             <td>{{ fiche.em_intitule }}</td>
-            <td>{{ fiche.type_seance }}</td>
+            <td>{% if fiche.type_seance == 'CM' %}Cours{% else %}{{ fiche.type_seance }}{% endif %}</td>
             <td>{{ fiche.salle_nom }}</td>
             <td style="min-width: 80px;">&nbsp;</td>
         </tr>

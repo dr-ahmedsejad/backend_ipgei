@@ -203,7 +203,7 @@ donc après que des heures ont été pointées et payées sur une autre version.
             <div class="bloc-special">{{ bloc.em_intitule }}</div>
             {% else %}
             <div class="bloc{% if bloc.est_evaluation %} bloc-evaluation{% endif %}">
-                <div class="session-type {{ bloc.type_seance }}">{{ bloc.type_seance }}</div>
+                <div class="session-type {{ bloc.type_seance }}">{% if bloc.type_seance == 'CM' %}Cours{% else %}{{ bloc.type_seance }}{% endif %}</div>
                 <div class="course-title">{{ bloc.em_intitule }}</div>
                 {% for ligne in bloc.lignes %}
                 <div class="ligne-seance">{{ ligne }}</div>
