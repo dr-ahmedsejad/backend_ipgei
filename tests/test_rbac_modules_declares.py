@@ -14,9 +14,15 @@ formes de seed reconnues sont celles du dépôt — tuple `('code', 'Nom',
 forme ferait passer un vrai module pour un orphelin : le test échouerait dans
 le bon sens (bruyamment), et il suffirait d'ajouter la forme ici.
 
-`ORPHELINS_CONNUS` documente l'existant : quatre modules du socle déclarés et
+`ORPHELINS_CONNUS` documente l'existant : des modules du socle déclarés et
 jamais semés, donc en 403 pour tous depuis le fork. Les retirer de la liste le
 jour où une migration les sème — ou où leurs vues disparaissent.
+
+« banques » en est sorti le 10/10/2026 : signalé parce que sa ligne, sur
+l'écran des permissions, s'affichait sans être cliquable. La migration
+`authentication/0024_module_banques` le sème désormais, sans accorder aucun
+droit — l'interrupteur devient utilisable, c'est à l'administrateur de le
+mettre. Restent trois orphelins, dont `emplois`, qui n'est pas des moindres.
 """
 import io
 import os
@@ -28,7 +34,7 @@ RACINE = Path(__file__).resolve().parent.parent
 
 #: Déclarés dans le code, semés par aucune migration — état constaté, pas
 #: souhaité. Chacun rend son application inaccessible à tous les rôles.
-ORPHELINS_CONNUS = {'banques', 'departements', 'em', 'emplois'}
+ORPHELINS_CONNUS = {'departements', 'em', 'emplois'}
 
 # Ancre en debut de ligne (hors commentaire) : une declaration mise en
 # commentaire n'ouvre aucun ecran, elle ne doit pas passer pour un orphelin.
