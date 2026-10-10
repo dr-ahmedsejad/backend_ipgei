@@ -1,10 +1,13 @@
 from rest_framework.throttling import UserRateThrottle, AnonRateThrottle
 
+from core.ip_client import adresse_client
+
 
 class LoginRateThrottle(AnonRateThrottle):
     """
-    Couche 1 — DRF : 5 tentatives de login par 15 minutes.
-    Bloque avant même d'interroger la base de données.
+    5 requêtes par 15 minutes : renouvellement de jeton et premier accès. La
+    CONNEXION n'en a plus — elle compte ses échecs, pas ses requêtes
+    (apps/authentication/tentatives.py).
     parse_rate surchargé car DRF ne supporte pas les fenêtres multi-minutes.
 
     Limite par IDENTITÉ tentée (username), PAS par IP : derrière le Wi-Fi d'un
@@ -30,6 +33,10 @@ class LoginRateThrottle(AnonRateThrottle):
         if not ident:
             ident = request.COOKIES.get('refresh_token') or self.get_ident(request)
         return self.cache_format % {'scope': self.scope, 'ident': (ident or '')[:150]}
+
+    def get_ident(self, request):
+        # DRF lirait X-Forwarded-For tel quel : le client y écrit ce qu'il veut.
+        return adresse_client(request) or super().get_ident(request)
 
 
 class SensitiveEndpointThrottle(UserRateThrottle):

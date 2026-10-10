@@ -103,56 +103,56 @@ def _set_auth_cookies(response, access_token, refresh_token):
 class LoginView(generics.GenericAPIView):
     """
     POST /api/v1/auth/login/
-    Protection double couche :
-      - Couche 1 (DRF)   : LoginRateThrottle → 5 req/15min par IP (avant toute DB)
-      - Couche 2 (axes)  : 5 échecs → blocage IP 15 min (persisté en DB, réponse JSON
-                           via AXES_LOCKOUT_CALLABLE=core.axes_utils.axes_lockout_callback)
-
-    Note axes 8 : quand l'IP est déjà bloquée, AxesMiddleware court-circuite la requête
-    AVANT que ce post() soit appelé → AXES_LOCKOUT_CALLABLE gère ce cas.
-    La vérification request.axes_locked_out ici est une sécurité supplémentaire.
+    Seuls les ÉCHECS comptent (apps/authentication/tentatives.py) :
+      - 5 échecs pour un compte depuis une adresse → ce compte est bloqué
+        15 min depuis cette adresse (axes, couple compte + IP) ;
+      - LOGIN_ECHECS_PAR_IP échecs depuis une adresse, tous comptes
+        confondus → l'adresse est bloquée.
+    Un blocage répond 429 avec le temps restant, que la page de connexion
+    affiche en compte à rebours. Une connexion réussie remet le compte à zéro.
     """
     serializer_class   = SIGATokenObtainPairSerializer
     permission_classes = [AllowAny]
-    throttle_classes   = [LoginRateThrottle]
 
     def post(self, request):
-        ip = request.META.get('REMOTE_ADDR', '?')
+        from . import tentatives
+        from core.ip_client import adresse_client
 
-        # Garde-fou : axes_locked_out peut être mis par le middleware si configuré ainsi
-        if getattr(request, 'axes_locked_out', False):
-            logger.warning('Login blocked (axes_locked_out) for IP=%s', ip)
-            return Response(
-                {'error': 'Trop de tentatives échouées. Accès bloqué pendant 15 minutes.'},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
+        ip       = adresse_client(request)
+        username = str(request.data.get('username') or '')
+
+        minutes = tentatives.adresse_bloquee(ip)
+        if minutes:
+            logger.warning('Login blocked (adresse) for IP=%s', ip)
+            return Response({'error': tentatives.message(minutes, pour_le_compte=False)},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
 
         serializer = self.get_serializer(data=request.data)
         try:
             serializer.is_valid(raise_exception=True)
         except Exception as exc:
-            # Quand axes verrouille au Nème échec, Django's authenticate() avale
-            # AxesBackendPermissionDenied et retourne None → SimpleJWT lève
-            # AuthenticationFailed. On détecte ce cas via axes.utils.is_already_locked.
-            try:
-                from axes.utils import is_already_locked
-                if is_already_locked(request):
-                    logger.warning('Login blocked (is_already_locked) for IP=%s', ip)
-                    return Response(
-                        {'error': 'Trop de tentatives échouées. Accès bloqué pendant 15 minutes.'},
-                        status=status.HTTP_429_TOO_MANY_REQUESTS,
-                    )
-            except Exception:
-                pass
+            # Axes refuse un compte bloqué en faisant échouer authenticate() :
+            # vu d'ici, c'est un mot de passe faux. On regarde donc la table
+            # après coup — y compris quand CET échec est celui qui bloque.
+            minutes = tentatives.compte_bloque(username, ip)
+            pour_le_compte = minutes is not None
+            if not pour_le_compte:
+                minutes = tentatives.adresse_bloquee(ip)
+            if minutes:
+                logger.warning('Login blocked (%s) for username=%s IP=%s',
+                               'compte' if pour_le_compte else 'adresse', username, ip)
+                return Response({'error': tentatives.message(minutes, pour_le_compte)},
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
 
             logger.warning('Login failed for username=%s IP=%s error=%s',
-                           request.data.get('username'), ip, type(exc).__name__)
+                           username, ip, type(exc).__name__)
             raise
 
+        tentatives.remettre_a_zero(username, ip)
         data     = serializer.validated_data
         response = Response({'user': data.pop('user')}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, data['access'], data['refresh'])
-        logger.info('Login success for username=%s IP=%s', request.data.get('username'), ip)
+        logger.info('Login success for username=%s IP=%s', username, ip)
 
         # Le journal d'audit écoute `user_logged_in` — mais ce signal n'est émis
         # que par `django.contrib.auth.login()`, qui ouvre une SESSION. Or on
@@ -583,29 +583,43 @@ class UserViewSet(viewsets.ModelViewSet):
 class LockedAttemptsView(generics.GenericAPIView):
     """
     GET /api/v1/auth/locked-attempts/
-    Retourne les IPs/comptes actuellement bloqués par axes
-    (failures >= AXES_FAILURE_LIMIT et dans la fenêtre de cooloff).
+    Retourne ce qui est actuellement bloqué, dans la fenêtre de cooloff :
+      - un compte depuis une adresse (somme des échecs du couple, tous
+        navigateurs confondus, >= AXES_FAILURE_LIMIT) ;
+      - une adresse entière (somme de tous ses échecs >= LOGIN_ECHECS_PAR_IP),
+        sans compte : `username` vaut null.
     """
     permission_classes = [IsAdminOrIT]
 
     def get(self, request):
         from axes.models import AccessAttempt
+        from django.db.models import Max, Sum
         from django.utils import timezone
         from datetime import timedelta
 
         limit         = getattr(settings, 'AXES_FAILURE_LIMIT', 5)
+        limit_ip      = getattr(settings, 'LOGIN_ECHECS_PAR_IP', 20)
         cooloff_td    = getattr(settings, 'AXES_COOLOFF_TIME', timedelta(minutes=15))
         cooloff       = cooloff_td.total_seconds() if isinstance(cooloff_td, timedelta) else cooloff_td * 3600
         since         = timezone.now() - timedelta(seconds=cooloff)
 
-        attempts = (
-            AccessAttempt.objects
-            .filter(failures_since_start__gte=limit, attempt_time__gte=since)
-            .order_by('-attempt_time')
+        recentes = AccessAttempt.objects.filter(attempt_time__gte=since)
+        comptes = list(
+            recentes.values('username', 'ip_address')
+            .annotate(failures=Sum('failures_since_start'), locked_at=Max('attempt_time'))
+            .filter(failures__gte=limit)
         )
+        adresses = list(
+            recentes.values('ip_address')
+            .annotate(failures=Sum('failures_since_start'), locked_at=Max('attempt_time'))
+            .filter(failures__gte=limit_ip)
+        )
+        for a in adresses:
+            a['username'] = None
+        attempts = sorted(comptes + adresses, key=lambda a: a['locked_at'], reverse=True)
 
         # Préchargement en une requête pour éviter les N+1
-        usernames = [a.username for a in attempts if a.username]
+        usernames = [a['username'] for a in attempts if a['username']]
         users_map = {
             u.username: u
             for u in User.objects.filter(username__in=usernames)
@@ -615,8 +629,8 @@ class LockedAttemptsView(generics.GenericAPIView):
         results = []
         for a in attempts:
             user_info = None
-            if a.username and a.username in users_map:
-                u = users_map[a.username]
+            if a['username'] and a['username'] in users_map:
+                u = users_map[a['username']]
                 user_info = {
                     'id':        u.pk,
                     'username':  u.username,
@@ -626,14 +640,14 @@ class LockedAttemptsView(generics.GenericAPIView):
                 }
 
             # Temps restant avant déblocage automatique
-            elapsed   = (now - a.attempt_time).total_seconds()
+            elapsed   = (now - a['locked_at']).total_seconds()
             remaining = max(0, int(cooloff - elapsed))
 
             results.append({
-                'ip_address': a.ip_address,
-                'username':   a.username,
-                'failures':   a.failures_since_start,
-                'locked_at':  a.attempt_time,
+                'ip_address': a['ip_address'],
+                'username':   a['username'],
+                'failures':   a['failures'],
+                'locked_at':  a['locked_at'],
                 'remaining_seconds': remaining,
                 'user':       user_info,
             })

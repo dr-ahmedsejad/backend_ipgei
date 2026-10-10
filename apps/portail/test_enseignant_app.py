@@ -25,7 +25,7 @@ def _groupe(inst):
     from apps.ipgei.models import Classe
     from apps.parametres.models import Niveau
     return Classe.objects.create(nom='MP A', institution=inst, annee_universitaire=ANNEE,
-                                 niveau=Niveau.objects.create(niveau='MP'), groupe='A')
+                                 niveau=Niveau.objects.get_or_create(niveau='MP')[0], groupe='A')
 
 
 def _inscrire(classe, matricules):
@@ -106,7 +106,8 @@ class EnseignantAppTest(APITestCase):
         sans = self.client.get(url, {'annee_universitaire': ANNEE}).data
         avec = self.client.get(url, {'annee_universitaire': ANNEE, 'tous': 1}).data
         self.assertEqual([r['statut'] for r in sans['rows']], ['Fait'])
-        self.assertEqual(sorted(r['statut'] for r in avec['rows']), ['Fait', 'Non fait', 'Reporté'])
+        # Jamais pointée (pointe_le vide) : « En attente », pas « Non fait ».
+        self.assertEqual(sorted(r['statut'] for r in avec['rows']), ['En attente', 'Fait', 'Reporté'])
         self.assertTrue(all(r['id'] and r['creneau'] == '08:00-09:30' for r in avec['rows']))
         # Seule la séance faite est payée : mêmes totaux avec ou sans `tous`.
         self.assertEqual((avec['total_heures'], avec['total_montant']),

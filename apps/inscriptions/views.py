@@ -25,6 +25,7 @@ from .serializers import (
     InscriptionElementSerializer, DerogationSerializer,
     GrilleFraisSerializer, CandidatBacSerializer,
 )
+from core.telechargement import entete_piece_jointe
 
 
 def _creer_inscriptions_pedagogiques(inscription_admin, user):
@@ -447,7 +448,7 @@ class InscriptionAdministrativeViewSet(InstitutionScopedMixin, viewsets.ModelVie
         matricule = getattr(insc.etudiant, 'matricule', '') or ''
         nom_fichier = f'{insc.recu_paiement}_{matricule}.pdf' if matricule else f'{insc.recu_paiement}.pdf'
         resp = HttpResponse(pdf, content_type='application/pdf')
-        resp['Content-Disposition'] = f'inline; filename="{nom_fichier}"'
+        resp['Content-Disposition'] = entete_piece_jointe(nom_fichier, inline=True)
         return resp
 
     @action(detail=False, methods=['post'], url_path='generer-progression')

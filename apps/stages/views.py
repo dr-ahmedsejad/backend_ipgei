@@ -13,6 +13,7 @@ from .models import ConventionStage, EvaluationStage, DerogationMedicale
 from .serializers import (
     ConventionStageSerializer, EvaluationStageSerializer, DerogationMedicaleSerializer,
 )
+from core.telechargement import entete_piece_jointe
 
 
 class ConventionStageViewSet(viewsets.ModelViewSet):
@@ -481,7 +482,7 @@ class ClassementStageExcelView(views.APIView):
             buf.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
 

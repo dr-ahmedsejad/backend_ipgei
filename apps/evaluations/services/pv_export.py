@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from apps.evaluations.models import ParametreJury
 from apps.evaluations.services.deliberation_semestre import DeliberationSemestreService
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -592,7 +593,7 @@ def build_pv_excel(pv):
         buf.getvalue(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Disposition'] = entete_piece_jointe(filename)
     return response
 
 
@@ -805,7 +806,7 @@ def build_pv_pdf(pv):
     parts   = ['PV', filiere_code, niveau_label(pv), periode, annee_pv(pv)]
     filename = '_'.join(p for p in parts if p) + '.pdf'
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Disposition'] = entete_piece_jointe(filename)
     return response
 
 
@@ -955,5 +956,5 @@ def build_pv_rapport_progression(pv):
     filiere_code = (pv.filiere.code if pv.filiere else None) or str(pv.filiere_id or 'X')
     filename = f'Rapport_progression_{filiere_code}_{niveau_actuel}.pdf'
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Disposition'] = entete_piece_jointe(filename)
     return response

@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from django.template.loader import get_template
 from rest_framework import status
 from rest_framework.response import Response
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -160,7 +161,7 @@ def build_emargement_excel(request):
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
     fn = f'emargement_{(filiere.code if filiere else filiere_id)}_N{niveau}_{semestre}.xlsx'
-    resp['Content-Disposition'] = f'attachment; filename="{fn}"'
+    resp['Content-Disposition'] = entete_piece_jointe(fn)
     return resp
 
 
@@ -493,7 +494,7 @@ def _collecte_excel_response(ems_data, session, type_note_label, anonymat, filen
         buf.read(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-    resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+    resp['Content-Disposition'] = entete_piece_jointe(filename)
     return resp
 
 

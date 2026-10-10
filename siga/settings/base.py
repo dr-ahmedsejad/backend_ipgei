@@ -396,14 +396,24 @@ CORS_ALLOW_HEADERS = [
 AXES_FAILURE_LIMIT        = config('AXES_FAILURE_LIMIT',    default=5,  cast=int)
 AXES_COOLOFF_TIME         = timedelta(minutes=config('AXES_COOLOFF_MINUTES', default=15, cast=int))
 AXES_LOCK_OUT_AT_FAILURE  = True
-AXES_RESET_ON_SUCCESS     = True
-# Verrou PAR COMPTE : 5 échecs sur un compte le bloquent 15 min. Plus de
-# verrou par IP seule : tout l'établissement sort par une même adresse
-# publique (Wi-Fi du campus), et cinq fautes de frappe d'étudiants
-# différents bloquaient tout le monde un quart d'heure. Même règle que le
-# SIGA privé (CDD).
-AXES_LOCKOUT_PARAMETERS   = [['username']]
+AXES_RESET_ON_SUCCESS     = True                   # sans effet en JWT : voir apps/authentication/tentatives.py
+# Le COUPLE compte + adresse : un étudiant qui se trompe ne bloque plus ses
+# camarades derrière la même adresse (le campus). L'adresse seule a son propre
+# garde-fou, LOGIN_ECHECS_PAR_IP, tous comptes confondus (comme à l'ISS).
+AXES_LOCKOUT_PARAMETERS   = [['username', 'ip_address']]
+# L'adresse réelle (X-Real-IP posé par nginx), pas celle du conteneur nginx.
+AXES_CLIENT_IP_CALLABLE   = 'core.ip_client.adresse_client'
+# Réessayer pendant le blocage ne le prolonge pas.
+AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT = False
+# Seuil large : des centaines d'étudiants partagent l'adresse du campus ; le
+# blocage par compte (5 échecs) reste la vraie protection.
+LOGIN_ECHECS_PAR_IP       = config('LOGIN_ECHECS_PAR_IP', default=300, cast=int)
 AXES_HTTP_RESPONSE_CODE   = 429
+
+# Cache des consultations étudiantes (notes, emploi du temps) : durée maximale
+# d'une copie, en secondes. Une écriture l'invalide avant (apps/portail/
+# cache_portail.py). 0 = cache coupé (retour immédiat à l'ancien comportement).
+PORTAIL_CACHE_SECONDES = config('PORTAIL_CACHE_SECONDES', default=600, cast=int)
 AXES_LOCKOUT_TEMPLATE     = None
 AXES_ENABLE_ADMIN         = True
 # Retourne du JSON 429 au lieu d'une page HTML quand l'IP est bloquée

@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -74,7 +75,7 @@ def _render_pdf(template_name: str, context: dict, filename: str) -> HttpRespons
         logger.error('pdfkit error %s: %s', template_name, exc)
         return HttpResponse(f'Erreur PDF : {exc}', status=500)
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Disposition'] = entete_piece_jointe(filename)
     return response
 
 

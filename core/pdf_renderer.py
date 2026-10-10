@@ -15,6 +15,7 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.template.loader import get_template
 from rest_framework.response import Response
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -74,5 +75,5 @@ def render_pdf_response(template_name, context, filename, orientation='Portrait'
         return Response({'error': f'Erreur génération PDF : {exc}'}, status=500)
 
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response['Content-Disposition'] = entete_piece_jointe(filename)
     return response

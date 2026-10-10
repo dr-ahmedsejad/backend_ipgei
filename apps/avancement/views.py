@@ -27,6 +27,7 @@ from apps.departement.models import Departement
 from apps.em.models import EM as EMModel, EM
 from apps.em.volumes import volumes_par_em
 from apps.parametres.models import Seance, Paiement
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -1188,8 +1189,11 @@ class SuiviPointageProfDetailView(APIView):
             from django.db.models import Q
             from django.utils import timezone
             sp_qs = sp_qs.filter(Q(commentaire='Fait') | Q(date_suivie__lte=timezone.localdate()))
-        for sp in sp_qs.select_related('em', 'type_seance_fk', 'creneau_fk').prefetch_related('departements').order_by(
-                'numero_semaine', 'date_suivie'):
+        from apps.suivi.statut_pointage import derniers_pointages, statut_affiche
+        sp_liste = list(sp_qs.select_related('em', 'type_seance_fk', 'creneau_fk')
+                        .prefetch_related('departements').order_by('numero_semaine', 'date_suivie'))
+        derniers = derniers_pointages(sp_liste) if tous else {}
+        for sp in sp_liste:
             type_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             dept_noms  = sorted(d.nom for d in sp.departements.all() if d.nom)
             rows.append({
@@ -1202,7 +1206,8 @@ class SuiviPointageProfDetailView(APIView):
                 'duree_creneau':  sp.duree_creneau or 0,
                 'taux_paiement':  sp.taux_paiement or 0,
                 'source':         'Suivi',
-                'statut':         sp.commentaire or 'Non fait',
+                # Avec `tous` : « En attente » si la séance n'est pas encore pointée.
+                'statut':         statut_affiche(sp, derniers.get(sp.pk)) if tous else (sp.commentaire or 'Non fait'),
                 # Pour contester une séance « Non fait » depuis le détail du mois.
                 'id':             sp.pk,
                 'creneau':        sp.creneau_fk.creneau if sp.creneau_fk_id else '',
@@ -1922,7 +1927,7 @@ class ChargePermanentsMensuelExcelView(APIView):
             buffer.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
 

@@ -14,6 +14,7 @@ from apps.absence.models import Presence
 from apps.reclamations.models import Reclamation
 from apps.reclamations.serializers import ReclamationCreateSerializer, ReclamationSerializer
 from .serializers import ProfilEtudiantSerializer, AbsenceEtudiantSerializer
+from core.telechargement import entete_piece_jointe
 
 # ── Suivi des générations PDF en cours ────────────────────────────────────────
 # Évite de lancer plusieurs wkhtmltopdf simultanément pour le même document.
@@ -84,6 +85,18 @@ class MonEmploiView(APIView):
     permission_classes = [IsEtudiant]
 
     def get(self, request):
+        # Copie gardée tant que les données ne changent pas (cache_portail.py).
+        # Sans semaine demandée, la semaine affichée dépend du jour : il entre
+        # dans la clé.
+        from django.utils import timezone
+        from .cache_portail import reponse_en_cache
+        etudiant = _get_etudiant(request)
+        semaine = request.query_params.get('semaine') or ''
+        parties = [etudiant.pk, _annee_demandee(request) or '', semaine,
+                   '' if semaine else timezone.localdate().isoformat()]
+        return reponse_en_cache('emploi', parties, lambda: self._calculer(request, etudiant))
+
+    def _calculer(self, request, etudiant):
         from collections import defaultdict
         from django.db.models import Max, Q
         from apps.suivi.models import Suivie
@@ -92,8 +105,6 @@ class MonEmploiView(APIView):
         from apps.ipgei.models import SemestreIPGEI
 
         from .ipgei_source import inscription_courante
-
-        etudiant = _get_etudiant(request)
 
         # LE CONTEXTE VIENT DE L'INSCRIPTION IPGEI, non de l'inscription
         # pédagogique du socle : cette dernière est vide depuis que l'IPGEI l'a
@@ -305,11 +316,18 @@ class MesNotesView(APIView):
     permission_classes = [IsEtudiant]
 
     def get(self, request):
+        # Copie gardée tant que les données ne changent pas (cache_portail.py) :
+        # une note saisie ou un jury validé l'invalide.
+        from .cache_portail import reponse_en_cache
+        etudiant = _get_etudiant(request)
+        return reponse_en_cache('notes', [etudiant.pk, _annee_demandee(request) or ''],
+                                lambda: self._calculer(request, etudiant))
+
+    def _calculer(self, request, etudiant):
         from apps.ipgei import services
 
         from .ipgei_source import inscriptions_de, note_en_ligne, notes_publiables
 
-        etudiant = _get_etudiant(request)
         lignes = []
         for inscription in inscriptions_de(etudiant, _annee_demandee(request)):
             seuil = services.seuil_applicable(
@@ -560,7 +578,7 @@ class TelechargerDirectView(APIView):
         # `inline` et non `attachment` : les gestionnaires de téléchargement
         # s'accrochent au second et tuent la requête de la page. Cf.
         # `core/download_middleware.py`.
-        reponse['Content-Disposition'] = f'inline; filename="{doc.numero_serie}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{doc.numero_serie}.pdf', inline=True)
         reponse['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         return reponse
 
@@ -602,7 +620,7 @@ class TelechargerDocumentView(APIView):
                 return Response({'detail': 'Fichier non disponible.'}, status=status.HTTP_404_NOT_FOUND)
 
             response = FileResponse(open(doc.fichier_pdf.path, 'rb'), content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="{os.path.basename(doc.fichier_pdf.name)}"'
+            response['Content-Disposition'] = entete_piece_jointe(os.path.basename(doc.fichier_pdf.name))
             response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
             response['Pragma'] = 'no-cache'
             return response

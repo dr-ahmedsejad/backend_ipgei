@@ -76,6 +76,7 @@ from .serializers import (
     SessionEvaluationIPGEISerializer, SignataireIPGEISerializer, SousGroupeTPSerializer,
     VersionArchiveSerializer,
 )
+from core.telechargement import entete_piece_jointe
 
 
 def _libelle_semestres(semaines) -> str:
@@ -1478,11 +1479,11 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
                              'spreadsheetml.sheet')
-            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.xlsx"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.xlsx')
         else:
             contenu = self._executer(secretariat.generer_pdf, session, niveau)
             reponse = HttpResponse(contenu, content_type='application/pdf')
-            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.pdf"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.pdf')
         return reponse
 
     @action(detail=True, methods=['post'], url_path='repartir-copies')
@@ -1549,14 +1550,14 @@ class SessionEvaluationIPGEIViewSet(_ErreurMetierMixin, ListModelMixin,
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
                              'spreadsheetml.sheet')
-            reponse['Content-Disposition'] =                 f'attachment; filename="{libelle}.xlsx"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.xlsx')
             return reponse
 
         contenu = self._executer(
             secretariat.generer_repartition_pdf, session, lots, niveau,
             matiere, epreuve)
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.pdf')
         return reponse
 
     @action(detail=True, methods=['post'], url_path='plafond')
@@ -1736,15 +1737,13 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
                              'spreadsheetml.sheet')
-            reponse['Content-Disposition'] = \
-                f'attachment; filename="collecte_{libelle}.xlsx"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'collecte_{libelle}.xlsx')
         else:
             contenu = self._executer(
                 collecte_notes.generer_pdf, semestre, classe, matieres,
                 type_note, anonymat)
             reponse = HttpResponse(contenu, content_type='application/pdf')
-            reponse['Content-Disposition'] = \
-                f'attachment; filename="collecte_{libelle}.pdf"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'collecte_{libelle}.pdf')
         return reponse
 
     @action(detail=False, methods=['get'], url_path='fiche-emargement')
@@ -1900,8 +1899,7 @@ class NoteViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSet):
         nom_classes = '-'.join(c.nom for c in classes)
         libelle = _nom_fichier(f'{nom_classes}_{semestre.code}_{type_note}')
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = (
-            f'attachment; filename="emargement_{libelle}.pdf"')
+        reponse['Content-Disposition'] = entete_piece_jointe(f'emargement_{libelle}.pdf')
         return reponse
 
     @action(detail=False, methods=['post'], url_path='importer',
@@ -2732,13 +2730,13 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
                              'spreadsheetml.sheet')
-            reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.xlsx')
             return reponse
 
         contenu = self._executer(pieces.generer_pdf, deliberation,
                                  base_url=request.build_absolute_uri('/')[:-1])
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.pdf')
         return reponse
 
     @action(detail=True, methods=['post'], url_path='ouvrir-rattrapage')
@@ -2866,7 +2864,7 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
         deliberation = self.get_object()
         contenu = pv.generer_pdf(deliberation, base_url=request.build_absolute_uri('/'))
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{_nom_pv(deliberation)}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{_nom_pv(deliberation)}.pdf')
         return reponse
 
     @action(detail=True, methods=['get'], url_path='detail-notes')
@@ -2899,8 +2897,7 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
                         + ', '.join(detail_notes.TRIS) + '.'})
         contenu = self._executer(detail_notes.generer_pdf, deliberation, tri)
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = (
-            f'attachment; filename="detail-notes-{_nom_pv(deliberation)}-{tri}.pdf"')
+        reponse['Content-Disposition'] = entete_piece_jointe(f'detail-notes-{_nom_pv(deliberation)}-{tri}.pdf')
         return reponse
 
     @action(detail=True, methods=['get'], url_path='pv-excel')
@@ -2913,7 +2910,7 @@ class DeliberationViewSet(_ErreurMetierMixin, InstitutionScopedMixin, ModelViewS
             contenu,
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        reponse['Content-Disposition'] = f'attachment; filename="{_nom_pv(deliberation)}.xlsx"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{_nom_pv(deliberation)}.xlsx')
         return reponse
 
 
@@ -3033,7 +3030,7 @@ class ConcoursCNIMViewSet(_ErreurMetierMixin, GenericViewSet):
             contenu,
             content_type='application/vnd.openxmlformats-officedocument.'
                          'spreadsheetml.sheet')
-        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.xlsx')
         return reponse
 
     @action(detail=False, methods=['post'], url_path='appliquer')
@@ -3105,13 +3102,13 @@ class ClassementS3ViewSet(_ErreurMetierMixin, GenericViewSet):
                 contenu,
                 content_type='application/vnd.openxmlformats-officedocument.'
                              'spreadsheetml.sheet')
-            reponse['Content-Disposition'] = f'attachment; filename="{libelle}.xlsx"'
+            reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.xlsx')
             return reponse
 
         contenu = self._executer(
             classement.generer_pdf, annee, niveau, institution, classe)
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.pdf')
         return reponse
 
 
@@ -4354,8 +4351,7 @@ class PermutationEtudiantViewSet(_WorkflowPermutationMixin, ModelViewSet):
             },
         )
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = (
-            'attachment; filename="demande-changement-de-classe.pdf"')
+        reponse['Content-Disposition'] = entete_piece_jointe('demande-changement-de-classe.pdf')
         return reponse
 
     @action(detail=False, methods=['post'], url_path='appliquer-maintenant')
@@ -4490,7 +4486,7 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
     def _reponse_pdf(self, doc, pdf: bytes):
         from django.http import HttpResponse
         reponse = HttpResponse(pdf, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{doc.numero_serie}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{doc.numero_serie}.pdf')
         # Un document officiel ne doit jamais etre servi depuis un cache
         # intermediaire : chaque tirage porte son propre numero.
         reponse['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -4732,7 +4728,7 @@ class DocumentIPGEIViewSet(_ErreurMetierMixin, ListModelMixin, RetrieveModelMixi
             f'{type_document}_' + (classe.nom if classe else f'{len(inscriptions)}_etudiants')
             + (f'_{semestre.code}' if semestre else ''))
         reponse = HttpResponse(contenu, content_type='application/pdf')
-        reponse['Content-Disposition'] = f'attachment; filename="{libelle}.pdf"'
+        reponse['Content-Disposition'] = entete_piece_jointe(f'{libelle}.pdf')
         reponse['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         # Le bilan voyage dans les en-têtes : le corps est le PDF lui-même, et
         # l'écran doit pouvoir dire « 39 sur 40 » sans seconde requête.

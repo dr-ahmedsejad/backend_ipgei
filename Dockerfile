@@ -43,6 +43,23 @@ RUN echo "deb http://deb.debian.org/debian bookworm contrib non-free non-free-fi
  && wkhtmltopdf --version \
  && fc-match "Arial"
 
+# ─── Client PostgreSQL 18 (pg_dump) ────────────────────────────
+# La sauvegarde manuelle chiffrée (apps/backup) et la publication vers le
+# miroir appellent pg_dump DANS ce conteneur : sans lui, « pg_dump
+# introuvable » (constaté le 10/10/2026). pg_dump doit être d'une version au
+# moins égale au serveur (postgres:18) ; Debian 12 ne fournit que la 15, qui
+# refuse un serveur 18 → dépôt officiel PostgreSQL (PGDG), client seul.
+RUN install -d /usr/share/postgresql-common/pgdg \
+ && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+ && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-18 \
+ && rm -rf /var/lib/apt/lists/* \
+ && pg_dump --version | grep -q " 18\." \
+ && pg_dump --version
+
 # ─── Hack zero-modif-code ──────────────────────────────────────
 # Le code Python utilise un chemin Windows hardcode :
 #   r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe'

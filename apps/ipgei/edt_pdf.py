@@ -21,6 +21,7 @@ from django.utils.formats import date_format
 
 from apps.parametres.models import Creneau, Jour
 from core.types_seance import TYPES_EPREUVE
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -225,7 +226,7 @@ def reponse_pdf(template, contexte, nom_fichier):
         return Response({'error': f'Erreur génération PDF : {exc}'}, status=500)
 
     reponse = HttpResponse(pdf, content_type='application/pdf')
-    reponse['Content-Disposition'] = f'attachment; filename="{nom_fichier}"'
+    reponse['Content-Disposition'] = entete_piece_jointe(nom_fichier)
     return reponse
 
 

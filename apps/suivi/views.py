@@ -26,6 +26,8 @@ from .serializers import (
     SuiviePointageSerializer, ChargeInstitutionSerializer,
 )
 from ..emplois.models import Emplois, EmploisArchive
+from django.utils import timezone
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -1194,7 +1196,7 @@ class SuivieViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin, 
         fn_parts = [p for p in fn_parts if p]
         filename = '_'.join(fn_parts) + f"_S{semaine_num}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
 
@@ -1222,6 +1224,15 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         if self.action in ('grille', 'semaines', 'reclamer', 'ems_prof'):
             return [IsAuthenticated()]
         return super().get_permissions()
+
+    def perform_update(self, serializer):
+        # Statut saisi dans le formulaire = pointage (heure retenue).
+        if 'commentaire' in serializer.validated_data:
+            serializer.save(pointe_le=timezone.now())
+            logger.info('[%s] UPDATE SuiviePointage#%s (pointage) by user=%s',
+                        self.__class__.__name__, serializer.instance.pk, self.request.user.username)
+            return
+        super().perform_update(serializer)
 
     # ── Nombre de semestres actifs (carte « Emplois » du tableau de bord) ────
     @action(detail=False, methods=['get'], url_path='semestres-actifs')
@@ -1364,6 +1375,9 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 contestations[_cle(r['prof_id'], r['annee_universitaire'], r['type_semestre'],
                                    r['numero_semaine'], r['em_id'], r['jour'], r['creneau'])] = r['statut']
 
+        from .statut_pointage import derniers_pointages, statut_affiche
+        derniers = derniers_pointages(qs_seances)
+
         grille = defaultdict(lambda: defaultdict(list))
         for sp in qs_seances:
             if not sp.creneau_fk_id:
@@ -1384,6 +1398,9 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 'salle_nom':              sp.salle.nom if sp.salle else None,
                 'dept_noms':              dept_noms,
                 'commentaire':            sp.commentaire,
+                # « Fait », « Reporté », « Non fait » (constaté) ou « En attente »
+                # (pas encore pointée) — `commentaire` reste la valeur brute.
+                'statut':                 statut_affiche(sp, derniers.get(sp.pk)),
                 'numero_semaine':         sp.numero_semaine,
                 'reclamation_statut':     contestations.get(_cle(
                     sp.prof_id, sp.annee_universitaire, sp.type_semestre, sp.numero_semaine, sp.em_id,
@@ -1580,7 +1597,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         slug = target_label.replace(' ', '_').replace('/', '_')
         filename = f"emploi_{mode}_{slug}_sem{semaine_num}.pdf"
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── PATCH /api/v1/suivi/pointages/{id}/toggle/ ────────────────────────
@@ -1588,7 +1605,8 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
     def toggle_commentaire(self, request, pk=None):
         sp = self.get_object()
         sp.commentaire = 'Fait' if sp.commentaire == 'Non fait' else 'Non fait'
-        sp.save(update_fields=['commentaire'])
+        sp.pointe_le = timezone.now()   # heure du pointage (statut_pointage.py)
+        sp.save(update_fields=['commentaire', 'pointe_le'])
         return Response({'id': sp.pk, 'commentaire': sp.commentaire})
 
     # ── POST /api/v1/suivi/pointages/bulk-update/ ─────────────────────────
@@ -1625,13 +1643,16 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         # Capture des anciens commentaires AVANT modification (pour audit per-row).
         old_commentaires = {pk: sp.commentaire for pk, sp in sps.items()}
         to_update = []
+        maintenant = timezone.now()
         for u in updates:
             sp = sps.get(u.get('id'))
             if sp and u.get('commentaire') in ('Fait', 'Non fait', 'Reporté'):
                 sp.commentaire = u['commentaire']
+                # Ligne envoyée = séance vue au pointage, même laissée « Non fait ».
+                sp.pointe_le = maintenant
                 to_update.append(sp)
         if to_update:
-            SuiviePointage.objects.bulk_update(to_update, ['commentaire'])
+            SuiviePointage.objects.bulk_update(to_update, ['commentaire', 'pointe_le'])
             # Audit per-row : bulk_update ne declenche pas de signal. Sans ce
             # log, le drawer historique de chaque pointage afficherait juste
             # l'aggregat BULK_UPDATE sans pouvoir remonter au detail.
@@ -1884,7 +1905,7 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
             return Response({'error': f'Erreur generation PDF : {exc}'}, status=500)
 
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── GET /api/v1/suivi/pointages/pdf-individuel/ ───────────────────────

@@ -23,6 +23,7 @@ from .serializers import (
     VacationSerializer, VacationCreateSerializer,
     SurveillanceSerializer,
 )
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -843,7 +844,7 @@ class VacationViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin
             buffer.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── PDF : État de vacation ────────────────────────────────────────────────
@@ -1219,7 +1220,7 @@ class VacationViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin
             buffer.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── PDF : Fiches individuelles (1 page par vacataire) ─────────────────────

@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
@@ -13,6 +13,7 @@ from .models import DocumentOfficiel, RegistreDiplome
 from .serializers import (
     DocumentOfficielSerializer, RegistreDiplomeSerializer, DocumentVerificationSerializer,
 )
+from core.telechargement import entete_piece_jointe
 
 
 class VerificationThrottle(AnonRateThrottle):
@@ -146,10 +147,62 @@ class DocumentOfficielViewSet(InstitutionScopedMixin, viewsets.ReadOnlyModelView
             sem_code = _sem.code_semestre if _sem else str(semestre_id)
         fname = '_'.join(p for p in (type_doc, sem_code, fil_code, (annee or '').replace('-', '_')) if p) + '.pdf'
         resp = HttpResponse(pdf_bytes, content_type='application/pdf')
-        resp['Content-Disposition'] = f'inline; filename="{fname}"'
+        resp['Content-Disposition'] = entete_piece_jointe(fname, inline=True)
         resp['X-Generated'] = str(nb_ok)
         resp['X-Total']     = str(nb_total)
         resp['Access-Control-Expose-Headers'] = 'X-Generated, X-Total'
+        return resp
+
+    # Droit vérifié dans l'action (ipgei_documents), pas celui du registre.
+    @action(detail=False, methods=['get', 'post'], url_path='releves-etudiant',
+            permission_classes=[IsAuthenticated])
+    def releves_etudiant(self, request):
+        """Les relevés de notes d'un ou de plusieurs étudiants, en un PDF.
+
+        GET  ?etudiant=ID          : ses semestres, avec moyenne et décision (aperçu).
+        POST {etudiants: [ID, ...]} (ou {etudiant: ID}) : leurs relevés (semestres
+             qui ont des résultats), étudiant par étudiant dans l'ordre donné,
+             fusionnés. Relevés IPGEI : voir releves_etudiant.py.
+        """
+        from apps.absence.models import Etudiant
+        from .releves_etudiant import generer_releves_etudiants, semestres_de
+
+        source = request.query_params if request.method == 'GET' else (request.data or {})
+        # IPGEI : le droit des documents officiels IPGEI (relevés compris).
+        droit = 'voir' if request.method == 'GET' else 'modifier'
+        if not (request.user.role == 'admin' or request.user.is_superuser
+                or _has_access(request.user, 'ipgei_documents', droit)):
+            raise PermissionDenied(f"Vous n'avez pas le droit « {droit} » sur les documents IPGEI.")
+        ids = source.get('etudiants') if request.method == 'POST' else None
+        if not ids:
+            ids = [source.get('etudiant')]
+        try:
+            ids = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return Response({'detail': 'Étudiant introuvable.'}, status=status.HTTP_400_BAD_REQUEST)
+        trouves = Etudiant.objects.in_bulk(ids)
+        if not ids or any(i not in trouves for i in ids):
+            return Response({'detail': 'Étudiant introuvable.'}, status=status.HTTP_400_BAD_REQUEST)
+        etudiants = [trouves[i] for i in dict.fromkeys(ids)]      # ordre donné, sans doublon
+
+        if request.method == 'GET':
+            etudiant = etudiants[0]
+            return Response({'etudiant': {'id': etudiant.pk, 'matricule': etudiant.matricule,
+                                          'nom': etudiant.nom},
+                             'semestres': semestres_de(etudiant)})
+        try:
+            pdf_bytes, bilan = generer_releves_etudiants(etudiants, request.user)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        from django.http import HttpResponse
+        resp = HttpResponse(pdf_bytes, content_type='application/pdf')
+        nom = (f'releves_{etudiants[0].matricule}.pdf' if len(etudiants) == 1
+               else f'releves_{len(etudiants)}_etudiants.pdf')
+        resp['Content-Disposition'] = entete_piece_jointe(nom, inline=True)
+        resp['X-Generated'] = str(sum(b['releves'] for b in bilan))
+        resp['X-Total'] = str(sum(len(b['semestres']) for b in bilan))
+        resp['X-Etudiants-Sans-Releve'] = ','.join(b['matricule'] for b in bilan if not b['releves'])
+        resp['Access-Control-Expose-Headers'] = 'X-Generated, X-Total, X-Etudiants-Sans-Releve'
         return resp
 
     @action(detail=True, methods=['post'], url_path='regenerer')
@@ -234,7 +287,7 @@ class DocumentOfficielViewSet(InstitutionScopedMixin, viewsets.ReadOnlyModelView
             doc.save(update_fields=['premiere_generation', 'fichier_pdf'])
 
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         # Anti-cache navigateur : sans ça, un re-téléchargement à la même URL peut
         # resservir l'ancien PDF gardé par le navigateur ("je vois pas de changement").
         response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -346,7 +399,7 @@ class RegistreDiplomeViewSet(InstitutionScopedMixin, viewsets.ReadOnlyModelViewS
         wb.save(buf)
         buf.seek(0)
         resp = HttpResponse(buf.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        resp['Content-Disposition'] = 'attachment; filename="registre_diplomes.xlsx"'
+        resp['Content-Disposition'] = entete_piece_jointe('registre_diplomes.xlsx')
         return resp
 
     @action(detail=False, methods=['get'], url_path='export-ministere')
@@ -421,5 +474,5 @@ class RegistreDiplomeViewSet(InstitutionScopedMixin, viewsets.ReadOnlyModelViewS
         wb.save(buf)
         buf.seek(0)
         resp = HttpResponse(buf.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        resp['Content-Disposition'] = 'attachment; filename="diplomes_licence_L3_ministere.xlsx"'
+        resp['Content-Disposition'] = entete_piece_jointe('diplomes_licence_L3_ministere.xlsx')
         return resp

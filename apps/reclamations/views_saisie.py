@@ -30,6 +30,7 @@ from apps.portail import ipgei_enseignant as source
 from core.permissions import IsAdminOrIT, IsEnseignant
 
 from .models import SaisieNoteEnLigne
+from core.telechargement import entete_piece_jointe
 
 
 def _prof(request):
@@ -227,6 +228,6 @@ class SaisieExportView(APIView):
         reponse = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.'
                          'spreadsheetml.sheet')
-        reponse['Content-Disposition'] = 'attachment; filename="saisie-en-ligne.xlsx"'
+        reponse['Content-Disposition'] = entete_piece_jointe('saisie-en-ligne.xlsx')
         classeur.save(reponse)
         return reponse

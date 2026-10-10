@@ -157,6 +157,7 @@ from core.mixins import AuditMixin, SelectAllMixin
 from core.pagination import StandardPagination
 
 from .models import Etudiant, Presence, SeuilAbsence
+from core.telechargement import entete_piece_jointe
 
 
 class EtudiantFilter(df_filters.FilterSet):
@@ -522,7 +523,7 @@ class EtudiantViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
             buf.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = 'attachment; filename="etudiants.xlsx"'
+        response['Content-Disposition'] = entete_piece_jointe('etudiants.xlsx')
         return response
 
     @action(detail=False, methods=['post'], url_path='importer', parser_classes=[MultiPartParser])
@@ -1090,7 +1091,7 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
         pdf      = self._make_pdf(html)
         filename = f"fiches-presence-S{semaine}-{annee}.pdf".replace(' ', '_')
         response = HttpResponse(pdf, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── Rapport HTML par département (une page par étudiant) ──────────────────
@@ -1163,7 +1164,7 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
         pdf      = self._make_pdf(html)
         filename = f"rapport-absences-{dep_nom}-{annee}.pdf".replace(' ', '_')
         response = HttpResponse(pdf, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
     # ── Rapport HTML par étudiant ─────────────────────────────────────────────
@@ -1223,7 +1224,7 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
         pdf      = self._make_pdf(html)
         filename = f"rapport-absences-{etudiant.matricule}-{annee}.pdf".replace(' ', '_')
         response = HttpResponse(pdf, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response
 
 

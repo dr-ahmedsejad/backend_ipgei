@@ -13,6 +13,7 @@ from core.mixins import AuditMixin, InstitutionScopedMixin, DepartementScopedMix
 from core.pagination import StandardPagination
 from .models import Emplois
 from .serializers import EmploisSerializer, EmploisCreateSerializer, DisponibiliteCheckSerializer
+from core.telechargement import entete_piece_jointe
 
 logger = logging.getLogger('siga')
 
@@ -731,5 +732,5 @@ class EmploisViewSet(InstitutionScopedMixin, DepartementScopedMixin, AuditMixin,
 
         filename = f"emploi_{dept.nom}_{semestre.semestre}.pdf".replace(' ', '_')
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = entete_piece_jointe(filename)
         return response

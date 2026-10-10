@@ -14,8 +14,9 @@
 # └──────────────────────────────────────────────────────────────────────────┘
 #
 # Écarts assumés par rapport à la pile SIGA :
-#   • pas de Redis — Django retombe sur son cache mémoire dès que REDIS_URL
-#     est absent, et la mémoire est comptée sur ce serveur ;
+#   • un Redis MINIMAL (10/10/2026) — cache seulement : 32 Mo au plus, rien
+#     sur disque. Partagé par les workers gunicorn, il rend justes les
+#     limites de connexion et le cache des notes / emploi du temps ;
 #   • pas d'Adminer — un client SQL exposé sur une machine de production est
 #     une porte de plus à surveiller ; `docker exec ipgei-db psql` suffit ;
 #   • une base à part, plutôt que celle de SIGA : partager `siga-db` ferait
@@ -74,6 +75,28 @@ services:
       start_period: 30s
     # Aucun port publié : la base n'est jointe que par le réseau du projet.
 
+  # ─── Redis (cache seulement) ──────────────────────────────────────────────
+  # Copies et compteurs, jamais une donnée : le perdre ne perd rien (Django
+  # recalcule). 32 Mo au plus, les plus anciennes clés partent d'elles-mêmes.
+  redis:
+    image: redis:7-alpine
+    container_name: ipgei-redis
+    restart: always
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 32mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   # ─── Django ───────────────────────────────────────────────────────────────
   backend:
     build:
@@ -89,6 +112,8 @@ services:
       options: { max-size: "10m", max-file: "5" }
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       # Le profil `docker` n'impose pas HTTPS — c'est celui qui convient ici.
@@ -133,7 +158,8 @@ services:
       AXES_FAILURE_LIMIT:   "5"
       AXES_COOLOFF_MINUTES: "15"
       BACKUP_BASE_DIR: /app/backups
-      # REDIS_URL volontairement absent → cache mémoire locale.
+      # Cache partagé par les workers (voir le service redis).
+      REDIS_URL: redis://redis:6379/1
     volumes:
       - ../media:/app/media
       - ../../backups:/app/backups

@@ -55,6 +55,10 @@ class SuiviePointage(models.Model):
     type_semestre       = models.CharField(max_length=10, blank=True, default='I')
     duree_creneau       = models.FloatField(null=True, blank=True)
     taux_paiement       = models.FloatField(null=True, blank=True)
+    # Heure du dernier pointage (statut saisi par le surveillant / le DE) :
+    # distingue un vrai « Non fait » d'une séance pas encore pointée
+    # (voir apps/suivi/statut_pointage.py).
+    pointe_le           = models.DateTimeField(null=True, blank=True)
     reclamation_motif   = models.TextField(blank=True, default='')
     reclamation_statut  = models.CharField(
         max_length=20, blank=True, default='',
