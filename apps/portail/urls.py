@@ -1,4 +1,6 @@
 from django.urls import path
+from .views_accueil import AccueilView
+from .accueil_enseignant import AccueilEnseignantView
 
 from apps.reclamations.views_seance import ReclamerSeanceView
 
@@ -20,6 +22,8 @@ urlpatterns = [
     path('reclamer-seance/',                ReclamerSeanceView.as_view(),     name='portail-reclamer-seance'),
     path('semaines/',                        SemaniesEtudiantView.as_view(),   name='portail-semaines'),
     path('profil/',                         MonProfilView.as_view(),          name='portail-profil'),
+    path('accueil/',                       AccueilView.as_view(),            name='portail-accueil'),
+    path('enseignant/accueil/',            AccueilEnseignantView.as_view(),  name='portail-enseignant-accueil'),
     path('emploi-du-temps/',                MonEmploiView.as_view(),          name='portail-emploi'),
     path('absences/',                       MesAbsencesView.as_view(),        name='portail-absences'),
     path('notes/',                          MesNotesView.as_view(),           name='portail-notes'),

@@ -29,6 +29,12 @@ class Notification(models.Model):
     class Meta:
         db_table = 'notifications_notification'
         ordering = ['-created_at']
+        indexes = [
+            # Cloche : notifications non lues d'un utilisateur.
+            models.Index(fields=['destinataire', 'lue'], name='notif_dest_lue_idx'),
+            # envoyer_push / dernière notification : les plus récentes.
+            models.Index(fields=['created_at'], name='notif_created_idx'),
+        ]
 
     def __str__(self):
         return f'[{self.type}] {self.titre} → {self.destinataire}'

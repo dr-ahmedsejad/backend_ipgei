@@ -27,6 +27,11 @@ class Suivie(models.Model):
     class Meta:
         db_table = 'suivi_suivie'
         ordering = ['-annee_universitaire', '-numero_semaine']
+        indexes = [
+            # Emploi du temps d'un étudiant : son groupe, l'année, la semaine.
+            models.Index(fields=['departement', 'annee_universitaire', 'numero_semaine'],
+                         name='suivie_dept_annee_sem_idx'),
+        ]
 
     def save(self, *args, **kwargs):
         # Auto-fill duree_creneau et taux_paiement si non renseignes
