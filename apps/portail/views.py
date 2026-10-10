@@ -279,6 +279,7 @@ class MesAbsencesView(APIView):
         etudiant = _get_etudiant(request)
         qs = Presence.objects.select_related(
             'suivi__creneau_fk', 'suivi__em', 'suivi__prof', 'suivi__jour_fk',
+            'suivi__type_seance_fk',   # lu par le serializer : sinon 1 requête par absence
         ).filter(etudiant=etudiant).exclude(statut=0).order_by(
             '-suivi__annee_universitaire', '-suivi__numero_semaine', 'suivi__jour_fk__jour'
         )

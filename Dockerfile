@@ -83,4 +83,11 @@ EXPOSE 8000
 
 # ─── Demarrage ─────────────────────────────────────────────────
 # Migrations + collectstatic au demarrage, puis gunicorn.
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn siga.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"]
+# gthread : chaque worker sert GUNICORN_THREADS requetes a la fois (une requete
+# qui attend PostgreSQL ne bloque plus le worker). 3 x 4 = 12 requetes
+# simultanees pour la memoire de 3 workers — le VPS mutualise est juste en RAM.
+# Retour a l'ancien comportement sans reconstruire : GUNICORN_THREADS=1 dans
+# deploy/.env puis `docker compose -f docker-compose.ipgei.yml up -d backend`.
+# --max-requests : chaque worker est recycle apres ~2000 requetes (fuites
+# memoire eventuelles), en decale (jitter) pour ne jamais tous redemarrer ensemble.
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn siga.wsgi:application --bind 0.0.0.0:8000 --worker-class gthread --workers ${GUNICORN_WORKERS:-3} --threads ${GUNICORN_THREADS:-4} --timeout 120 --max-requests 2000 --max-requests-jitter 200"]

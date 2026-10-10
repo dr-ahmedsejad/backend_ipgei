@@ -303,6 +303,35 @@ class PortailIPGEITest(TestCase):
         self.assertIn('Presence', source)
         self.assertNotIn('AbsenceSeance', source)
 
+    def test_les_absences_ne_coutent_pas_une_requete_chacune(self):
+        """Le type de séance est chargé avec le reste : le nombre de requêtes
+        ne croît plus avec le nombre d'absences (1 de plus par absence avant)."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from apps.absence.models import Presence
+        from apps.parametres.models import Seance
+        from apps.portail.views import MesAbsencesView
+        from apps.suivi.models import Suivie
+
+        cours = Seance.objects.create(type_seance='Cours')
+
+        def absences(n):
+            for i in range(n):
+                suivi = Suivie.objects.create(institution=self.inst, annee_universitaire=self.annee,
+                                              numero_semaine=i + 1, type_seance_fk=cours)
+                Presence.objects.create(suivi=suivi, etudiant=self.etudiant, statut=1)
+            with CaptureQueriesContext(connection) as q:
+                r = self._appeler(MesAbsencesView)
+                r.render()
+            return r, len(q)
+
+        r2, n2 = absences(2)
+        r6, n6 = absences(4)
+        self.assertEqual(len(r6.data), 6)
+        self.assertEqual({a['suivi_type'] for a in r6.data}, {'Cours'})
+        self.assertEqual(n6, n2)
+
     # ── 7. Le registre distingue enfin les semestres ────────────────────────
     def test_le_registre_retient_le_semestre_du_releve(self):
         """

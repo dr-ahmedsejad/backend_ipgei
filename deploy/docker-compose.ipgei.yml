@@ -96,6 +96,9 @@ services:
       # navigateur refuse d'émettre en clair : personne ne pourrait se connecter.
       DJANGO_SETTINGS_MODULE: siga.settings.docker
       DEBUG: "False"
+      # gunicorn (voir Dockerfile) : 3 workers x 4 threads par defaut.
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
       SECRET_KEY: ${SECRET_KEY:?definir SECRET_KEY dans .env}
 
       # Django compare le NOM D'HÔTE seul : le port n'a pas sa place ici.
