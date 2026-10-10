@@ -1341,6 +1341,29 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
         if scope_dept_ids is not None:
             qs_seances = qs_seances.filter(departements__in=scope_dept_ids).distinct()
 
+        # Les contestations déposées en ligne (portail enseignant, app) vivent
+        # dans `ReclamationSeance`, SANS clé étrangère : on les retrouve par la
+        # clé naturelle de la séance (l'identifiant du pointage n'est
+        # qu'indicatif — une publication peut le changer). La grille montre
+        # l'état de la dernière, sinon l'ancien champ du pointage.
+        from apps.reclamations.models import ReclamationSeance
+        qs_seances = list(qs_seances)
+
+        def _cle(prof_id, annee, ts_, semaine, em_id, jour, creneau):
+            return (prof_id, annee or '', ts_ or '', semaine or 0, em_id, jour or '', creneau or '')
+
+        contestations = {}
+        profs = {sp.prof_id for sp in qs_seances if sp.prof_id}
+        if profs:
+            for r in (ReclamationSeance.objects
+                      .filter(prof_id__in=profs,
+                              annee_universitaire__in={sp.annee_universitaire for sp in qs_seances})
+                      .order_by('date_soumission', 'pk')
+                      .values('prof_id', 'annee_universitaire', 'type_semestre', 'numero_semaine',
+                              'em_id', 'jour', 'creneau', 'statut')):
+                contestations[_cle(r['prof_id'], r['annee_universitaire'], r['type_semestre'],
+                                   r['numero_semaine'], r['em_id'], r['jour'], r['creneau'])] = r['statut']
+
         grille = defaultdict(lambda: defaultdict(list))
         for sp in qs_seances:
             if not sp.creneau_fk_id:
@@ -1362,7 +1385,10 @@ class SuiviePointageViewSet(InstitutionScopedMixin, DepartementScopedMixin, Audi
                 'dept_noms':              dept_noms,
                 'commentaire':            sp.commentaire,
                 'numero_semaine':         sp.numero_semaine,
-                'reclamation_statut':     sp.reclamation_statut,
+                'reclamation_statut':     contestations.get(_cle(
+                    sp.prof_id, sp.annee_universitaire, sp.type_semestre, sp.numero_semaine, sp.em_id,
+                    getattr(sp.jour_fk, 'jour', ''), getattr(sp.creneau_fk, 'creneau', ''),
+                )) or sp.reclamation_statut,
             })
 
         creneaux_used = list(

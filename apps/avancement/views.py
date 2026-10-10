@@ -1145,6 +1145,10 @@ class SuiviPointageProfDetailView(APIView):
         annee   = request.query_params.get('annee_universitaire')
         prof_id = request.query_params.get('prof')
         ts      = request.query_params.get('type_semestre')  # 'I' ou 'P'
+        # `tous=1` (app enseignant) : aussi les séances « Non fait » / « Reporté »
+        # déjà passées, sans montant, pour le détail mois par mois. Les totaux ne
+        # comptent toujours que ce qui est payé (Fait + vacations).
+        tous    = request.query_params.get('tous') in ('1', 'true')
 
         if getattr(request.user, 'role', None) == 'enseignant':
             try:
@@ -1172,13 +1176,20 @@ class SuiviPointageProfDetailView(APIView):
 
         rows = []
 
-        # 1. SuiviePointage (Fait) — filtre par type_semestre
-        sp_filter = dict(prof_id=prof_id, annee_universitaire=annee, commentaire='Fait')
+        # 1. SuiviePointage (Fait ; avec `tous`, aussi les séances passées non
+        # faites ou reportées) — filtre par type_semestre
+        sp_filter = dict(prof_id=prof_id, annee_universitaire=annee)
+        if not tous:
+            sp_filter['commentaire'] = 'Fait'
         if ts:
             sp_filter['type_semestre'] = ts
-        for sp in SuiviePointage.objects.filter(
-            **sp_filter
-        ).select_related('em', 'type_seance_fk').prefetch_related('departements').order_by('numero_semaine', 'date_suivie'):
+        sp_qs = SuiviePointage.objects.filter(**sp_filter)
+        if tous:
+            from django.db.models import Q
+            from django.utils import timezone
+            sp_qs = sp_qs.filter(Q(commentaire='Fait') | Q(date_suivie__lte=timezone.localdate()))
+        for sp in sp_qs.select_related('em', 'type_seance_fk', 'creneau_fk').prefetch_related('departements').order_by(
+                'numero_semaine', 'date_suivie'):
             type_label = sp.type_seance_fk.type_seance if sp.type_seance_fk_id and sp.type_seance_fk else ''
             dept_noms  = sorted(d.nom for d in sp.departements.all() if d.nom)
             rows.append({
@@ -1191,6 +1202,10 @@ class SuiviPointageProfDetailView(APIView):
                 'duree_creneau':  sp.duree_creneau or 0,
                 'taux_paiement':  sp.taux_paiement or 0,
                 'source':         'Suivi',
+                'statut':         sp.commentaire or 'Non fait',
+                # Pour contester une séance « Non fait » depuis le détail du mois.
+                'id':             sp.pk,
+                'creneau':        sp.creneau_fk.creneau if sp.creneau_fk_id else '',
             })
 
         # 2. Vacations — restreintes aux dates du semestre si type_semestre fourni
@@ -1214,12 +1229,14 @@ class SuiviPointageProfDetailView(APIView):
                 'duree_creneau':  v.duree or 0,
                 'taux_paiement':  v.taux_paiement or 0,
                 'source':         'Vacation',
+                'statut':         'Fait',
             })
 
         rows.sort(key=lambda r: (r['numero_semaine'] or 0, r['date_suivie'] or ''))
 
-        total_heures  = sum(r['duree_creneau'] for r in rows)
-        total_montant = sum(r['duree_creneau'] * r['taux_paiement'] for r in rows)
+        payees = [r for r in rows if r['statut'] == 'Fait']
+        total_heures  = sum(r['duree_creneau'] for r in payees)
+        total_montant = sum(r['duree_creneau'] * r['taux_paiement'] for r in payees)
 
         return Response({
             'rows':           rows,
