@@ -11,6 +11,7 @@ TYPE_NOTIFICATION_CHOICES = [
     ('evaluation',     'Évaluation'),
     ('document',       'Document'),
     ('stage',          'Stage'),
+    ('annonce',        'Annonce'),
 ]
 
 

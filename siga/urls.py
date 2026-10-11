@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/v1/stages/',       include('apps.stages.urls')),
     path('api/v1/documents/',    include('apps.documents.urls')),
     path('api/v1/notifications/', include('apps.notifications.urls')),
+    path('api/v1/annonces/',      include('apps.annonces.urls')),
     # Portail étudiant
     path('api/v1/portail/',       include('apps.portail.urls')),
     path('api/v1/reclamations/',  include('apps.reclamations.urls')),
