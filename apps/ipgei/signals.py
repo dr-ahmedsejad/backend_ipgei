@@ -173,3 +173,31 @@ def _semaine_socle_touchee(sender, instance, created=None, **kwargs):
     _A_REFLETER.add(cle)
     if premier:
         transaction.on_commit(_refleter_calendrier)
+
+
+@receiver(post_save, sender=SemestreIPGEI, dispatch_uid='ipgei_decalage_semestre')
+def _decalage_du_semestre(sender, instance, **kwargs):
+    """Descend le décalage de rentrée sur les départements du niveau.
+
+    Le socle convertit le numéro de semaine à partir de
+    `Departement.decalage_impair` / `decalage_pair`, un champ par groupe. Le
+    régler une fois sur le semestre et le laisser descendre évite la quinzaine
+    de saisies identiques — et l'oubli silencieux qui irait avec.
+
+    Après le commit : une répétition en transaction annulée ne doit pas laisser
+    de trace sur les départements, et la propagation n'a de sens que si le
+    semestre est bien enregistré.
+    """
+    from . import services
+
+    def propager():
+        try:
+            corriges = services.appliquer_decalage(instance)
+            if corriges:
+                logger.info('Décalage %s %s = %s semaine(s) → %s département(s)',
+                            instance.annee_universitaire, instance.code,
+                            instance.decalage_semaines, corriges)
+        except Exception:
+            logger.exception('Propagation du décalage impossible pour %s', instance)
+
+    transaction.on_commit(propager)

@@ -234,6 +234,7 @@ class SemestreIPGEISerializer(serializers.ModelSerializer):
             'id', 'institution', 'code', 'annee_universitaire', 'date_debut', 'date_fin',
             'nb_semaines', 'est_cloture', 'rang', 'libelle_annee', 'niveaux',
             'type_semestre', 'nb_semaines_generees', 'calendrier',
+            'decalage_semaines',
         ]
 
     def get_nb_semaines_generees(self, obj) -> int:

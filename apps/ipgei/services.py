@@ -1983,6 +1983,41 @@ _TYPE_SEMAINE_SOCLE = {
 
 
 @transaction.atomic
+def appliquer_decalage(semestre: SemestreIPGEI) -> int:
+    """Recopie le décalage du semestre sur les départements de son niveau.
+
+    Le socle convertit le numéro global en numéro pédagogique à partir de
+    `Departement.decalage_impair` / `decalage_pair` — c'est ainsi que les
+    fiches de présence affichent déjà « semaine 1 » là où la base dit 5. Mais
+    ce champ vit sur CHAQUE groupe : une quinzaine de lignes pour les MPSI,
+    sous-groupes compris, qu'il faudrait saisir une à une sans qu'un oubli se
+    voie nulle part.
+
+    Le décalage se règle donc une fois, sur le semestre, et descend d'ici.
+
+    Seule la colonne de la PARITÉ du semestre est touchée : poser un retard en
+    S1 ne doit rien changer au S2 de la même promotion, qui reprend à sa date.
+
+    Rend le nombre de départements corrigés — zéro quand rien ne change, ce qui
+    rend l'opération sûre à répéter.
+    """
+    from apps.departement.models import Departement
+
+    codes = semestre.niveaux
+    if not codes:
+        return 0
+
+    champ = ('decalage_impair' if semestre.type_semestre == 'I'
+             else 'decalage_pair')
+    # L'année borne la portée : un retard de 2026-2027 ne regarde pas les
+    # promotions passées, dont les documents sont déjà imprimés.
+    cibles = Departement.objects.filter(
+        annee_universitaire=semestre.annee_universitaire,
+        niveau__niveau__in=codes,
+    ).exclude(**{champ: semestre.decalage_semaines})
+    return cibles.update(**{champ: semestre.decalage_semaines})
+
+
 def synchroniser_calendrier(semestre: SemestreIPGEI, *, remplacer=False) -> dict:
     """
     Aligne le calendrier du semestre sur celui du socle : crée, corrige, retire.

@@ -315,6 +315,27 @@ class SemestreIPGEI(models.Model):
         default=16, validators=[MinValueValidator(1), MaxValueValidator(40)],
         help_text='Nombre de semaines ajoutées par défaut à chaque génération.',
     )
+    # Le DÉCALAGE de rentrée, en semaines. Il n'y a qu'un seul calendrier par
+    # parité : S1 et S3 reçoivent les mêmes semaines, aux mêmes numéros. Quand
+    # une promotion entre plus tard — les MPSI arrivés le 12/10/2026, quatre
+    # semaines après les MP —, ses étudiants lisent « semaine 5 » sur un
+    # emploi du temps qui est leur premier.
+    #
+    # Le numéro en base ne bouge pas : c'est lui que lisent le suivi et la
+    # paie, et c'est ce qui les garde justes. Seul l'AFFICHAGE recule, de ce
+    # nombre de semaines. Le socle convertit déjà ainsi, par département
+    # (`Departement.decalage_impair`) ; ce champ en est la source unique, et
+    # `services.appliquer_decalage` le recopie sur les classes du niveau.
+    #
+    # Posé ici, et non sur chaque classe : ce n'est pas une propriété de
+    # « MPSI A » mais de la promotion. Quinze saisies identiques seraient
+    # quinze occasions d'en oublier une, et l'oubli ne se verrait pas.
+    decalage_semaines   = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(20)],
+        help_text="Semaines de retard à la rentrée : l'affichage recule d'autant, "
+                  'la numérotation en base ne change pas.',
+    )
     est_cloture         = models.BooleanField(
         default=False,
         help_text='Semestre clôturé : notes verrouillées, plus de saisie.',
