@@ -54,7 +54,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from core.permissions import RBACPermission
+from core.permissions import IsAdmin, RBACPermission
 from core.mixins import AuditMixin, SelectAllMixin
 from core.pagination import StandardPagination
 from .models import Prof, ProfTypeHistory
@@ -94,6 +94,13 @@ class ProfViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
         return super().get_queryset().annotate(
             nni_texte=Cast('NNI', output_field=CharField()),
         )
+
+    def get_permissions(self):
+        # Créer des comptes de connexion est un geste d'ADMINISTRATEUR (comme
+        # Comptes → Utilisateurs) : le droit de modifier les fiches ne suffit pas.
+        if self.action in ('generer_comptes', 'generer_compte'):
+            return [IsAdmin()]
+        return super().get_permissions()
 
     def get_serializer_class(self):
         if self.action in ('list', 'all'):
@@ -151,32 +158,32 @@ class ProfViewSet(AuditMixin, SelectAllMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='generer-comptes')
     def generer_comptes(self, request):
-        """Crée les comptes enseignants pour tous les profs sans user.
+        """Crée les comptes des enseignants ACTIFS qui n'en ont pas — ni le
+        personnel, ni une fiche archivée (comme à l'ESP, 12/10/2026).
 
         Rend le détail des ÉCHECS, pas seulement le nombre de réussites. Un
         rattrapage qui répond « 1 compte créé » sur vingt-huit professeurs a
         échoué vingt-sept fois, et c'est cela qu'il faut lire.
         """
-        from .services import creer_compte_pour_prof_detaille
-        profs = Prof.objects.filter(user__isnull=True).order_by('nom')
-        created, echecs = 0, []
-        for p in profs:
-            ok, raison = creer_compte_pour_prof_detaille(p)
-            if ok:
-                created += 1
-            else:
-                echecs.append({'id': p.pk, 'nom': p.nom, 'raison': raison})
-        detail = f'{created} compte(s) créé(s)'
-        if echecs:
-            detail += f', {len(echecs)} en échec'
-        return Response({'created': created, 'echecs': echecs,
-                         'detail': detail + '.'})
+        from .services import generer_comptes_manquants
+        crees, non_crees = generer_comptes_manquants()
+        detail = f'{len(crees)} compte(s) créé(s)'
+        if non_crees:
+            detail += f', {len(non_crees)} en échec'
+        return Response({'created': len(crees), 'crees': crees, 'non_crees': non_crees,
+                         'echecs': non_crees, 'detail': detail + '.'})
 
     @action(detail=True, methods=['post'], url_path='generer-compte')
     def generer_compte(self, request, pk=None):
         """Crée le compte enseignant pour un prof spécifique."""
+        from .models import TYPES_ENSEIGNANTS
         from .services import creer_compte_pour_prof_detaille
         prof = self.get_object()
+        if prof.type not in TYPES_ENSEIGNANTS or not prof.actif:
+            return Response(
+                {'detail': 'Un compte enseignant ne se crée que pour un enseignant actif.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if prof.user_id:
             return Response(
                 {'detail': 'Ce professeur a déjà un compte.'},

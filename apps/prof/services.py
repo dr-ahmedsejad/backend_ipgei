@@ -254,3 +254,29 @@ def creer_compte_pour_prof_detaille(prof) -> tuple[bool, str]:
 def creer_compte_pour_prof(prof) -> bool:
     """Variante booléenne, pour les appelants qui n'affichent pas la raison."""
     return creer_compte_pour_prof_detaille(prof)[0]
+
+
+def generer_comptes_manquants():
+    """Rattrape les comptes des enseignants ACTIFS qui n'en ont pas.
+
+    Jamais le personnel administratif (`Prof.type` hors TYPES_ENSEIGNANTS) ni
+    une fiche archivée. Chaque fiche est traitée seule : un cas qui coince
+    n'arrête pas les autres. Rend (créés, non créés), chaque non-créé avec sa
+    raison — l'écran l'affiche telle quelle.
+    """
+    from .models import Prof, TYPES_ENSEIGNANTS
+
+    crees, non_crees = [], []
+    profs = (Prof.objects.filter(user__isnull=True, actif=True, type__in=TYPES_ENSEIGNANTS)
+             .order_by('nom'))
+    for prof in profs:
+        ligne = {'id': prof.pk, 'nom': prof.nom}
+        try:
+            cree, raison = creer_compte_pour_prof_detaille(prof)
+        except Exception as exc:                              # noqa: BLE001
+            cree, raison = False, f'erreur : {exc}'[:300]
+        if cree:
+            crees.append({**ligne, 'identifiant': str(prof.telephone)})
+        else:
+            non_crees.append({**ligne, 'raison': raison})
+    return crees, non_crees

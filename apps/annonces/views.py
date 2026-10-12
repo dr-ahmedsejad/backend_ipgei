@@ -2,7 +2,8 @@
 
 GET  /api/v1/annonces/grille/  les cases à cocher (niveaux × classes de l'année)
 GET  /api/v1/annonces/         l'historique des envois
-POST /api/v1/annonces/         envoyer — { titre, texte, cibles: ["c12", …], resume }
+POST /api/v1/annonces/         envoyer — { titre, texte, cibles: ["c12", …], resume,
+                                          etudiants: bool, enseignants: "" | "tous" | "cases" }
 
 Droit RBAC « annonces » : voir (grille, historique), modifier (envoyer).
 """
@@ -26,7 +27,7 @@ class AnnonceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Annonce
         fields = ['id', 'titre', 'texte', 'cibles', 'resume', 'nb_destinataires',
-                  'auteur_nom', 'cree_le']
+                  'auteur_nom', 'cree_le', 'etudiants', 'enseignants']
         read_only_fields = ['nb_destinataires', 'auteur_nom', 'cree_le']
 
     def validate_titre(self, v):
@@ -44,9 +45,20 @@ class AnnonceSerializer(serializers.ModelSerializer):
         return v
 
     def validate_cibles(self, v):
-        if not isinstance(v, list) or not v:
-            raise serializers.ValidationError('Cochez au moins une case.')
+        if not isinstance(v, list):
+            raise serializers.ValidationError('Liste de cases attendue.')
         return [str(x) for x in v][:500]
+
+    def validate(self, attrs):
+        etudiants = attrs.get('etudiants', True)
+        enseignants = attrs.get('enseignants', '')
+        if not etudiants and not enseignants:
+            raise serializers.ValidationError(
+                {'etudiants': 'Choisissez les étudiants, les enseignants, ou les deux.'})
+        # Les cases ne servent pas quand on n'écrit qu'à tous les enseignants.
+        if (etudiants or enseignants == 'cases') and not attrs.get('cibles'):
+            raise serializers.ValidationError({'cibles': 'Cochez au moins une case.'})
+        return attrs
 
 
 class AnnonceViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
@@ -68,9 +80,16 @@ class AnnonceViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Ge
 
         s = self.get_serializer(data=request.data)
         s.is_valid(raise_exception=True)
-        ids, cibles = services.destinataires(s.validated_data['cibles'])
+        d = s.validated_data
+        ids, cibles = (services.destinataires(d.get('cibles'))
+                       if d.get('etudiants', True) else ([], d.get('cibles') or []))
+        if not d.get('etudiants', True) and d.get('enseignants') == 'cases':
+            cibles = [c for c in cibles if services.CLE.match(c)]
+        # Un enseignant qui serait aussi étudiant ne reçoit qu'une annonce.
+        ids = list(dict.fromkeys(list(ids) + services.destinataires_enseignants(
+            d.get('enseignants', ''), d.get('cibles'))))
         if not ids:
-            return Response({'detail': "Aucun étudiant n'a de compte dans les cases cochées."},
+            return Response({'detail': "Aucun destinataire n'a de compte dans cette sélection."},
                             status=status.HTTP_400_BAD_REQUEST)
         u = request.user
         with transaction.atomic():

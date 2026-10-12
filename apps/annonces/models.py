@@ -13,6 +13,13 @@ class Annonce(models.Model):
     (« c12 » = la classe 12). `resume` : leur libellé lisible
     (« Toutes les classes MPSI »), figé à l'envoi.
     """
+    # LE PUBLIC (décision du 11/10/2026, comme à l'ESP) : les élèves des
+    # classes, et/ou les enseignants — tous, ou ceux qui ont cours dans les
+    # classes cochées.
+    ENSEIGNANTS_CHOICES = [('', 'Aucun'), ('tous', 'Tous'), ('cases', 'Ceux des cases')]
+    etudiants = models.BooleanField(default=True)
+    enseignants = models.CharField(max_length=10, blank=True, default='',
+                                   choices=ENSEIGNANTS_CHOICES)
     titre = models.CharField(max_length=200)
     texte = models.TextField()
     cibles = models.JSONField(default=list)

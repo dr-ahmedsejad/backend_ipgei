@@ -69,13 +69,17 @@ class ProfSerializer(serializers.ModelSerializer):
 class ProfListSerializer(serializers.ModelSerializer):
     """Serializer léger pour les listes et <select>."""
     banque_nom = serializers.CharField(source='banque.nom', read_only=True, allow_null=True)
+    a_un_compte = serializers.SerializerMethodField()
+
+    def get_a_un_compte(self, obj):
+        return obj.user_id is not None
 
     class Meta:
         model  = Prof
         # `NNI` est affiche en premiere colonne de la liste et sert de critere
         # de recherche : l'omettre laissait la colonne vide a l'ecran.
         fields = ['id', 'NNI', 'nom', 'type', 'genre', 'grade', 'banque', 'banque_nom',
-                  'email', 'telephone', 'cv', 'diplome', 'actif']
+                  'email', 'telephone', 'cv', 'diplome', 'actif', 'a_un_compte']
 
 
 class ProfStatsSerializer(serializers.Serializer):
