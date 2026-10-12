@@ -467,12 +467,55 @@ class SousGroupeTPViewSet(ModelViewSet):
     """Sous-groupes de TP (fixes sur le semestre)."""
     serializer_class   = SousGroupeTPSerializer
     permission_classes = [RBACPermission]
-    required_module    = 'ipgei_classes'
+    required_module    = 'ipgei_sous_groupes'
     queryset           = SousGroupeTP.objects.select_related('classe').prefetch_related('matieres')
     filter_backends    = [DjangoFilterBackend, OrderingFilter]
     filterset_fields   = ['classe']
     ordering           = ['classe', 'groupe']
     pagination_class   = NoPagination
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse de supprimer un sous-groupe qui tient encore quelque chose.
+
+        Les règles de suppression de la base sont silencieuses, et dans deux
+        sens opposés :
+
+          - `InscriptionIPGEI.sous_groupe` est en SET_NULL : les étudiants
+            seraient DÉTACHÉS, sans disparaître ni prévenir. On ne s'en
+            apercevrait qu'au prochain appel de TP, devant une liste vide ;
+          - `SeanceReelle.sous_groupe` et `SeanceType.sous_groupe` sont en
+            CASCADE : les séances seraient DÉTRUITES, y compris celles d'une
+            semaine déjà publiée.
+
+        Un sous-groupe de TP compte une vingtaine d'élèves : la suppression
+        n'est jamais anodine. On la refuse tant qu'il reste quelqu'un ou
+        quelque chose, et l'on dit quoi faire — « Affecter les étudiants »
+        déplace les inscrits vers un autre sous-groupe, ou vers aucun.
+        """
+        sous_groupe = self.get_object()
+        inscrits = sous_groupe.inscriptions.count()
+        seances  = sous_groupe.seances.count()
+        patrons  = sous_groupe.seances_type.count()
+        if not (inscrits or seances or patrons):
+            return super().destroy(request, *args, **kwargs)
+
+        retenues = []
+        if inscrits:
+            retenues.append(f'{inscrits} étudiant' + ('s' if inscrits > 1 else ''))
+        if seances:
+            retenues.append(f'{seances} séance' + ('s' if seances > 1 else ''))
+        if patrons:
+            retenues.append(f'{patrons} séance' + ('s' if patrons > 1 else '')
+                            + ' de la grille type')
+        quoi = ', '.join(retenues[:-1]) + (' et ' if len(retenues) > 1 else '') + retenues[-1]
+
+        remede = ("Réaffectez-les d'abord depuis « Affecter les étudiants »."
+                  if inscrits else
+                  "Retirez d'abord ces séances de l'emploi du temps.")
+        return Response(
+            {'error': f'« {sous_groupe.libelle} » tient encore {quoi}. {remede}'},
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 class InscriptionIPGEIViewSet(_ErreurMetierMixin, SelectAllMixin, ModelViewSet):
