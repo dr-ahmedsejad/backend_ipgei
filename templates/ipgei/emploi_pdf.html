@@ -155,6 +155,8 @@ Une case à deux groupes garde ainsi la hauteur d'une case ordinaire.
 <h4>{{ cible_libelle }} : {{ cible }}</h4>
 {% if semaine %}
 <h4>{{ semestre_nom }} — Semaine n°{{ semaine }} du {{ debut }} au {{ fin }}</h4>
+{% elif debut %}
+<h4>{{ semestre_nom }} — du {{ debut }} au {{ fin }}</h4>
 {% else %}
 <h4>{{ semestre_nom }}</h4>
 {% endif %}

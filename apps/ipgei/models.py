@@ -450,6 +450,27 @@ class SemaineIPGEI(models.Model):
         ]
         indexes = [models.Index(fields=['semestre', 'numero'])]
 
+    @property
+    def numero_affiche(self):
+        """Le numéro tel que la PROMOTION le compte, ou `None` avant sa rentrée.
+
+        Il n'existe qu'un calendrier par parité : S1 et S3 portent les mêmes
+        numéros. Quand une promotion entre plus tard, le décalage de son
+        semestre recule l'affichage — la semaine 5 devient sa première.
+
+        `None` et non zéro pour les semaines antérieures : elles n'existent pas
+        pour cette promotion, et un « 0 » ou un « −3 » n'apprendrait rien à
+        personne. L'écran les nomme alors par leurs dates.
+
+        Le numéro STOCKÉ, lui, ne bouge pas : c'est celui que lisent le suivi
+        et la paie, et c'est ce qui les garde justes.
+        """
+        if self.numero is None:
+            return None
+        decalage = self.semestre.decalage_semaines if self.semestre_id else 0
+        pedagogique = self.numero - (decalage or 0)
+        return pedagogique if pedagogique >= 1 else None
+
     def __str__(self):
         if self.numero is None:
             return f'[{self.get_type_semaine_display()}] {self.date_debut}'

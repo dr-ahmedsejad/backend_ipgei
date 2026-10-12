@@ -248,7 +248,11 @@ def contexte_semaine(semaine):
         return {'semaine': '', 'debut': '', 'fin': '', 'semestre_nom': '',
                 'etat_semaine': ''}
     return {
-        'semaine':      semaine.numero or '',
+        # Le numéro tel que la PROMOTION le compte : une promotion entrée
+        # quatre semaines après les autres lit « 1 » sur ce que la base appelle
+        # la cinquième. Vide avant sa rentrée — l'en-tête se contente alors des
+        # dates, qui, elles, ne mentent pas.
+        'semaine':      semaine.numero_affiche or '',
         'debut':        _date_fr(semaine.date_debut),
         'fin':          _date_fr(semaine.date_fin),
         'semestre_nom': f'Semestre {semaine.semestre.code}' if semaine.semestre_id else '',

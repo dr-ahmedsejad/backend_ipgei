@@ -29,7 +29,7 @@ from django.test import TestCase
 
 from apps.departement.models import Departement
 from apps.departement.semaine_helpers import numero_pedagogique_dept
-from apps.ipgei.models import NiveauIPGEI, SemestreIPGEI
+from apps.ipgei.models import NiveauIPGEI, SemaineIPGEI, SemestreIPGEI
 from apps.ipgei.services import appliquer_decalage
 from apps.parametres.models import Institution, Niveau
 
@@ -150,3 +150,64 @@ class DecalageDeRentreeTest(TestCase):
         g.refresh_from_db()
         for numero in (1, 2, 3, 4):
             self.assertIsNone(numero_pedagogique_dept(numero, g, 'I'))
+
+
+class NumeroAfficheTest(TestCase):
+    """Ce que l'étudiant lit sur son emploi du temps.
+
+    Le numéro STOCKÉ ne bouge jamais — suivi et paie s'appuient dessus. Seul
+    `numero_affiche` recule, et il vaut `None` avant la rentrée de la
+    promotion : ces semaines-là n'existent pas pour elle.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.inst = Institution.objects.create(acronyme='TST', nom='Institut Test',
+                                              est_principale=True)
+
+    def semaine(self, numero, decalage):
+        semestre = SemestreIPGEI.objects.create(
+            institution=self.inst, code='S1', annee_universitaire=f'202{numero}-202{numero + 1}',
+            date_debut=date(2026, 9, 14), decalage_semaines=decalage)
+        return SemaineIPGEI.objects.create(
+            semestre=semestre, numero=numero, type_semaine='cours',
+            date_debut=date(2026, 9, 14), date_fin=date(2026, 9, 19))
+
+    def test_sans_decalage_le_numero_ne_bouge_pas(self):
+        self.assertEqual(self.semaine(3, decalage=0).numero_affiche, 3)
+
+    def test_la_cinquieme_devient_la_premiere(self):
+        self.assertEqual(self.semaine(5, decalage=4).numero_affiche, 1)
+
+    def test_avant_la_rentree_il_n_y_a_pas_de_numero(self):
+        """Ni zéro ni négatif : `None`.
+
+        Sans cela, la semaine du 14 septembre et celle du 12 octobre
+        s'appelleraient toutes deux « Semaine 1 » sur le même écran.
+        """
+        for numero in (1, 2, 3, 4):
+            with self.subTest(numero=numero):
+                self.assertIsNone(self.semaine(numero, decalage=4).numero_affiche)
+
+    def test_le_numero_stocke_reste_intact(self):
+        s = self.semaine(5, decalage=4)
+        s.refresh_from_db()
+        self.assertEqual(s.numero, 5, 'le suivi et la paie lisent celui-ci')
+
+    def test_le_serialiseur_le_porte(self):
+        from apps.ipgei.serializers import SemaineIPGEISerializer
+        rendu = SemaineIPGEISerializer(self.semaine(5, decalage=4)).data
+        self.assertEqual(rendu['numero'], 5)
+        self.assertEqual(rendu['numero_affiche'], 1)
+
+    def test_l_en_tete_du_pdf_annonce_le_numero_pedagogique(self):
+        from apps.ipgei import edt_pdf
+        contexte = edt_pdf.contexte_semaine(self.semaine(5, decalage=4))
+        self.assertEqual(contexte['semaine'], 1)
+
+    def test_le_pdf_d_une_semaine_d_avant_la_rentree_garde_ses_dates(self):
+        """Sans numéro, le document se repère par ses dates — elles ne mentent pas."""
+        from apps.ipgei import edt_pdf
+        contexte = edt_pdf.contexte_semaine(self.semaine(2, decalage=4))
+        self.assertEqual(contexte['semaine'], '')
+        self.assertTrue(contexte['debut'], 'les dates restent')

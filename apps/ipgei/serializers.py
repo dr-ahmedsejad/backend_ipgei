@@ -159,6 +159,11 @@ class _ListeSemaines(serializers.ListSerializer):
 
 class SemaineIPGEISerializer(serializers.ModelSerializer):
     semestre_code = serializers.CharField(source='semestre.code', read_only=True)
+    # Le numéro tel que la PROMOTION le compte. `null` avant sa rentrée : les
+    # semaines d'avant n'existent pas pour elle, et l'écran les nomme par leurs
+    # dates plutôt que de leur prêter un « 0 ». Porté ici pour que les écrans
+    # et le PDF le reçoivent sans le recalculer chacun de son côté.
+    numero_affiche = serializers.IntegerField(read_only=True, allow_null=True)
     # État de cohérence entre l'emploi du temps de la semaine et son suivi :
     # « previsionnel », « aligne » ou « divergent ». Exposé pour que l'écran
     # comme le PDF puissent dire ce que vaut ce qu'ils montrent.
@@ -205,7 +210,8 @@ class SemaineIPGEISerializer(serializers.ModelSerializer):
         model       = SemaineIPGEI
         list_serializer_class = _ListeSemaines
         fields = [
-            'id', 'semestre', 'semestre_code', 'numero', 'date_debut', 'date_fin',
+            'id', 'semestre', 'semestre_code', 'numero', 'numero_affiche',
+            'date_debut', 'date_fin',
             'type_semaine', 'description',
             'suivi_genere_le', 'etat_coherence', 'libelle_coherence',
             'jours_feries',
