@@ -1,0 +1,108 @@
+{% comment %}
+La vue de surveillance pour le poste de garde : une page par journée, les
+classes et leurs sous-groupes de TP en lignes, les créneaux en colonnes, la
+SALLE en gros dans chaque case. Les données sont assemblées par
+`apps/ipgei/surveillance.py` ; l'en-tête est celui des emplois du temps.
+{% endcomment %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Vue de surveillance {{ annee }}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; margin: 0; }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+
+  .titre { text-align: center; font-weight: bold; font-size: 16px; margin: 6px 0 0; }
+  .sous-titre { text-align: center; font-size: 12px; margin: 0 0 8px; }
+
+  table.grille { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  table.grille th, table.grille td { border: 1px solid #000; padding: 3px 4px; vertical-align: top; }
+  table.grille th { background: #BFBFBF; font-weight: bold; text-align: center; }
+  table.grille th.inactif { background: #E7E6E6; }
+  th.groupe, td.groupe { width: 12%; text-align: left; vertical-align: middle; font-weight: bold; }
+  td.sous-groupe { font-weight: normal; padding-left: 14px; }
+  tr.niveau td { background: #E7E6E6; font-weight: bold; font-size: 11px; padding: 2px 4px; }
+
+  .salle { font-size: 14px; font-weight: bold; }
+  .em { font-weight: bold; }
+  .prof { color: #333; }
+  .sans-prof { color: #B00000; font-weight: bold; }
+  .libre { color: #888; text-align: center; }
+  .herite { color: #555; }
+  .marque { display: inline-block; border: 1px solid #000; padding: 0 3px; font-size: 9px; font-weight: bold; margin-top: 1px; }
+  .evaluation .salle, .evaluation .em { color: #B00000; }
+  .annulee { color: #888; text-decoration: line-through; }
+  .legende { margin-top: 6px; font-size: 10px; }
+  .ferme { text-align: center; padding: 30px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+
+{% for j in journees %}
+<div class="page">
+  {% include '_institution_header.html' %}
+  <p class="titre">Vue de surveillance — {{ j.jour }} {{ j.date_fr }}</p>
+  <p class="sous-titre">Année universitaire {{ annee }}{% if j.numero_semaine %} — semaine {{ j.numero_semaine }}{% endif %}</p>
+
+  {% if j.type_semaine and j.type_semaine != 'cours' %}
+  <p class="ferme">Journée sans cours ({{ j.type_semaine }}) : aucune classe n'est attendue.</p>
+  {% else %}
+  <table class="grille">
+    <thead>
+      <tr>
+        <th class="groupe">Classe</th>
+        {% for c in j.creneaux %}<th{% if c.inactif %} class="inactif"{% endif %}>{{ c.libelle }}{% if c.inactif %}<br><span style="font-weight:normal">créneau inactif</span>{% endif %}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for n in j.lignes %}
+      <tr class="niveau"><td colspan="{{ j.creneaux|length|add:1 }}">{{ n.niveau_libelle }}</td></tr>
+      {% for g in n.groupes %}
+      <tr>
+        <td class="groupe{% if g.sous_groupe %} sous-groupe{% endif %}">{% if g.sous_groupe %}↳ {{ g.libelle }}{% else %}{{ g.libelle }}{% endif %}</td>
+        {% for case in g.cases %}
+        {% if not case %}
+        <td class="libre">libre</td>
+        {% elif case.dedouble %}
+        <td>
+          <div class="em">TP en sous-groupes</div>
+          {% for sg in case.sous_groupes %}<div>{{ sg.groupe }} : <b>{{ sg.salle|default:"—" }}</b>{% if sg.em_code %} · {{ sg.em_code }}{% endif %}</div>{% endfor %}
+        </td>
+        {% elif case.annulee %}
+        <td class="annulee">
+          <div class="em">{{ case.type }} {{ case.em_code }}</div>
+          <span class="marque">ANNULÉE — libre</span>
+        </td>
+        {% else %}
+        <td class="{% if case.evaluation %}evaluation{% endif %}{% if case.herite %} herite{% endif %}">
+          <div class="salle">{{ case.salle|default:"—" }}</div>
+          <div class="em">{% if case.special %}{{ case.type }}{% else %}{{ case.type }} {{ case.em_code }}{% endif %}</div>
+          {% if case.horaire %}<div>{{ case.horaire }}</div>{% endif %}
+          {% if case.prof %}<div class="prof">{{ case.prof }}</div>
+          {% elif case.evaluation %}<div class="sans-prof">Aucun surveillant désigné</div>{% endif %}
+          {% if case.herite %}<span class="marque">AVEC LA CLASSE</span>{% endif %}
+          {% if case.reunis %}<span class="marque">RÉUNI : {{ case.reunis|join:", " }}</span>{% endif %}
+          {% if case.paralleles %}<span class="marque">EN PARALLÈLE : {% for p in case.paralleles %}{{ p.groupe }}{% if p.salle %} ({{ p.salle }}){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+          {% if case.sous_groupes %}<span class="marque">AUSSI : {% for sg in case.sous_groupes %}{{ sg.groupe }}{% if sg.salle %} ({{ sg.salle }}){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+        </td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="legende">
+    <b>Salle</b> en gros : c'est là qu'on vérifie. <span style="color:#B00000;font-weight:bold">Rouge</span> : devoir ou examen ·
+    <span class="marque">RÉUNI</span> même cours, même salle · <span class="marque">EN PARALLÈLE</span> même cours, autre salle ·
+    <span class="marque">AVEC LA CLASSE</span> le sous-groupe suit sa classe · barré : séance annulée, le groupe est libre ·
+    colonne grisée : créneau inactif, utilisé ce jour-là.
+  </p>
+  {% endif %}
+</div>
+{% endfor %}
+
+</body>
+</html>

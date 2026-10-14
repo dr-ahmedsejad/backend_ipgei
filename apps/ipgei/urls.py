@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .perimetre import PerimetreResponsableView
 from .views_fraudes import SanctionFraudeViewSet
+from .views_surveillance import VueSurveillancePDFView, VueSurveillanceView
 
 from .views import (
     AbsenceSeanceViewSet, ClassementS3ViewSet, ClasseViewSet, ConcoursCNIMViewSet,
@@ -72,4 +73,8 @@ urlpatterns = router.urls + [
     # matieres. Pose par l'admin, lu par le RBAC a chaque requete.
     path('perimetres/<int:user_id>/', PerimetreResponsableView.as_view(),
          name='ipgei-perimetre'),
+    # La vue de surveillance : toutes les classes et leurs sous-groupes sur une
+    # journée, pour ceux qui veillent sur les étudiants (module « surveillance »).
+    path('surveillance/',     VueSurveillanceView.as_view(),    name='ipgei-surveillance'),
+    path('surveillance/pdf/', VueSurveillancePDFView.as_view(), name='ipgei-surveillance-pdf'),
 ]
