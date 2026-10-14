@@ -1334,95 +1334,20 @@ class StatistiquesSemestresView(APIView):
         type_semestre = 'P' if ts == "Pairs" else 'I'
         libelle_semestres = "pairs" if ts == "Pairs" else "impairs"
 
-        # 3. Récupération des codes semestres (S1, S2, S3...)
-        #
-        # Le rattachement d'un EM à un département sert ici à le DATER. Une
-        # matière IPGEI, elle, n'a pas d'année : la maquette de prépa vaut pour
-        # toutes les promotions, et son ancrage ne lui donne qu'un niveau — il
-        # reste sur la première classe créée. La filtrer sur l'année de cet
-        # ancrage vidait donc l'écran dès l'ouverture de l'année suivante :
-        # aucun label, aucune barre, alors que des séances étaient pointées.
-        # Les heures RÉALISÉES restent filtrées sur l'année demandée, plus bas.
-        # Même correctif que `_compute_avancement_em`, qui l'avait déjà reçu —
-        # y compris la matière SANS ancre dont le niveau a une classe cette année.
-        base_em = EM.objects.filter(semestre__type_semestre=type_semestre).filter(
-            Q(departement__annee_universitaire=annee)
-            | Q(departement__classe_ipgei__isnull=False)
-            | Q(departement__isnull=True,
-                matiere_ipgei__isnull=False, matiere_ipgei__actif=True,
-                semestre__niveau_semestre__departements__annee_universitaire=annee,
-                semestre__niveau_semestre__departements__classe_ipgei__isnull=False,
-                semestre__niveau_semestre__departements__classe_ipgei__actif=True)
-        )
-        sem_codes = (
-            base_em
-            .values_list('semestre__code_semestre', flat=True)
-            .distinct()
-            .order_by('semestre__code_semestre')
-        )
-
-        # Optimisation : dictionnaires de correspondance via FK
-        seance_map = {s.id: s.type_seance for s in Seance.objects.all()}
-        duree_map = {c.id: c.duree for c in Creneau.objects.all()}
+        # 3. Classe par classe, depuis le référentiel (14/10/2026) : l'ancien
+        # calcul rapportait les heures du professeur le plus chargé au volume de
+        # la maquette compté une fois — un enseignant dans quatre classes
+        # affichait 200 %. Voir apps/avancement/semestres.py.
+        from .semestres import avancement_par_semestre, pourcentage
+        par_semestre = avancement_par_semestre(annee, type_semestre)
 
         labels, progress_cm, progress_td, progress_tp, progress_pr = [], [], [], [], []
-
-        # 4. Calculs pour chaque semestre
-        for code in sem_codes:
-            # Dédoublonnage par code : une même matière ancrée sur deux classes
-            # compterait deux fois son volume, et le prévu doublerait.
-            ems = EM.objects.filter(
-                id__in=list(
-                    base_em.filter(semestre__code_semestre=code)
-                    .values('code_em').annotate(premier=Min('id'))
-                    .values_list('premier', flat=True)
-                )
-            )
-
-            # Volume horaire PREVU
-            planned_cm = ems.aggregate(s=Sum('CM'))['s'] or 0
-            planned_td = ems.aggregate(s=Sum('TD'))['s'] or 0
-            planned_tp = ems.aggregate(s=Sum('TP'))['s'] or 0
-            planned_pr = ems.aggregate(s=Sum('PR'))['s'] or 0
-
-            # Volume horaire REALISE
-            em_ids = list(ems.values_list('id', flat=True))
-            suivis = SuiviePointage.objects.filter(
-                em_id__in=em_ids,
-                annee_universitaire=annee,
-                type_semestre=type_semestre,
-                commentaire="Fait"
-            )
-
-            prof_totals = {}
-            for s in suivis:
-                d = duree_map.get(s.creneau_fk_id, 0)
-                lib = (seance_map.get(s.type_seance_fk_id, '') or '').strip().upper()
-                if lib not in ['CM', 'TD', 'DS', 'TP', 'PR']:
-                    continue
-                key = (s.em_id, lib, s.prof_id)
-                prof_totals[key] = prof_totals.get(key, 0) + d
-
-            max_totals = {}
-            for (em_id, seance_type, prof), total in prof_totals.items():
-                k = (em_id, seance_type)
-                if k not in max_totals or total > max_totals[k]:
-                    max_totals[k] = total
-
-            real_cm = sum(v for (eid, st), v in max_totals.items() if st == 'CM')
-            real_td = sum(v for (eid, st), v in max_totals.items() if st in ('TD', 'DS'))
-            real_tp = sum(v for (eid, st), v in max_totals.items() if st == 'TP')
-            real_pr = sum(v for (eid, st), v in max_totals.items() if st == 'PR')
-
-            # Calcul des pourcentages (sans dépasser 100% si tu le souhaites, mais ici on garde le ratio réel)
-            def pct(r, p):
-                return round((r / p) * 100, 1) if p and p > 0 else 0
-
+        for code, s in par_semestre.items():
             labels.append(code)
-            progress_cm.append(pct(real_cm, planned_cm))
-            progress_td.append(pct(real_td, planned_td))
-            progress_tp.append(pct(real_tp, planned_tp))
-            progress_pr.append(pct(real_pr, planned_pr))
+            progress_cm.append(pourcentage(s['fait']['CM'], s['prevu']['CM']))
+            progress_td.append(pourcentage(s['fait']['TD'], s['prevu']['TD']))
+            progress_tp.append(pourcentage(s['fait']['TP'], s['prevu']['TP']))
+            progress_pr.append(pourcentage(s['fait']['PR'], s['prevu']['PR']))
 
         # 5. Renvoi des données au frontend
         return Response({
