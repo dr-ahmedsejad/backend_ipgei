@@ -439,6 +439,19 @@ class SousGroupeTPSerializer(serializers.ModelSerializer):
     def get_effectif(self, obj) -> int:
         return obj.inscriptions.filter(actif=True).count()
 
+    def validate_libelle(self, valeur):
+        """Un sous-groupe à la fois. « B1, B2 » saisi d'un trait créait UN
+        sous-groupe nommé « B1, B2 » (MPSI B, 2026-2027) à côté de B1 et B2,
+        créés ensuite : un groupe fantôme, sans élève ni séance, que la grille et
+        l'avancement comptaient comme les autres."""
+        valeur = (valeur or '').strip()
+        if not valeur:
+            raise serializers.ValidationError('Le libellé est obligatoire.')
+        if any(sep in valeur for sep in ',;/'):
+            raise serializers.ValidationError(
+                'Un sous-groupe à la fois : créez « B1 », puis « B2 » (sans virgule).')
+        return valeur
+
     def validate(self, attrs):
         """
         Unicité (classe, libellé).

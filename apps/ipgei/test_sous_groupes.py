@@ -171,3 +171,15 @@ class ModuleSepareTest(APITestCase):
         """
         self.assertEqual(SousGroupeTPViewSet.required_module,
                          'ipgei_sous_groupes')
+
+
+def test_un_libelle_a_plusieurs_noms_est_refuse():
+    """« B1, B2 » d'un trait créait UN sous-groupe fantôme (MPSI B, 2026-2027)."""
+    import pytest
+    from rest_framework import serializers
+    from apps.ipgei.serializers import SousGroupeTPSerializer
+    s = SousGroupeTPSerializer()
+    for mauvais in ('B1, B2', 'G1;G2', 'TP1/TP2', '   '):
+        with pytest.raises(serializers.ValidationError):
+            s.validate_libelle(mauvais)
+    assert s.validate_libelle('  B1 ') == 'B1'
