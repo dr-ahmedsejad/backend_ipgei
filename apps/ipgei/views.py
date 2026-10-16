@@ -74,7 +74,7 @@ from .serializers import (
     SaisieCollectiveSerializer, SeanceReelleSerializer, SeanceTypeSerializer,
     SemaineIPGEISerializer, SemestreIPGEISerializer,
     SessionEvaluationIPGEISerializer, SignataireIPGEISerializer, SousGroupeTPSerializer,
-    VersionArchiveSerializer,
+    VersionArchiveSerializer, meme_semaine_civile, nom_complet_groupe,
 )
 from core.telechargement import entete_piece_jointe
 
@@ -3653,13 +3653,18 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
 
         semaine_id = request.query_params.get('semaine')
         if semaine_id:
+            semaine = SemaineIPGEI.objects.filter(pk=semaine_id).first()
+            if semaine is None:
+                raise ValidationError({'semaine': 'Semaine introuvable.'})
+            # La semaine CIVILE, pas la ligne du calendrier : le MPSI et le MP
+            # ont chacun la leur aux mêmes dates — la règle du serializer.
             seances = (
                 SeanceReelle.objects
-                .filter(semaine_id=semaine_id, annulee=False)
+                .filter(**meme_semaine_civile(semaine), annulee=False)
                 .exclude(classe_id=classe.pk)
                 .select_related('classe', 'prof', 'salle', 'sous_groupe')
             )
-            contexte = lambda s: s.classe.nom            # noqa: E731
+            contexte = lambda s: s.classe                # noqa: E731
         else:
             type_semestre = request.query_params.get('type_semestre', 'I')
             if type_semestre not in ('I', 'P'):
@@ -3672,18 +3677,20 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
                 .exclude(grille__classe_id=classe.pk)
                 .select_related('grille__classe', 'prof', 'salle', 'sous_groupe')
             )
-            contexte = lambda s: s.grille.classe.nom     # noqa: E731
+            contexte = lambda s: s.grille.classe         # noqa: E731
 
         # Le front a besoin de savoir OÙ la personne est prise : masquer un nom
         # sans pouvoir dire pourquoi rend l'écran incompréhensible.
+        # « MPSI B · B1 », écrit comme le refus du serveur : « B1 » seul existe
+        # aussi en MP B.
         return Response([
             {
                 'jour':    s.jour_id,
                 'creneau': s.creneau_id,
                 'prof':    s.prof_id,
                 'salle':   s.salle_id,
-                'classe':  contexte(s) + (f' ({s.sous_groupe.groupe})'
-                                          if s.sous_groupe_id else ''),
+                'classe':  nom_complet_groupe(
+                    contexte(s), s.sous_groupe if s.sous_groupe_id else None),
             }
             for s in seances if s.prof_id or s.salle_id
         ])

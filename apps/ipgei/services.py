@@ -2310,23 +2310,31 @@ def _occupation_ailleurs(classe, semaines):
 
     Une séance ANNULÉE libère son créneau — c'est la règle que le serializer
     applique déjà, et deux règles divergentes seraient pires que pas de règle.
+
+    Les voisines se cherchent par semaine CIVILE (`meme_semaine_civile`) : le
+    MP a ses propres semaines aux dates de celles du MPSI. L'index reste rangé
+    par semaine DEMANDÉE, celle que l'appelant consulte.
     """
     index = {}
+    demandees = {}
+    for s in semaines:
+        demandees.setdefault(s.date_debut, []).append(s.pk)
     voisines = (
         SeanceReelle.objects
-        .filter(semaine__in=semaines, annulee=False)
+        .filter(semaine__date_debut__in=list(demandees), annulee=False)
         .exclude(classe=classe)
         .select_related('classe')
-        .values_list('semaine_id', 'jour_id', 'creneau_id', 'prof_id', 'salle_id',
-                     'classe__nom')
+        .values_list('semaine__date_debut', 'jour_id', 'creneau_id', 'prof_id',
+                     'salle_id', 'classe__nom')
     )
-    for semaine_id, jour_id, creneau_id, prof_id, salle_id, nom_classe in voisines:
-        case = index.setdefault((semaine_id, jour_id, creneau_id),
-                                {'profs': {}, 'salles': {}})
-        if prof_id is not None:
-            case['profs'].setdefault(prof_id, nom_classe)
-        if salle_id is not None:
-            case['salles'].setdefault(salle_id, nom_classe)
+    for debut, jour_id, creneau_id, prof_id, salle_id, nom_classe in voisines:
+        for semaine_id in demandees.get(debut, ()):
+            case = index.setdefault((semaine_id, jour_id, creneau_id),
+                                    {'profs': {}, 'salles': {}})
+            if prof_id is not None:
+                case['profs'].setdefault(prof_id, nom_classe)
+            if salle_id is not None:
+                case['salles'].setdefault(salle_id, nom_classe)
     return index
 
 

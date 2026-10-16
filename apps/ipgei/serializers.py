@@ -1502,7 +1502,7 @@ def _refuser_double_affectation(voisines, instance, prof, salle):
     """
     Un enseignant, une salle : un seul endroit à la fois.
 
-    L'écran de saisie masque déjà ce qui est pris, mais il ne peut pas tout :
+    L'écran de saisie grise déjà ce qui est pris, mais il ne peut pas tout :
     deux responsables qui éditent deux classes en parallèle ne voient pas les
     listes l'un de l'autre, et l'API reste accessible directement. Sans cette
     règle au serveur, un professeur se retrouve sur deux classes au même
@@ -1529,12 +1529,49 @@ def _refuser_double_affectation(voisines, instance, prof, salle):
             )
 
 
+def meme_semaine_civile(semaine) -> dict:
+    """
+    Le filtre « même semaine » d'un conflit d'enseignant ou de salle.
+
+    Chaque niveau a son propre calendrier : la semaine 3 du MPSI (S1) et la
+    semaine 3 du MP (S3) sont deux lignes distinctes, aux MÊMES dates. Comparer
+    l'objet semaine laissait donc placer un enseignant en MPSI A et en MP B au
+    même créneau, le même jour, sans un mot (relevé du 16/10/2026 : trente
+    dates de début partagées). Un enseignant n'est pas à deux endroits parce
+    que deux calendriers le décrivent : on compare le lundi de la semaine.
+    """
+    if semaine is None:
+        return {'semaine': None}
+    return {'semaine__date_debut': semaine.date_debut}
+
+
+def nom_complet_groupe(classe, sous_groupe=None) -> str:
+    """
+    Le groupe qui tient un créneau, nommé sans ambiguïté : « MPSI B · B1 ».
+
+    Le nom de la classe dit déjà son niveau (« MPSI B », « MP B ») et l'IPGEI
+    n'a qu'une filière : rien à y ajouter. Le sous-groupe seul, lui, ne suffit
+    pas — « B1 » existe en MPSI B comme en MP B la même année (relevé du
+    16/10/2026). La classe entière garde son nom seul.
+
+    Une seule écriture pour le refus du serveur et pour l'occupation que lit
+    la grille : l'écran grise « pris (MPSI B · B1) », le refus dit la même
+    chose. Elle remplace « MPSI B B1 », où le sous-groupe se lisait comme une
+    suite du nom de la classe.
+    """
+    nom = (getattr(classe, 'nom', '') or '').strip()
+    if sous_groupe is None:
+        return nom
+    groupe = (sous_groupe.groupe or '').strip()
+    return f'{nom} · {groupe}' if nom and groupe else (nom or groupe)
+
+
 def _ou_est(seance):
     """Nomme la classe — masquer un nom sans dire où il est pris est stérile."""
     classe = (seance.classe if hasattr(seance, 'classe')
               else seance.grille.classe)
-    groupe = f' {seance.sous_groupe.groupe}' if seance.sous_groupe_id else ''
-    return f'{classe.nom}{groupe}'
+    return nom_complet_groupe(
+        classe, seance.sous_groupe if seance.sous_groupe_id else None)
 
 
 def _exiger_matiere(type_seance, matiere):
@@ -1695,7 +1732,7 @@ class SeanceReelleSerializer(serializers.ModelSerializer):
 
         _refuser_double_affectation(
             SeanceReelle.objects.filter(
-                semaine=valeur('semaine'), jour=valeur('jour'),
+                **meme_semaine_civile(valeur('semaine')), jour=valeur('jour'),
                 creneau=valeur('creneau'), annulee=False,
             ).exclude(classe=valeur('classe')),
             self.instance, valeur('prof'), valeur('salle'),
