@@ -26,6 +26,7 @@ from rest_framework.test import APITestCase
 
 from apps.ipgei.models import (
     Classe, Matiere, NiveauIPGEI, SeanceReelle, SemaineIPGEI, SemestreIPGEI,
+    SousGroupeTP,
 )
 from apps.ipgei.serializers import SeanceReelleSerializer
 from apps.ipgei.services import _occupation_ailleurs
@@ -165,3 +166,10 @@ class SemaineCivileTest(APITestCase):
     def test_la_duplication_ignore_une_autre_semaine_civile(self):
         self._cours_de_mp(semaine=self.sem_mp_suivante)
         self.assertEqual(_occupation_ailleurs(self.mpsi_a, [self.sem_mpsi]), {})
+
+    def test_la_duplication_nomme_le_sous_groupe_qui_tient_le_creneau(self):
+        b1 = SousGroupeTP.objects.create(classe=self.mp_b, groupe='B1')
+        self._cours_de_mp(sous_groupe=b1)
+        index = _occupation_ailleurs(self.mpsi_a, [self.sem_mpsi])
+        case = index[(self.sem_mpsi.pk, self.lundi.pk, self.c1.pk)]
+        self.assertEqual(case['profs'], {self.prof.pk: 'MP B · B1'})

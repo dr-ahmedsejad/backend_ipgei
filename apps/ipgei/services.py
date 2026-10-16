@@ -2314,7 +2314,13 @@ def _occupation_ailleurs(classe, semaines):
     Les voisines se cherchent par semaine CIVILE (`meme_semaine_civile`) : le
     MP a ses propres semaines aux dates de celles du MPSI. L'index reste rangé
     par semaine DEMANDÉE, celle que l'appelant consulte.
+
+    Le groupe se nomme comme dans le refus du serveur et dans la grille —
+    « MPSI B · B1 » : la classe seule (« déjà pris en MPSI B ») ne disait pas
+    quel sous-groupe tient le créneau, et « B1 » existe aussi en MP B.
     """
+    from .serializers import nom_complet_groupe
+
     index = {}
     demandees = {}
     for s in semaines:
@@ -2323,18 +2329,17 @@ def _occupation_ailleurs(classe, semaines):
         SeanceReelle.objects
         .filter(semaine__date_debut__in=list(demandees), annulee=False)
         .exclude(classe=classe)
-        .select_related('classe')
-        .values_list('semaine__date_debut', 'jour_id', 'creneau_id', 'prof_id',
-                     'salle_id', 'classe__nom')
+        .select_related('semaine', 'classe', 'sous_groupe')
     )
-    for debut, jour_id, creneau_id, prof_id, salle_id, nom_classe in voisines:
-        for semaine_id in demandees.get(debut, ()):
-            case = index.setdefault((semaine_id, jour_id, creneau_id),
+    for v in voisines:
+        nom = nom_complet_groupe(v.classe, v.sous_groupe if v.sous_groupe_id else None)
+        for semaine_id in demandees.get(v.semaine.date_debut, ()):
+            case = index.setdefault((semaine_id, v.jour_id, v.creneau_id),
                                     {'profs': {}, 'salles': {}})
-            if prof_id is not None:
-                case['profs'].setdefault(prof_id, nom_classe)
-            if salle_id is not None:
-                case['salles'].setdefault(salle_id, nom_classe)
+            if v.prof_id is not None:
+                case['profs'].setdefault(v.prof_id, nom)
+            if v.salle_id is not None:
+                case['salles'].setdefault(v.salle_id, nom)
     return index
 
 
