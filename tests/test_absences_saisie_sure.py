@@ -275,3 +275,46 @@ def test_l_emargement_ne_recrit_pas_une_justifiee(monde):
     pa = Presence.objects.get(suivi=s, etudiant=a)
     assert (pa.statut, pa.commentaire) == (3, 'certificat')
     assert Presence.objects.get(suivi=s, etudiant=b).commentaire == 'arrivé en retard'
+
+
+# ── La migration 0027 : le DA écrit (17/10/2026, décision de l'utilisateur) ──
+
+def _migration_0027():
+    import importlib
+    return importlib.import_module(
+        'apps.authentication.migrations.0027_abs_saisie_modifier_da')
+
+
+def test_la_migration_donne_l_ecriture_au_da(saisie, settings):
+    from django.apps import apps
+
+    from apps.absence.models import Presence
+    from apps.authentication.models import RoleDefault
+    settings.SEEDS_DESACTIVES_POUR_TESTS = False
+    s, _, abs_ = saisie
+    droit('DA', 'abs_saisie', 'voir')
+    # Un refus déjà posé pour un autre rôle reste un refus.
+    droit('DG', 'abs_saisie', 'modifier')
+    RoleDefault.objects.filter(role='DG', module_action__action__code='modifier') \
+        .update(allowed=False)
+
+    _migration_0027().ajouter(apps, None)
+    _migration_0027().ajouter(apps, None)          # idempotente
+
+    droits = RoleDefault.objects.filter(module_action__module__code='abs_saisie',
+                                        module_action__action__code='modifier')
+    assert dict(droits.values_list('role', 'allowed')) == {'DA': True, 'DG': False}
+
+    r = api(UserFactory(username='u_da2', role='DA')).post(URL, {'suivi_id': s.pk, 'presences': [
+        {'etudiant_id': abs_.pk, 'statut': 0, 'commentaire': ''},
+    ]}, format='json')
+    assert r.status_code == 200, r.data
+    assert Presence.objects.get(suivi=s, etudiant=abs_).statut == 0
+
+
+def test_la_migration_ne_fait_rien_sur_la_base_de_test(db):
+    from django.apps import apps
+
+    from apps.authentication.models import RoleDefault
+    _migration_0027().ajouter(apps, None)          # SEEDS_DESACTIVES_POUR_TESTS
+    assert not RoleDefault.objects.filter(role='DA').exists()
