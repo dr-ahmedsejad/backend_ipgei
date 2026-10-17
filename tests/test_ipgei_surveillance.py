@@ -39,8 +39,9 @@ def droit(role, module, action):
     RoleDefault.objects.update_or_create(role=role, module_action=ma, defaults={'allowed': True})
 
 
-DROITS_SAISIE = [('suivi_saisie', 'voir'), ('scolarite_etudiants', 'voir'),
-                 ('abs_saisie', 'voir'), ('abs_saisie', 'modifier')]
+# Les droits de l'écran d'appel (17/10/2026) : `presences/saisie-seance/`
+# (voir) et `presences/bulk/` (modifier), tous deux sous abs_saisie.
+DROITS_SAISIE = [('abs_saisie', 'voir'), ('abs_saisie', 'modifier')]
 
 
 @pytest.fixture(autouse=True)
@@ -388,43 +389,39 @@ class TestLaJournee:
 
 # ── Les absences depuis la vue ───────────────────────────────────────────────
 class TestLesAbsencesDepuisLaVue:
-    """La saisie des absences (`/dashboard/absences/saisir/salle/<suivi>`) relit
-    la séance par /suivi/suivies/<id>/ — institution principale, groupes
-    délégués, module suivi_saisie — puis les étudiants par département et le
-    pointage existant. La vue ne propose le lien que là où il s'ouvrira."""
+    """L'appel d'une séance (`/dashboard/absences/saisir/salle/<suivi>`) lit
+    tout en une requête, `presences/saisie-seance/` — institution principale,
+    module abs_saisie — et s'enregistre par `presences/bulk/` (abs_saisie :
+    modifier). La vue ne propose le lien que là où il s'ouvrira.
+
+    Depuis le 17/10/2026 : plus de délégation par groupe (elle venait de
+    `/suivi/suivies/`, que l'écran ne lit plus), et un TP s'ouvre — sa liste
+    est celle du sous-groupe (`apps/ipgei/liste_appel.py`)."""
 
     @pytest.fixture
-    def de(self, monde):
-        u = UserFactory(role='DE')
+    def scolarite(self, monde):
+        """Fait l'appel sans saisir le suivi ni avoir de groupe délégué."""
+        u = UserFactory(role='scolarite')
         for m, a in DROITS_SAISIE + [('surveillance', 'voir')]:
-            droit('DE', m, a)
-        u.managed_departements.add(monde['classes']['MPSI A'], monde['sg']['A1'])
+            droit('scolarite', m, a)
         return u
 
-    def test_seulement_les_groupes_delegues_comme_l_ecran_de_saisie(self, monde, de):
+    def test_sans_delegation_la_seance_s_ouvre_comme_a_l_ecran(self, monde, scolarite):
         a = suivi(monde, seance(monde, classe='MPSI A'))
         b = suivi(monde, seance(monde, classe='MPSI B', creneau='09h45-11h15'))
-        j = journee(api(de))
+        j = journee(api(scolarite))
         ca, cb = case(j, monde, 'MPSI A'), case(j, monde, 'MPSI B', '09h45-11h15')
         assert (ca['pointable'], ca['suivi']) == (True, a.pk)
-        assert (cb['pointable'], cb['motif']) == (False, 'Groupe non délégué')
-        # Et c'est bien la règle de l'écran de saisie :
-        assert api(de).get(f'/api/v1/suivi/suivies/{a.pk}/').status_code == 200
-        assert api(de).get(f'/api/v1/suivi/suivies/{b.pk}/').status_code == 404
+        assert (cb['pointable'], cb['suivi']) == (True, b.pk)
+        # Et c'est bien la règle de l'écran d'appel :
+        for s in (a, b):
+            r = api(scolarite).get('/api/v1/absences/presences/saisie-seance/', {'seance': s.pk})
+            assert r.status_code == 200
 
-    def test_contre_epreuve_sans_delegation_rien_ne_s_ouvre(self, monde, de):
-        a = suivi(monde, seance(monde))
-        de.managed_departements.clear()
-        c = case(journee(api(de)), monde, 'MPSI A')
-        assert c['pointable'] is False
-        assert api(de).get(f'/api/v1/suivi/suivies/{a.pk}/').status_code == 404
-
-    def test_le_role_admin_n_echappe_pas_a_la_delegation(self, monde):
-        """`DepartementScopedMixin` ne dispense que le superutilisateur."""
-        a = suivi(monde, seance(monde))
+    def test_le_role_admin_ouvre_tout(self, monde):
+        suivi(monde, seance(monde))
         adm = UserFactory(role='admin', is_superuser=False)
-        assert case(journee(api(adm)), monde, 'MPSI A')['pointable'] is False
-        assert api(adm).get(f'/api/v1/suivi/suivies/{a.pk}/').status_code == 404
+        assert case(journee(api(adm)), monde, 'MPSI A')['pointable'] is True
 
     def test_le_superutilisateur_ouvre_tout(self, monde, admin):
         suivi(monde, seance(monde, classe='MPSI A'))
@@ -440,11 +437,14 @@ class TestLesAbsencesDepuisLaVue:
             droit('DE', m, a)
         RoleDefault.objects.filter(role='DE', module_action__module__code=manque[0],
                                    module_action__action__code=manque[1]).delete()
-        u.managed_departements.add(monde['classes']['MPSI A'])
         suivi(monde, seance(monde))
         j = journee(api(u))
         assert j['droits_saisie'] is False
         assert case(j, monde, 'MPSI A')['pointable'] is False
+
+    def test_les_droits_sont_ceux_des_routes_d_appel(self):
+        from apps.ipgei.surveillance import DROITS_SAISIE as DROITS
+        assert set(DROITS) == {('abs_saisie', 'voir'), ('abs_saisie', 'modifier')}
 
     def test_da_par_defaut_n_a_que_la_lecture(self, monde):
         """Le DA voit la vue, mais `abs_saisie : modifier` ne lui est pas donné
@@ -458,29 +458,25 @@ class TestLesAbsencesDepuisLaVue:
         autre = Institution.objects.create(acronyme='AUTRE', nom='Autre', est_principale=False)
         a = suivi(monde, seance(monde), institution=autre)
         c = case(journee(api(admin)), monde, 'MPSI A')
-        assert c['pointable'] is False and c['motif'] == 'Groupe non délégué'
-        assert api(admin).get(f'/api/v1/suivi/suivies/{a.pk}/').status_code == 404
+        assert c['pointable'] is False and c['motif'] == "Hors de l'institution principale"
+        assert c['appel'] is None
+        r = api(admin).get('/api/v1/absences/presences/saisie-seance/', {'seance': a.pk})
+        assert r.status_code == 404
 
     def test_sans_ligne_de_suivi(self, monde, admin):
         seance(monde)
         c = case(journee(api(admin)), monde, 'MPSI A')
-        assert (c['pointable'], c['suivi'], c['motif']) == (False, None, 'Suivi non généré')
+        assert (c['pointable'], c['suivi'], c['motif'], c['appel']) == (False, None, 'Suivi non généré', None)
 
-    def test_le_sous_groupe_ne_s_ouvre_pas_mais_ce_qu_il_suit_avec_sa_classe_oui(self, monde, admin):
-        """L'écran liste les étudiants par `Etudiant.departement`, la classe :
-        sur un sous-groupe il serait vide."""
-        from apps.absence.models import Etudiant
+    def test_le_sous_groupe_s_ouvre_sur_sa_liste(self, monde, admin):
+        """Le TP s'ouvre désormais : l'écran appelle le sous-groupe."""
         tp = suivi(monde, seance(monde, sous_groupe='A1', matiere='INFO', type_='TP'))
         cm = suivi(monde, seance(monde, matiere='MATH', creneau='09h45-11h15'))
         j = journee(api(admin))
         c = case(j, monde, 'A1')
-        assert (c['pointable'], c['suivi'], c['motif']) == (False, tp.pk, 'Appel par sous-groupe indisponible')
+        assert (c['pointable'], c['suivi'], c['motif']) == (True, tp.pk, '')
         herite = case(j, monde, 'A1', '09h45-11h15')
         assert (herite['herite'], herite['pointable'], herite['suivi']) == (True, True, cm.pk)
-        # Ce que l'écran lirait sur la ligne du sous-groupe : personne.
-        Etudiant.objects.create(matricule='9001', nom='E1', departement=monde['classes']['MPSI A'])
-        r = api(admin).get('/api/v1/absences/etudiants/', {'departement': monde['sg']['A1'].pk})
-        assert r.status_code == 200 and r.data['count'] == 0
 
     def test_jamais_pour_une_journee_a_venir(self, monde, admin):
         demain = dt.date.today() + dt.timedelta(days=1)
@@ -488,7 +484,8 @@ class TestLesAbsencesDepuisLaVue:
         suivi(monde, s)
         j = journee(api(admin), demain)
         assert j['a_venir'] is True
-        assert case(j, monde, 'MPSI A')['pointable'] is False
+        c = case(j, monde, 'MPSI A')
+        assert c['pointable'] is False and c['appel'] is None
 
     def test_la_cle_est_celle_de_la_vraie_generation_du_suivi(self, monde, admin):
         """La génération réelle (« Ajouter un suivi ») : chaque case retrouve
@@ -522,7 +519,59 @@ class TestLesAbsencesDepuisLaVue:
         assert Suivie.objects.get(pk=cm['suivi']).departement_id == monde['classes']['MPSI A'].pk
         assert Suivie.objects.get(pk=tp['suivi']).departement_id == monde['sg']['A1'].pk
         assert Suivie.objects.get(pk=ds['suivi']).type_seance_fk.type_seance == 'DS'
-        assert cm['pointable'] and ds['pointable'] and not tp['pointable']
+        assert cm['pointable'] and ds['pointable'] and tp['pointable']
+
+
+# ── L'état de l'appel ────────────────────────────────────────────────────────
+class TestLEtatDeLAppel:
+    """Chaque case porte l'état de l'appel de sa séance (17/10/2026) : la
+    direction voit d'un coup d'œil où l'appel n'a pas été fait."""
+
+    def test_appel_a_faire_puis_fait(self, monde, admin):
+        from apps.absence.models import Etudiant, Presence
+        s = suivi(monde, seance(monde))
+        c = case(journee(api(admin)), monde, 'MPSI A')
+        assert c['appel'] == {'saisi': False, 'presents': 0, 'absents': 0,
+                              'sanctions': 0, 'justifiees': 0}
+        for i, statut in enumerate((0, 0, 1, 2, 3)):
+            Presence.objects.create(suivi=s, statut=statut, etudiant=Etudiant.objects.create(
+                matricule=f'77{i}', nom=f'E{i}'))
+        c = case(journee(api(admin)), monde, 'MPSI A')
+        assert c['appel'] == {'saisi': True, 'presents': 2, 'absents': 1,
+                              'sanctions': 1, 'justifiees': 1}
+
+    def test_visible_sans_droit_de_saisie(self, monde):
+        """Le DA surveille sans faire l'appel : il voit où il manque."""
+        suivi(monde, seance(monde))
+        j = journee(api(UserFactory(role='DA')))
+        c = case(j, monde, 'MPSI A')
+        assert c['pointable'] is False and c['appel']['saisi'] is False
+
+    def test_rien_pour_une_epreuve_une_seance_speciale_ou_annulee(self, monde, admin):
+        suivi(monde, seance(monde, matiere='PHYS', type_='DS'))
+        # Une séance spéciale n'a pas de matière (le modèle la retire) : sans
+        # élément, pas de ligne de suivi qui la désigne.
+        seance(monde, matiere=None, type_='IM', prof=None, salle=None, creneau='09h45-11h15')
+        suivi(monde, seance(monde, creneau='11h30-13h00', annulee=True))
+        j = journee(api(admin))
+        for creneau in ('08h00-09h30', '09h45-11h15', '11h30-13h00'):
+            assert case(j, monde, 'MPSI A', creneau)['appel'] is None
+
+    def test_la_case_heritee_porte_l_appel_de_sa_classe(self, monde, admin):
+        from apps.absence.models import Etudiant, Presence
+        s = suivi(monde, seance(monde))
+        seance(monde, sous_groupe='A1', matiere='INFO', type_='TP', jour='Mardi')
+        Presence.objects.create(suivi=s, statut=1, etudiant=Etudiant.objects.create(
+            matricule='880', nom='E'))
+        j = journee(api(admin))
+        assert case(j, monde, 'A1')['herite'] is True
+        assert case(j, monde, 'A1')['appel'] == case(j, monde, 'MPSI A')['appel']
+        assert case(j, monde, 'A1')['appel']['saisi'] is True
+
+    def test_rien_n_est_ecrit_et_le_pdf_ne_porte_pas_de_cle_interne(self, monde, admin):
+        suivi(monde, seance(monde))
+        j = journee(api(admin))
+        assert all('_suivi' not in c for c in j['cases'].values())
 
 
 # ── Le PDF ───────────────────────────────────────────────────────────────────

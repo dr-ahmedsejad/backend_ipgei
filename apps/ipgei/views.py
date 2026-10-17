@@ -3926,10 +3926,16 @@ class SeanceReelleViewSet(PerimetreMatiereMixin, _ErreurMetierMixin, ModelViewSe
             return Response(resultat)
 
         # Une séance de TP ne concerne que son sous-groupe : l'appel doit
-        # refléter exactement qui devait être présent.
-        inscriptions = InscriptionIPGEI.objects.filter(classe=seance.classe, actif=True)
-        if seance.sous_groupe_id:
-            inscriptions = inscriptions.filter(sous_groupe_id=seance.sous_groupe_id)
+        # refléter exactement qui devait être présent. La règle est celle de
+        # toutes les listes d'appel (`liste_appel.py`, 17/10/2026) : abandons
+        # et réorientations écartés — sauf qui porte déjà une absence sur
+        # cette feuille, faute de quoi la réenregistrer l'effacerait.
+        from .liste_appel import inscriptions_appelees
+        appelees = inscriptions_appelees(seance.sous_groupe_id or seance.classe_id,
+                                         seance.semaine.semestre.annee_universitaire)
+        inscriptions = InscriptionIPGEI.objects.filter(
+            Q(pk__in=appelees.values('pk')) | Q(pk__in=seance.absences.values('inscription_id')),
+        )
         inscriptions = inscriptions.select_related('etudiant').order_by(
             'numero_ordre', 'etudiant__nom',
         )

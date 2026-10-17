@@ -596,30 +596,114 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
     filter_backends  = [DjangoFilterBackend, OrderingFilter]
     filterset_class  = PresenceFilter
     ordering_fields  = ['suivi__numero_semaine', 'suivi__date_suivie', 'etudiant__nom']
-    ordering         = ['-suivi__numero_semaine']
+    # `id` en dernier : la matrice charge les présences page après page. Sans
+    # ordre TOTAL, PostgreSQL peut rendre une même ligne sur deux pages et en
+    # omettre une autre — qui repartait alors en « Présent » (17/10/2026).
+    ordering         = ['-suivi__numero_semaine', 'id']
     pagination_class = StandardPagination
+
+    # ── « Justifiée » : posée ou retirée par qui gère les justificatifs ──────
+    # La fiche d'une présence (POST, PUT, PATCH) n'exigeait que `abs_saisie` :
+    # la scolarité, qui fait l'appel, pouvait justifier une absence — ou défaire
+    # une justification — sans pièce ni droit (17/10/2026). Entrer en 3 ou en
+    # sortir demande `abs_justificatifs` / `modifier` ; présent, absent,
+    # sanction et commentaire restent à `abs_saisie`. Le statut arrive déjà
+    # normalisé par le serializer (« "3" » devient 3).
+    @staticmethod
+    def _peut_justifier(user) -> bool:
+        from core.permissions import _has_access
+        return (user.role == 'admin' or user.is_superuser
+                or _has_access(user, 'abs_justificatifs', 'modifier'))
+
+    def _garde_justifiee(self, avant, apres):
+        if (avant == 3) == (apres == 3):
+            return
+        if self._peut_justifier(self.request.user):
+            return
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied(
+            'Seul un responsable des justificatifs peut poser ou retirer une absence justifiée.')
+
+    def perform_create(self, serializer):
+        self._garde_justifiee(None, serializer.validated_data.get('statut', 0))
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        if 'statut' in serializer.validated_data:
+            self._garde_justifiee(serializer.instance.statut,
+                                  serializer.validated_data['statut'])
+        super().perform_update(serializer)
 
     @action(detail=False, methods=['post'], url_path='bulk')
     def bulk_update(self, request):
-        """Mise à jour en masse des présences pour une séance (Frontend Matrix)."""
+        """Mise à jour en masse des présences pour une séance (Frontend Matrix).
+
+        Écrire exige `abs_saisie` / `modifier` : à l'IPGEI, un `@action` en POST
+        retombe sur `modifier` par le verbe HTTP (`core.permissions.
+        METHODE_ACTION`), et non sur « voir » comme à l'ISS d'avant le
+        17/10/2026 — d'où l'absence de contrôle explicite ici.
+
+        Rend `updated`, `justifiees_preservees` (lignes qui voulaient défaire
+        une justifiée, ignorées) et `justifiees_refusees` (lignes qui voulaient
+        poser « J » sans le droit de justifier, ignorées).
+        """
         s = PresenceBulkSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         d = s.validated_data
         updated = 0
 
+        # Une absence JUSTIFIÉE ne se défait que par qui peut justifier : la
+        # matrice renvoyait chaque cellule, et une cellule non chargée repartait
+        # en « Présent » — l'absence justifiée était réécrite sans que personne
+        # l'ait touchée. Et « J » ne se POSE que par qui peut justifier : sans
+        # pièce, ce n'est qu'une absence effacée du décompte (17/10/2026).
+        peut_justifier = self._peut_justifier(request.user)
+        justifiees = set() if peut_justifier else set(
+            Presence.objects.filter(suivi_id=d['suivi_id'], statut=3)
+            .values_list('etudiant_id', flat=True))
+        preservees = 0
+        refusees = 0
+
+        # Identifiant et statut en ENTIERS avant toute comparaison : envoyé en
+        # texte (« "12" »), l'identifiant n'était pas reconnu parmi les
+        # justifiées et passait la garde. Une ligne illisible refuse tout
+        # l'envoi, avant la moindre écriture (17/10/2026).
+        from rest_framework.exceptions import ValidationError
+        lignes = []
         for item in d['presences']:
+            try:
+                etudiant_id = int(item.get('etudiant_id'))
+                statut_demande = int(item.get('statut', 0))
+            except (TypeError, ValueError):
+                raise ValidationError(
+                    {'presences': 'etudiant_id et statut doivent être des entiers.'})
+            if statut_demande not in (0, 1, 2, 3):
+                raise ValidationError({'presences': 'statut doit valoir 0, 1, 2 ou 3.'})
+            lignes.append((item, etudiant_id, statut_demande))
+
+        for item, etudiant_id, statut_demande in lignes:
+            if etudiant_id in justifiees:
+                if statut_demande != 3:
+                    preservees += 1
+                    continue
+            elif statut_demande == 3 and not peut_justifier:
+                # Ni déjà justifiée, ni le droit de justifier : ignorée.
+                refusees += 1
+                continue
             # On ne met à jour que statut et commentaire.
             # Le champ justificatif reste intact s'il existe déjà.
             Presence.objects.update_or_create(
                 suivi_id=d['suivi_id'],
-                etudiant_id=item.get('etudiant_id'),
+                etudiant_id=etudiant_id,
                 defaults={
-                    'statut': item.get('statut', 0),
+                    'statut': statut_demande,
                     'commentaire': item.get('commentaire', ''),
                 }
             )
             updated += 1
-        return Response({'updated': updated}, status=status.HTTP_200_OK)
+        return Response({'updated': updated, 'justifiees_preservees': preservees,
+                         'justifiees_refusees': refusees},
+                        status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='upload-justificatif', parser_classes=[MultiPartParser])
     def upload_justificatif(self, request):
@@ -980,6 +1064,101 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
         }
         return pdfkit.from_string(html, False, configuration=config, options=options)
 
+    # ── GET /api/v1/absences/presences/liste-appel/ ───────────────────────────
+    @action(detail=False, methods=['get'], url_path='liste-appel')
+    def liste_appel_action(self, request):
+        """Qui doit figurer à l'appel d'une séance de ce département.
+
+        Params : departement (classe ou sous-groupe de TP), annee_universitaire.
+        La règle est celle de `apps/ipgei/liste_appel.py` (17/10/2026), que
+        lisent aussi le mode salle, les fiches PDF et l'app enseignant : la
+        grille appelait le groupe entier par `Etudiant.departement` — vide pour
+        un sous-groupe.
+        """
+        from apps.ipgei.liste_appel import SOURCE_GROUPE, liste_appel, resume
+
+        dep = (request.query_params.get('departement') or '').strip()
+        annee = (request.query_params.get('annee_universitaire') or '').strip()
+        if not dep.isdigit() or not annee:
+            return Response({'detail': 'departement et annee_universitaire requis.'},
+                            status=400)
+        r = liste_appel(int(dep), annee)
+        return Response({
+            'source':             r['source'],
+            'etudiants':          [resume(e) for e in r['etudiants']],
+            'liste_non_verifiee': r['source'] == SOURCE_GROUPE,
+        })
+
+    # ── Mode salle et grille : l'appel séance par séance (mode_salle.py) ─────
+    # Les écrans lisaient `/suivi/suivies/`, gardé par `suivi_saisie` et borné
+    # aux groupes délégués : la scolarité, qui fait l'appel sans saisir le
+    # suivi, ne voyait aucune séance (17/10/2026). Ces trois lectures restent
+    # sous `abs_saisie` / voir.
+    @staticmethod
+    def _entier(request, nom, requis=True):
+        valeur = (request.query_params.get(nom) or '').strip()
+        if not valeur and not requis:
+            return None
+        if not valeur.isdigit():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({nom: 'Un entier est requis.'})
+        return int(valeur)
+
+    @staticmethod
+    def _annee_et_semestre(request):
+        from rest_framework.exceptions import ValidationError
+        annee = (request.query_params.get('annee_universitaire') or '').strip()
+        ts = (request.query_params.get('type_semestre') or '').strip()
+        if not annee:
+            raise ValidationError({'annee_universitaire': 'Ce paramètre est requis.'})
+        if ts and ts not in ('I', 'P'):
+            raise ValidationError({'type_semestre': 'I ou P.'})
+        return annee, ts or None
+
+    # ── GET /api/v1/absences/presences/fiches-semaines/ ───────────────────
+    @action(detail=False, methods=['get'], url_path='fiches-semaines')
+    def fiches_semaines(self, request):
+        """Les semaines générées, leurs dates et celle à proposer.
+
+        Params : annee_universitaire, type_semestre (I | P).
+        Rend {semaines: [n…], courante: n|null, dates: {"n": {debut, fin}}}.
+        """
+        from apps.absence.mode_salle import semaines_generees
+        annee, ts = self._annee_et_semestre(request)
+        return Response(semaines_generees(annee, ts))
+
+    # ── GET /api/v1/absences/presences/fiches-seances/ ────────────────────
+    @action(detail=False, methods=['get'], url_path='fiches-seances')
+    def fiches_seances(self, request):
+        """Les séances de la semaine d'une classe (ses TP compris) ou d'un
+        sous-groupe, chacune avec son bilan d'appel.
+
+        Params : annee_universitaire, type_semestre, numero_semaine,
+        departement (facultatif). Rend une liste triée par jour puis créneau ;
+        `appel` = {saisi, presents, absents, sanctions, justifiees}.
+        """
+        from apps.absence.mode_salle import seances_de_la_semaine
+        annee, ts = self._annee_et_semestre(request)
+        semaine = self._entier(request, 'numero_semaine')
+        departement = self._entier(request, 'departement', requis=False)
+        return Response(seances_de_la_semaine(annee, ts, semaine, departement))
+
+    # ── GET /api/v1/absences/presences/saisie-seance/ ─────────────────────
+    @action(detail=False, methods=['get'], url_path='saisie-seance')
+    def saisie_seance(self, request):
+        """Tout l'appel d'une séance en une réponse : la séance, sa liste
+        d'appel (`apps/ipgei/liste_appel.py`), les présences déjà saisies et
+        `refus` (vide si l'appel est possible).
+
+        Param : seance (id du `Suivie`).
+        """
+        from rest_framework.exceptions import NotFound
+        from apps.absence.mode_salle import saisie_seance
+        r = saisie_seance(self._entier(request, 'seance'))
+        if r is None:
+            raise NotFound('Séance introuvable.')
+        return Response(r)
+
     # ── Fiches de présence PDF ────────────────────────────────────────────────
     @action(detail=False, methods=['get'], url_path='fiches-pdf',
             permission_classes=[RBACPermission])
@@ -1009,7 +1188,12 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
             .order_by('jour_fk__jour', 'creneau_fk__creneau')
         )
         if dep_id:
-            qs = qs.filter(departement_id=dep_id)
+            if not str(dep_id).isdigit():
+                return HttpResponse('departement doit être un identifiant.', status=400)
+            # Une classe ET ses sous-groupes : les fiches de ses TP en
+            # manquaient, la séance étant posée sur le sous-groupe (17/10/2026).
+            from apps.ipgei.liste_appel import unites
+            qs = qs.filter(departement_id__in=unites(int(dep_id)))
 
         # Déduplication et résolution des labels (Phase 5 : FK uniquement)
         jours_order = {'Lundi': 1, 'Mardi': 2, 'Mercredi': 3, 'Jeudi': 4, 'Vendredi': 5, 'Samedi': 6}
@@ -1031,14 +1215,17 @@ class PresenceViewSet(AuditMixin, viewsets.ModelViewSet):
             seen.add(key)
             suivies_unique.append(s)
 
-        # Charger les étudiants par département
+        # Les étudiants de chaque séance : SA liste d'appel — la classe pour un
+        # cours, le sous-groupe pour un TP (`apps/ipgei/liste_appel.py`). Par
+        # `Etudiant.departement`, la fiche d'un TP sortait vide (17/10/2026).
+        from apps.ipgei.liste_appel import liste_appel
         dep_ids = {s.departement_id for s in suivies_unique if s.departement_id}
         etudiants_by_dep: dict = defaultdict(list)
         for did in dep_ids:
-            etudiants_by_dep[did] = list(
-                Etudiant.objects.filter(departement_id=did).order_by('matricule')
-                .values('matricule', 'nom', 'genre')
-            )
+            etudiants_by_dep[did] = [
+                {'matricule': e.matricule, 'nom': e.nom, 'genre': e.genre}
+                for e in liste_appel(did, annee)['etudiants']
+            ]
 
         # Construire les fiches
         from apps.departement.models import Departement as DepModel

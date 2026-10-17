@@ -34,6 +34,8 @@ Reprise des vues de l'ISS et de l'ESP (10/2026), adaptée au modèle IPGEI :
 
 La case ouvre la saisie des absences de SA ligne de suivi (`pointable`) — voir
 `_perimetre_saisie` pour les règles, qui sont celles de l'écran de saisie.
+Elle dit aussi où en est son appel (`appel`, 17/10/2026) : fait ou à faire, et
+son bilan — lu sur les présences, en une requête pour la journée.
 
 Rien ici n'écrit.
 """
@@ -52,26 +54,25 @@ from .socle import SEMESTRES
 
 JOURS = ('Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche')
 
-#: Ce que l'écran de saisie des absences (`/dashboard/absences/saisir/salle/
-#: <suivi>`) lit en s'ouvrant, et le droit que chaque lecture exige :
-#:   * la séance — `/suivi/suivies/<id>/`   → suivi_saisie : voir ;
-#:   * la liste des étudiants — `/absences/etudiants/?departement=`
-#:                                          → scolarite_etudiants : voir ;
-#:   * le pointage déjà fait — `/absences/presences/?suivi=`
-#:                                          → abs_saisie : voir ;
+#: Ce que l'écran d'appel (`/dashboard/absences/saisir/salle/<suivi>`) lit en
+#: s'ouvrant, et le droit que chaque lecture exige — depuis le 17/10/2026, une
+#: seule lecture remplace les trois d'avant (`/suivi/suivies/<id>/` sous
+#: suivi_saisie et groupes délégués, `/absences/etudiants/` sous
+#: scolarite_etudiants, `/absences/presences/`) :
+#:   * la séance, sa liste d'appel et le pointage déjà fait —
+#:     `/absences/presences/saisie-seance/`        → abs_saisie : voir ;
 #:   * la validation — `/absences/presences/bulk/` → abs_saisie : modifier.
 #: Il en manque un, l'écran s'ouvre sur une erreur ou valide dans le vide.
 DROITS_SAISIE = (
-    ('suivi_saisie', 'voir'),
-    ('scolarite_etudiants', 'voir'),
     ('abs_saisie', 'voir'),
     ('abs_saisie', 'modifier'),
 )
 
-# Pourquoi une case ne s'ouvre pas, pour qui a les droits de saisie.
+# Pourquoi une case ne s'ouvre pas, pour qui a les droits de saisie. Le motif
+# « Appel par sous-groupe indisponible » a disparu le 17/10/2026 : un TP
+# appelle désormais SON sous-groupe (`liste_appel.py`).
 SANS_SUIVI = 'Suivi non généré'
-SOUS_GROUPE = 'Appel par sous-groupe indisponible'
-HORS_PERIMETRE = 'Groupe non délégué'
+HORS_PERIMETRE = "Hors de l'institution principale"
 
 
 def _debut(libelle: str) -> int:
@@ -97,27 +98,23 @@ def _droit(user, module: str, action: str) -> bool:
     return _has_access(user, module, action)
 
 
-def _perimetre_saisie(user):
-    """Les départements dont `user` peut ouvrir la saisie des absences.
+def _perimetre_saisie(user) -> bool:
+    """`user` peut-il ouvrir l'appel d'une séance depuis la vue ?
 
-    `None` : tous (superutilisateur) ; un ensemble, éventuellement vide, sinon.
     Sans utilisateur (le PDF), personne n'ouvre rien.
 
-    Les règles sont celles de l'écran de saisie, sans les contourner :
-      * les quatre droits de `DROITS_SAISIE` ;
-      * la séance est relue par `SuivieViewSet`, qui ne montre que
-        l'institution principale (`InstitutionScopedMixin`) — vérifié par
-        case — et à chacun ses groupes délégués, `managed_departements`
-        (`DepartementScopedMixin`). Seul le superutilisateur y échappe : le
-        rôle administrateur, lui, y est soumis comme tout le monde.
+    Les règles sont celles de l'écran d'appel, sans les contourner :
+      * les droits de `DROITS_SAISIE` ;
+      * la séance est relue par `presences/saisie-seance/`, qui ne montre que
+        l'institution principale (`apps/absence/mode_salle.py`) — vérifié par
+        case.
+    Plus de délégation par groupe (`managed_departements`) depuis le
+    17/10/2026 : elle venait de `SuivieViewSet`, que l'écran ne lit plus, et
+    l'enregistrement des présences ne l'a jamais exigée.
     """
     if user is None or not getattr(user, 'is_authenticated', False):
-        return set(), False
-    if not all(_droit(user, m, a) for m, a in DROITS_SAISIE):
-        return set(), False
-    if user.is_superuser:
-        return None, True
-    return set(user.managed_departements.values_list('id', flat=True)), True
+        return False
+    return all(_droit(user, m, a) for m, a in DROITS_SAISIE)
 
 
 # ── Les lignes ───────────────────────────────────────────────────────────────
@@ -196,19 +193,43 @@ def _case_vide():
         'annulee': False, 'herite': False, 'dedouble': False,
         'sous_groupes': [], 'reunis': [], 'paralleles': [], 'doublon': False,
         'pointable': False, 'motif': '',
+        # L'état de l'appel de la séance : None quand il n'a pas lieu d'être
+        # (pas de ligne de suivi, journée à venir, séance annulée ou spéciale,
+        # épreuve — elle a sa feuille d'émargement).
+        'appel': None,
     }
+
+
+def _etats_d_appel(cases: dict, a_venir: bool) -> None:
+    """Pose `appel` sur chaque case qui en a un — une requête pour la journée.
+
+    Rien pour une journée à venir, une séance annulée ou spéciale, ni pour une
+    épreuve (sa feuille d'émargement fait l'appel) : « Appel à faire » n'y
+    voudrait rien dire. La case héritée d'un sous-groupe porte l'appel de sa
+    classe — c'est la même séance."""
+    from apps.absence.mode_salle import bilan_appel, comptes_par_seance
+
+    retenues = {}
+    for cle, case in cases.items():
+        suivi = case.pop('_suivi', None)
+        if (suivi is None or a_venir or case['annulee'] or case['special']
+                or case['evaluation']):
+            continue
+        retenues[cle] = suivi
+    comptes = comptes_par_seance(set(retenues.values())) if retenues else {}
+    for cle, suivi in retenues.items():
+        cases[cle]['appel'] = bilan_appel(comptes.get(suivi))
 
 
 def journee(annee: str, date: dt.date, user=None) -> dict:
     """Toutes les classes et leurs sous-groupes, tous les créneaux, ce jour-là."""
     from apps.parametres.models import Creneau, Institution
 
-    perimetre, droits_saisie = _perimetre_saisie(user)
-    principale = None
-    if droits_saisie:
-        # Exactement la lecture d'`InstitutionScopedMixin`.
-        p = Institution.objects.filter(est_principale=True).first()
-        principale = p.pk if p else None
+    droits_saisie = _perimetre_saisie(user)
+    # Exactement la lecture de `mode_salle._suivies` : l'appel ne porte que sur
+    # le pointage de l'institution principale.
+    p = Institution.objects.filter(est_principale=True).first()
+    principale = p.pk if p else None
     a_venir = date > dt.date.today()
 
     jour = _calendrier(annee, date)
@@ -228,7 +249,9 @@ def journee(annee: str, date: dt.date, user=None) -> dict:
         .filter(epreuve__date=date, classe_id__in=classes)
         .select_related('epreuve__matiere', 'salle')
         .order_by('epreuve__heure_debut', 'epreuve_id', 'classe_id'))
-    suivis = _index_suivis(annee, date) if (droits_saisie or convocations) else {}
+    # Toujours lu : l'état de l'appel se montre à qui surveille, même sans
+    # pouvoir faire l'appel lui-même.
+    suivis = _index_suivis(annee, date)
 
     # Colonnes : les créneaux actifs, et ceux que la journée utilise.
     actifs = list(Creneau.objects.filter(is_actif=True).order_by('ordre', 'id'))
@@ -238,22 +261,21 @@ def journee(annee: str, date: dt.date, user=None) -> dict:
     colonnes = sorted(creneaux.values(), key=lambda c: (_debut(c.creneau), c.ordre or 0, c.pk))
 
     def ouvrable(case, unite, suivi):
-        """`pointable` et, pour qui a les droits, pourquoi pas."""
+        """`pointable` et, pour qui a les droits, pourquoi pas. Retient aussi
+        la ligne de suivi de l'institution principale, dont `appel` dira l'état.
+
+        Une séance de sous-groupe s'ouvre comme une autre : sa liste d'appel
+        est celle du sous-groupe (`liste_appel.py`, 17/10/2026)."""
+        if (suivi is not None and principale is not None
+                and suivi['institution_id'] == principale):
+            case['_suivi'] = suivi['pk']
         if not droits_saisie or a_venir or case['annulee']:
             return
         if suivi is None:
             case['motif'] = SANS_SUIVI
             return
         case['suivi'] = suivi['pk']
-        if unite not in classes:
-            # L'écran de saisie liste les étudiants par `Etudiant.departement`,
-            # qui ne porte que la CLASSE : sur la ligne d'un sous-groupe, il
-            # s'ouvrirait sur une liste vide (relevé du 14/10/2026 : aucun
-            # étudiant n'a un sous-groupe pour département).
-            case['motif'] = SOUS_GROUPE
-            return
-        if (principale is None or suivi['institution_id'] != principale
-                or (perimetre is not None and unite not in perimetre)):
+        if principale is None or suivi['institution_id'] != principale:
             case['motif'] = HORS_PERIMETRE
             return
         case['pointable'] = True
@@ -384,6 +406,8 @@ def journee(annee: str, date: dt.date, user=None) -> dict:
             if cle in cases or mere is None or mere['dedouble']:
                 continue
             cases[cle] = {**mere, 'herite': True, 'sous_groupes': []}
+
+    _etats_d_appel(cases, a_venir)
 
     numero, type_semestre = None, ''
     if jour:

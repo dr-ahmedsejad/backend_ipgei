@@ -23,17 +23,17 @@ def ordre_matricule(matricule):
 def _groupe(dep, sp):
     """À l'IPGEI, le groupe d'une séance est une CLASSE ou un sous-groupe de TP
     (`apps/ipgei/miroir.py`) : ses étudiants sont ceux de l'inscription IPGEI
-    de l'année (auditeurs compris : ils assistent aux cours)."""
-    from django.db.models import Q
+    de l'année (auditeurs compris : ils assistent aux cours).
 
-    from apps.ipgei.models import InscriptionIPGEI
+    La règle vit désormais dans `apps/ipgei/liste_appel.py`, que lisent aussi
+    la grille d'appel, le mode salle et les fiches PDF (17/10/2026) : une
+    seule liste partout. Elle écarte en plus abandons et réorientations. La
+    `source` rendue à l'app reste « classe », la valeur qu'elle connaît."""
+    from apps.ipgei.liste_appel import liste_appel
 
-    inscriptions = (InscriptionIPGEI.objects
-                    .filter(Q(classe_id=dep.pk) | Q(sous_groupe_id=dep.pk),
-                            annee_universitaire=sp.annee_universitaire, actif=True)
-                    .select_related('etudiant'))
-    lignes = [{'matricule': i.etudiant.matricule or '', 'nom': i.etudiant.nom or '', 'statut': ''}
-              for i in inscriptions]
+    r = liste_appel(dep.pk, sp.annee_universitaire)
+    lignes = [{'matricule': e.matricule or '', 'nom': e.nom or '', 'statut': ''}
+              for e in r['etudiants']]
     return lignes, 'classe'
 
 

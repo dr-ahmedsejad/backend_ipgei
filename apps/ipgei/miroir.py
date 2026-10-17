@@ -575,6 +575,14 @@ def synchroniser_tout(institution=None) -> dict:
 #: sanctionné et justifiée. Il n'est donc pas présenté plutôt que rangé sous un
 #: libellé qui dirait autre chose que ce qui s'est passé.
 _STATUT_SOCLE = {'absent': 1, 'justifiee': 3}
+# Le RETARD d'émargement n'a pas d'équivalent : le socle connaît présent (0),
+# absent (1), sanctionné (2) et justifiée (3), rien d'autre. Un retard n'est
+# donc pas reporté — l'étudiant était là — et une absence requalifiée en
+# retard quitte le registre (`retirer_reflets`, 17/10/2026).
+
+#: Le motif qu'écrit le reflet quand la feuille n'en donne pas. Il sert aussi à
+#: RECONNAÎTRE une ligne venue de l'émargement (`retirer_reflets`).
+MOTIF_EMARGEMENT = "Émargement de l'épreuve (IPGEI)"
 
 
 def absences_pour_socle(etudiant_id: int, date_debut=None, date_fin=None) -> list:
@@ -658,6 +666,38 @@ def absences_pour_socle(etudiant_id: int, date_debut=None, date_fin=None) -> lis
     return presentees
 
 
+def _index_suivi(annee_universitaire: str, type_semestre: str, numero_semaine=None) -> dict:
+    """Les lignes de Suivi candidates, indexées par ce qui identifie une séance
+    des deux côtés. Un seul aller en base : la semaine d'une classe en porte
+    des dizaines."""
+    from apps.suivi.models import Suivie
+
+    lignes = Suivie.objects.filter(
+        annee_universitaire=annee_universitaire, type_semestre=type_semestre,
+    )
+    if numero_semaine is not None:
+        lignes = lignes.filter(numero_semaine=numero_semaine)
+    return {
+        (s.numero_semaine, s.departement_id, s.em_id, s.jour_fk_id,
+         s.creneau_fk_id, s.type_seance_fk_id): s.pk
+        for s in lignes
+    }
+
+
+def _ligne_de_suivi(index: dict, seance):
+    """La ligne de Suivi d'une séance réelle, ou None (pas encore générée, ou
+    séance sans matière miroitée)."""
+    matiere = seance.matiere
+    if matiere is None or matiere.em_miroir_id is None:
+        return None
+    # Le sous-groupe de TP porte sa propre ligne de Suivi ; une épreuve,
+    # elle, se tient en classe entière. On cherche donc l'unité telle que
+    # la projection l'a écrite.
+    unite = seance.sous_groupe_id or seance.classe_id
+    return index.get((seance.semaine.numero, unite, matiere.em_miroir_id,
+                      seance.jour_id, seance.creneau_id, seance.type_seance_id))
+
+
 def refleter_absences(annee_universitaire: str, type_semestre: str,
                       numero_semaine=None) -> int:
     """
@@ -676,14 +716,20 @@ def refleter_absences(annee_universitaire: str, type_semestre: str,
     semaine, qui appelle cette fonction.
 
     Idempotent : rejouer ne crée pas de doublon, `Presence` étant unique par
-    (suivi, étudiant). Ne touche JAMAIS une ligne pointée à la main dans le
-    module ABS avec un autre statut que celui d'origine : on ne récrit que ce
-    qui vient de l'émargement.
+    (suivi, étudiant).
+
+    Ce qu'il récrit, et ce qu'il ne récrit pas (17/10/2026) : la feuille
+    d'émargement fait foi pour l'absence qu'elle relève — une ligne du module
+    ABS au même (séance, étudiant) prend son statut et son motif. Sauf une
+    absence JUSTIFIÉE : elle ne se défait que dans « Justificatifs », avec le
+    droit de justifier, et chaque enregistrement de la feuille, comme chaque
+    génération du suivi, la remettait en « Absent ». L'ancien commentaire
+    promettait de ne jamais toucher une ligne pointée à la main ; le code,
+    lui, récrivait tout.
 
     Renvoie le nombre de présences écrites ou mises à jour.
     """
     from apps.absence.models import Presence
-    from apps.suivi.models import Suivie
 
     from .models import AbsenceSeance
 
@@ -702,43 +748,69 @@ def refleter_absences(annee_universitaire: str, type_semestre: str,
     if not absences:
         return 0
 
-    # Les lignes de Suivi candidates, indexées par ce qui identifie une séance.
-    # Un seul aller en base : la semaine d'une classe en porte des dizaines.
-    lignes = Suivie.objects.filter(
-        annee_universitaire=annee_universitaire, type_semestre=type_semestre,
-    )
-    if numero_semaine is not None:
-        lignes = lignes.filter(numero_semaine=numero_semaine)
+    index = _index_suivi(annee_universitaire, type_semestre, numero_semaine)
 
-    index = {
-        (s.numero_semaine, s.departement_id, s.em_id, s.jour_fk_id,
-         s.creneau_fk_id, s.type_seance_fk_id): s.pk
-        for s in lignes
-    }
+    # Les (séance, étudiant) déjà justifiés au registre : un aller en base.
+    deja = Presence.objects.filter(suivi__annee_universitaire=annee_universitaire,
+                                   suivi__type_semestre=type_semestre, statut=3)
+    if numero_semaine is not None:
+        deja = deja.filter(suivi__numero_semaine=numero_semaine)
+    justifiees = set(deja.values_list('suivi_id', 'etudiant_id'))
 
     ecrites = 0
     for absence in absences:
-        seance = absence.seance
-        matiere = seance.matiere
-        if matiere is None or matiere.em_miroir_id is None:
-            continue
-        # Le sous-groupe de TP porte sa propre ligne de Suivi ; une épreuve,
-        # elle, se tient en classe entière. On cherche donc l'unité telle que
-        # la projection l'a écrite.
-        unite = seance.sous_groupe_id or seance.classe_id
-        cle = (seance.semaine.numero, unite, matiere.em_miroir_id,
-               seance.jour_id, seance.creneau_id, seance.type_seance_id)
-        suivi_id = index.get(cle)
+        suivi_id = _ligne_de_suivi(index, absence.seance)
         if suivi_id is None:
+            continue
+        if (suivi_id, absence.inscription.etudiant_id) in justifiees:
+            # Une justifiée ne se récrit pas d'ici (17/10/2026, voir plus haut).
             continue
 
         Presence.objects.update_or_create(
             suivi_id=suivi_id, etudiant_id=absence.inscription.etudiant_id,
             defaults={
                 'statut':      _STATUT_SOCLE[absence.statut],
-                'commentaire': absence.justificatif
-                               or "Émargement de l'épreuve (IPGEI)",
+                'commentaire': absence.justificatif or MOTIF_EMARGEMENT,
             },
         )
         ecrites += 1
     return ecrites
+
+
+def retirer_reflets(seance, retirees) -> int:
+    """
+    Retire du registre du socle les absences que la feuille d'émargement ne
+    porte plus — retirées, ou requalifiées en retard (17/10/2026).
+
+    `refleter_absences` ne faisait qu'ajouter : une absence corrigée sur la
+    feuille restait au registre, et l'étudiant gardait au relevé une absence
+    que personne ne lui reprochait plus.
+
+    Ne retire QUE ce que le reflet a écrit et que personne n'a retouché depuis,
+    reconnu à deux traits : le statut « Absent » (1) et le motif même du reflet
+    — le justificatif de la feuille, sinon `MOTIF_EMARGEMENT`. Une absence
+    justifiée, sanctionnée, ou recommentée dans le module ABS est laissée telle
+    quelle : rien ne distinguerait alors une saisie de la scolarité d'un reste
+    d'émargement, et dans le doute on n'efface pas.
+
+    `retirees` : les `AbsenceSeance` telles qu'elles étaient AVANT
+    l'enregistrement (statut « absent »). Rend le nombre de lignes retirées.
+    """
+    from apps.absence.models import Presence
+
+    if not retirees:
+        return 0
+    semestre = seance.semaine.semestre
+    index = _index_suivi(semestre.annee_universitaire, semestre.type_semestre,
+                         seance.semaine.numero)
+    suivi_id = _ligne_de_suivi(index, seance)
+    if suivi_id is None:
+        return 0
+    retire = 0
+    for absence in retirees:
+        retire += Presence.objects.filter(
+            suivi_id=suivi_id, etudiant_id=absence.inscription.etudiant_id,
+            statut=_STATUT_SOCLE[absence.statut],
+            commentaire=absence.justificatif or MOTIF_EMARGEMENT,
+        ).delete()[0]
+    return retire

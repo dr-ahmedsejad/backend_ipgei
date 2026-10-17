@@ -2818,19 +2818,31 @@ def saisir_absences(seance: SeanceReelle, saisies: list, utilisateur=None) -> di
                   'justificatif': str}]. Toute inscription absente de la liste
     est considérée **présente** : sa ligne éventuelle est supprimée, ce qui
     permet de corriger une saisie sans laisser de trace fantôme.
+
+    Une séance de TP n'appelle que SON sous-groupe : la feuille (GET) le
+    montrait déjà, l'enregistrement acceptait encore toute la classe
+    (17/10/2026). Un abandon déclaré après coup reste enregistrable — la
+    feuille d'une séance passée doit pouvoir se réenregistrer telle quelle.
     """
-    inscriptions_eligibles = set(
-        InscriptionIPGEI.objects
-        .filter(classe=seance.classe, actif=True)
-        .values_list('id', flat=True)
-    )
+    eligibles = InscriptionIPGEI.objects.filter(classe=seance.classe, actif=True)
+    if seance.sous_groupe_id:
+        eligibles = eligibles.filter(sous_groupe_id=seance.sous_groupe_id)
+    inscriptions_eligibles = set(eligibles.values_list('id', flat=True))
+
+    # Ce que portait la feuille AVANT : une absence retirée (ou devenue un
+    # retard, que le socle ne connaît pas) doit quitter le registre du socle.
+    avant = {a.inscription_id: a for a in
+             AbsenceSeance.objects.filter(seance=seance).select_related('inscription')}
 
     vus = set()
+    nouveaux = {}
     for saisie in saisies:
         inscription_id = int(saisie['inscription'])
         if inscription_id not in inscriptions_eligibles:
             raise ValidationError(
                 f"L'inscription {inscription_id} n'appartient pas à la classe de cette séance."
+                if not seance.sous_groupe_id else
+                f"L'inscription {inscription_id} n'appartient pas au sous-groupe de cette séance."
             )
         AbsenceSeance.objects.update_or_create(
             seance=seance, inscription_id=inscription_id,
@@ -2841,6 +2853,7 @@ def saisir_absences(seance: SeanceReelle, saisies: list, utilisateur=None) -> di
             },
         )
         vus.add(inscription_id)
+        nouveaux[inscription_id] = saisie.get('statut', AbsenceSeance.STATUT_ABSENT)
 
     supprimees, _ = (
         AbsenceSeance.objects.filter(seance=seance).exclude(inscription_id__in=vus).delete()
@@ -2851,12 +2864,19 @@ def saisir_absences(seance: SeanceReelle, saisies: list, utilisateur=None) -> di
     # ignoreraient l'épreuve. Si le suivi de la semaine n'existe pas encore,
     # rien n'est écrit — le report se fera à sa génération, qui appelle la même
     # fonction. Un échec ne fait pas échouer la saisie : la feuille d'appel doit
-    # rester enregistrable même si le reflet, lui, achoppe.
+    # rester enregistrable même si le reflet, lui, achoppe — d'où le point de
+    # sauvegarde : sous PostgreSQL, une requête en échec sans lui condamnait
+    # toute la transaction de la feuille.
     semaine = seance.semaine
+    retirees = [a for iid, a in avant.items()
+                if a.statut == AbsenceSeance.STATUT_ABSENT
+                and nouveaux.get(iid) in (None, AbsenceSeance.STATUT_RETARD)]
     try:
-        from .miroir import refleter_absences
-        refleter_absences(semaine.semestre.annee_universitaire,
-                          semaine.semestre.type_semestre, semaine.numero)
+        from .miroir import refleter_absences, retirer_reflets
+        with transaction.atomic():
+            retirer_reflets(seance, retirees)
+            refleter_absences(semaine.semestre.annee_universitaire,
+                              semaine.semestre.type_semestre, semaine.numero)
     except Exception:                                          # noqa: BLE001
         logger.exception('Report au registre du socle impossible (séance %s)',
                          seance.pk)
